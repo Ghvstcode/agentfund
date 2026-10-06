@@ -28,7 +28,7 @@ afterAll(async () => {
 describe("router ↔ OpenAPI parity", () => {
   it("every operation in the document has a handler", () => {
     const documented = [...t.ctx.spec.operations.keys()].sort();
-    expect(documented.length).toBe(36);
+    expect(documented.length).toBe(37);
     expect([...t.app.operations].sort()).toEqual(documented);
   });
 
@@ -82,6 +82,7 @@ describe("every operation, validated against the document", () => {
     // meta
     const meta = (await t.call<Schemas["Meta"]>("getMeta")).body;
     expect(meta).toMatchObject({ app: "AgentFund", base_url: "http://af.test", protocol_versions: ["v1"], spec_versions: [1] });
+    expect(meta.links).toEqual({ source_url: "https://github.com/agentfund/agentfund", install_command: "curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh" });
     expect(meta.instance_pubkey).toMatch(/^[A-Za-z0-9+/]{56}$/);
     expect(Buffer.from(meta.instance_pubkey!, "base64").subarray(0, 2).toString()).toBe("Ed");
     await t.call("getStats");
@@ -171,12 +172,26 @@ describe("every operation, validated against the document", () => {
     await t.call("listTasks", { path: { slug }, query: { cursor: tasks.next_cursor!, state: "open", claimable: true } });
     await t.call("listTasks", { path: { slug }, query: { state: "sideways" } });
     await t.call("listTasks", { path: { slug: "missing" } });
+    const one = await t.call<Schemas["Task"]>("getTask", { path: { task_id: `${slug}:0001-a` } });
+    expect(one.status).toBe(200);
+    expect(one.body).toEqual(tasks.items[0]);
+    expect((await t.call("getTask", { path: { task_id: `${slug}:0009-missing` } })).status).toBe(404);
+    expect((await t.call("getTask", { path: { task_id: "missing:0001-a" } })).status).toBe(404);
+    expect((await t.call("getTask", { path: { task_id: "not-a-task-id" } })).status).toBe(404);
     const c2 = (await t.call<Schemas["Claim"]>("claimTask", { token: key.key, path: { task_id: `${slug}:0002-b` } })).body;
     await t.call("heartbeatClaim", { token: key.key, path: { claim_id: c2.claim_id }, body: { tokens_in: 1, tokens_out: 1, phase: "sandbox" } });
     const withClaim = (await t.call<{ items: Schemas["Task"][] }>("listTasks", { path: { slug }, query: { state: "claimed" } })).body.items;
     expect(withClaim[0]!.active_claim).toMatchObject({ tokens_so_far: 2, phase: "sandbox" });
     const ledger = (await t.call<Schemas["Ledger"]>("getLedger", { path: { slug }, query: { limit: 3 } })).body;
     expect(ledger.entries).toHaveLength(3);
+    const full = (await t.call<Schemas["Ledger"]>("getLedger", { path: { slug }, query: { limit: 100 } })).body.entries;
+    expect(full.find((e) => e.type === "report" && e.report_status === "completed")?.delivery).toBe("merged");
+    expect(full.find((e) => e.type === "report" && e.report_status === "failed")?.delivery).toBe("none");
+    expect(full.find((e) => e.report_status === "released")?.delivery).toBeNull();
+    expect(full.filter((e) => e.type !== "report").every((e) => e.delivery === null)).toBe(true);
+    const proj = (await t.call<Schemas["Project"]>("getProject", { path: { slug } })).body;
+    expect(proj.commit_url).toBeNull(); // file:// repo: no browser URL
+    expect(proj.lock_url).toBeNull();
     await t.call("getLedger", { path: { slug }, query: { cursor: ledger.next_cursor! } });
     await t.call("getLedger", { path: { slug: "missing" } });
     await t.call("listProjectEvents", { path: { slug }, query: { limit: 5 } });

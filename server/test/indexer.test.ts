@@ -59,7 +59,15 @@ describe("indexer: a good repo", () => {
     expect((await preview(repo)).ok).toBe(false);
     const other = TestRepo.create([{ id: "0001-a" }]);
     expect((await create(other, "good")).code).toBe("slug-taken");
-    expect((await create(other, "admin")).status).toBe(422); // reserved
+    for (const reserved of ["v1", "u", "og", "auth", "admin", "donors", "maintain", "settings", "styleguide", "problems", "assets", "api", "healthz", "static", "feed", "sitemap", "robots", "favicon"]) {
+      const r = await create(other, reserved);
+      expect(r.status, reserved).toBe(422);
+      expect(r.code).toBe("validation");
+    }
+    // A project whose name slugifies to a reserved word gets another suggestion, and no default slug.
+    const named = TestRepo.create([{ id: "0001-a" }], { name: "Settings" });
+    expect((await preview(named)).suggested_slug).toBe("settings-2");
+    expect((await t.call("createProject", { token: session, body: { repo_url: named.url } })).status).toBe(422);
     expect((await t.call("createProject", { token: session, body: { repo_url: "https://localhost/x/y" } })).code).toBe("validation");
     expect((await t.call("createProject", { token: session, body: { repo_url: "ext::sh -c 'id'" } })).code).toBe("validation");
     expect((await t.call("previewProject", { token: session, body: { repo_url: "git@github.com:a/b.git" } })).status).toBe(422);

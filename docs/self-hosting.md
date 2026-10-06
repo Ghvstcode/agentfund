@@ -57,6 +57,10 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per IP on `/v1/auth/*` |
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` |
 | `DB_POOL_MAX` | `10` | Postgres connections per process |
+| `SOURCE_URL` | `https://github.com/agentfund/agentfund` | `meta.links.source_url`: where this instance's source lives |
+| `INSTALL_COMMAND` | the upstream `install.sh` one-liner | `meta.links.install_command`: how donors install the worker |
+| `DOCS_URL` | – (omitted) | `meta.links.docs_url` |
+| `OG_ACCENT` | `#2563eb` | Accent colour (`#rrggbb`) of generated OG cards |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`; JSON lines on stdout |
 
 Compose-only: `HOST_PORT` (published port), `POSTGRES_PASSWORD`, `AGENTFUND_TAG` (image tag),

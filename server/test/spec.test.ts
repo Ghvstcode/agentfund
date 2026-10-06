@@ -8,6 +8,7 @@ import { validateAgentfund, validateManifest } from "../src/lib/schemas.js";
 import { parseStrictYaml } from "../src/lib/yaml.js";
 import { streakDays } from "../src/services/ledger.js";
 import { formatTokens } from "../src/services/og.js";
+import { commitUrl } from "../src/services/projects.js";
 
 const root = join(import.meta.dirname, "..");
 const spec = join(root, "..", "spec");
@@ -94,6 +95,10 @@ describe("config", () => {
     expect(c.authDevLogin).toBe(true);
     expect(c.warnings.join(" ")).toMatch(/DEV LOGIN IS ENABLED/);
     expect(c.webOrigins).toEqual(["http://localhost:5173"]);
+    expect(c.sourceUrl).toBe("https://github.com/agentfund/agentfund");
+    expect(c.docsUrl).toBeUndefined();
+    expect(loadConfig({ ...env, SOURCE_URL: "https://git.example/fork", INSTALL_COMMAND: "brew install x", DOCS_URL: "https://docs.example" })).toMatchObject({ sourceUrl: "https://git.example/fork", installCommand: "brew install x", docsUrl: "https://docs.example" });
+    expect(() => loadConfig({ ...env, DOCS_URL: "javascript:alert(1)" })).toThrow(/DOCS_URL/);
   });
   it("turns dev login off by default once GitHub OAuth is configured", () => {
     const c = loadConfig({ ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret", BASE_URL: "https://fund.example/" });
@@ -120,6 +125,11 @@ describe("small pure helpers", () => {
     expect(streakDays(["2026-01-13"], "2026-01-15")).toBe(0);
     expect(streakDays(["2026-01-15", "2026-01-13"], "2026-01-15")).toBe(1);
     expect(streakDays([], "2026-01-15")).toBe(0);
+  });
+  it("commitUrl is built for GitHub only", () => {
+    expect(commitUrl("https://github.com/acme/widgets", "a".repeat(40))).toBe(`https://github.com/acme/widgets/commit/${"a".repeat(40)}`);
+    expect(commitUrl("https://gitlab.com/acme/widgets", "a".repeat(40))).toBeNull();
+    expect(commitUrl("file:///tmp/x", "a".repeat(40))).toBeNull();
   });
   it("formatTokens abbreviates", () => {
     expect(formatTokens(950)).toBe("950");

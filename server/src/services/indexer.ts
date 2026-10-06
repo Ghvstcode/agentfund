@@ -37,7 +37,7 @@ async function suggestSlug(ctx: AppContext, name: string): Promise<string> {
     if (RESERVED_SLUGS.has(candidate)) continue;
     if (!(await one<{ id: string }>(ctx.db, sql`SELECT id FROM projects WHERE slug = ${candidate}`))) return candidate;
   }
-  return base;
+  return `${base.slice(0, 50)}-${Date.now().toString(36)}`;
 }
 
 export async function previewProject(ctx: AppContext, repoUrl: string): Promise<Schemas["ProjectPreview"]> {

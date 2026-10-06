@@ -226,7 +226,7 @@ export async function finishGithubOauth(ctx: AppContext, code: string | undefine
   });
   const tokenBody = (await tokenRes.json().catch(() => ({}))) as { access_token?: unknown };
   if (!tokenRes.ok || typeof tokenBody.access_token !== "string") throw badCallback("GitHub rejected the authorization code.");
-  const gh = { accept: "application/vnd.github+json", authorization: `Bearer ${tokenBody.access_token}`, "x-github-api-version": "2022-11-28", "user-agent": "agentfund-server" };
+  const gh = { accept: "application/vnd.github+json", authorization: `Bearer ${tokenBody.access_token}`, "x-github-api-version": "2026-03-10", "user-agent": "agentfund-server" };
 
   const userRes = await ctx.fetch("https://api.github.com/user", { headers: gh, signal: AbortSignal.timeout(15_000) });
   const profile = (await userRes.json().catch(() => ({}))) as { id?: unknown; login?: unknown; email?: unknown; avatar_url?: unknown };

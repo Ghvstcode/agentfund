@@ -241,6 +241,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Instance-unique task reference, `<project slug>:<manifest id>`, e.g. `gridrs:0042-csv-parser`. */
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        /** One task with its manifest, state and latest report */
+        get: operations["getTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks/{task_id}/claim": {
         parameters: {
             query?: never;
@@ -680,6 +700,14 @@ export interface components {
             } & {
                 [key: string]: unknown;
             };
+            /** @description Operator-configured pointers UIs show to donors. All optional. */
+            links?: {
+                /** @description Where this instance's software source lives */
+                source_url?: string;
+                /** @description Shell one-liner that installs the worker CLI */
+                install_command?: string;
+                docs_url?: string;
+            };
             defaults?: {
                 lease_seconds?: number;
                 heartbeat_interval_seconds?: number;
@@ -762,6 +790,8 @@ export interface components {
             lock_sha256?: string | null;
             /** @description Browser URL of MANIFEST.lock at the pinned commit */
             lock_url?: string | null;
+            /** @description Browser URL of the pinned commit on the git host */
+            commit_url?: string | null;
             token_goal: number;
             totals: components["schemas"]["Totals"];
             tasks: components["schemas"]["TaskCounts"];
@@ -990,6 +1020,11 @@ export interface components {
             tokens: number;
             task_id?: string | null;
             task_title?: string | null;
+            /**
+             * @description For `report` entries, where the report currently sits (same values as Report.delivery)
+             * @enum {string|null}
+             */
+            delivery?: "none" | "pending_ci" | "ci_failed" | "delivered" | "merged" | "closed" | null;
             report_status?: string | null;
             pr_url?: string | null;
             ci_run_url?: string | null;
@@ -1526,6 +1561,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Donor"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Instance-unique task reference, `<project slug>:<manifest id>`, e.g. `gridrs:0042-csv-parser`. */
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             404: components["responses"]["Problem"];

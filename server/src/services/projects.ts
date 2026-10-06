@@ -99,6 +99,10 @@ export function lockUrl(repoUrl: string, commit: string): string | null {
   return /^https:\/\/github\.com\//i.test(repoUrl) ? `${repoUrl}/blob/${commit}/tasks/MANIFEST.lock` : null;
 }
 
+export function commitUrl(repoUrl: string, commit: string): string | null {
+  return /^https:\/\/github\.com\//i.test(repoUrl) ? `${repoUrl}/commit/${commit}` : null;
+}
+
 function toProject(ctx: AppContext, instance: InstanceRow, r: ProjectViewRow): Project {
   return {
     id: projectGlobalId(ctx, r.slug),
@@ -119,6 +123,7 @@ function toProject(ctx: AppContext, instance: InstanceRow, r: ProjectViewRow): P
     pinned_commit: r.pinned_commit,
     lock_sha256: r.lock_sha256,
     lock_url: lockUrl(r.repo_url, r.pinned_commit),
+    commit_url: commitUrl(r.repo_url, r.pinned_commit),
     token_goal: num(r.token_goal),
     totals: { pledged: num(r.pledged), reported: num(r.reported), delivered: num(r.delivered), merged: num(r.merged), in_flight: num(r.in_flight) },
     tasks: { open: num(r.t_open), claimed: num(r.t_claimed), delivered: num(r.t_delivered), merged: num(r.t_merged), failed: num(r.t_failed), claimable: num(r.t_claimable) },

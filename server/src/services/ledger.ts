@@ -141,6 +141,7 @@ interface EntryRow {
   ci_run_url: string | null;
   branch: string | null;
   head_sha: string | null;
+  delivery: Schemas["LedgerEntry"]["delivery"];
 }
 
 const toEntry = (ctx: AppContext, r: EntryRow): Schemas["LedgerEntry"] => ({
@@ -157,6 +158,7 @@ const toEntry = (ctx: AppContext, r: EntryRow): Schemas["LedgerEntry"] => ({
   ci_run_url: r.ci_run_url,
   branch: r.branch,
   head_sha: r.head_sha,
+  delivery: r.type === "report" ? (r.delivery ?? null) : null,
 });
 
 async function entries(ctx: AppContext, where: SQL, limit: number, cursor?: string): Promise<{ items: Schemas["LedgerEntry"][]; next_cursor: string | null }> {
@@ -169,7 +171,7 @@ async function entries(ctx: AppContext, where: SQL, limit: number, cursor?: stri
   const list = await rows<EntryRow & { at_exact: string }>(
     ctx.db,
     sql`SELECT e.id, e.type, e.at, to_char(e.at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at_exact, e.tokens::text AS tokens,
-          u.handle, u.avatar_url, p.slug, m.manifest_id, m.title, e.report_status, e.pr_url, e.ci_run_url, e.branch, e.head_sha
+          u.handle, u.avatar_url, p.slug, m.manifest_id, m.title, e.report_status, e.pr_url, e.ci_run_url, e.branch, e.head_sha, e.delivery
         FROM ledger_entries e
         JOIN users u ON u.id = e.user_id
         JOIN projects p ON p.id = e.project_id

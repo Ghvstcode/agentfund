@@ -226,3 +226,10 @@ Readings fixed while building the reference server; they are normative.
   are excluded from totals, feeds and leaderboards.
 - A release burn appears in ledger entries as `type: report` with `report_status: "released"`.
 - Public operations ignore an invalid token and answer as anonymous.
+- **Reserved slugs.** A project slug may not be `v1`, `u`, `og`, `auth`, `admin`, `donors`,
+  `maintain`, `settings`, `styleguide`, `problems`, `assets`, `api`, `healthz`, `static`,
+  `feed`, `sitemap`, `robots` or `favicon` (→ `422 validation`), so the reference UI's routes and
+  global ids never collide.
+- **Claim lost mid-run.** A worker whose heartbeat is answered `claim-not-active` stops and
+  still sends its report; the server stores it `flagged_late`, so the burned tokens stay
+  visible without being counted.

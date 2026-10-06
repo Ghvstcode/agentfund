@@ -16,7 +16,7 @@ import * as indexer from "../services/indexer.js";
 import { getInstance, toInstanceConfig, updateInstance } from "../services/instance.js";
 import * as ledger from "../services/ledger.js";
 import * as projects from "../services/projects.js";
-import { listTasks } from "../services/tasks.js";
+import { listTasks, taskByRef } from "../services/tasks.js";
 import { json, noContent, registrar } from "./kit.js";
 
 const ADAPTERS: CiAdapter[] = [githubAdapter, genericAdapter];
@@ -47,6 +47,7 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
         ci_poll: ctx.config.ciPoll,
         federation: false,
       },
+      links: { source_url: ctx.config.sourceUrl, install_command: ctx.config.installCommand, ...(ctx.config.docsUrl ? { docs_url: ctx.config.docsUrl } : {}) },
       defaults: { lease_seconds: instance.leaseSeconds, heartbeat_interval_seconds: HEARTBEAT_INTERVAL_SECONDS },
     });
   });
@@ -87,6 +88,14 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
       200,
       await listTasks(ctx, row.id, { state: query.state, claimable: given.has("claimable") ? query.claimable : undefined, limit: query.limit ?? 50, cursor: query.cursor }),
     );
+  });
+
+  op("getTask", async ({ c, path, auth: who }) => {
+    const sep = path.task_id.indexOf(":");
+    const row = await projects.visibleProject(ctx, path.task_id.slice(0, sep), who?.user);
+    const task = await taskByRef(ctx, row.id, path.task_id.slice(sep + 1));
+    if (!task) throw new Problem("not-found", `No task ${path.task_id}.`);
+    return json<ResponseOf<"getTask", 200>>(c, 200, task);
   });
 
   op("getLedger", async ({ c, path, query, auth: who }) => {

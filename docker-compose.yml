@@ -58,6 +58,10 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
       DB_POOL_MAX: ${DB_POOL_MAX:-}
+      SOURCE_URL: ${SOURCE_URL:-}
+      INSTALL_COMMAND: ${INSTALL_COMMAND:-}
+      DOCS_URL: ${DOCS_URL:-}
+      OG_ACCENT: ${OG_ACCENT:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
     volumes:
       - appdata:/data

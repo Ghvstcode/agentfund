@@ -166,12 +166,13 @@ export async function heartbeat(ctx: AppContext, who: Principal, claimId: string
   return { lease_expires_at: out.lease!.toISOString() };
 }
 
-function completedProblems(body: BodyOf<"reportClaim">, expectedBranch: string): FieldError[] {
+// `file://` PR references exist only for local repos (ALLOW_FILE_REPOS), where the worker pushes straight to the origin.
+function completedProblems(body: BodyOf<"reportClaim">, expectedBranch: string, allowFile: boolean): FieldError[] {
   const errors: FieldError[] = [];
   if (!body.branch) errors.push({ path: "/branch", message: "is required when status is completed" });
   else if (body.branch !== expectedBranch) errors.push({ path: "/branch", message: `must be ${expectedBranch}` });
   if (!body.pr_url) errors.push({ path: "/pr_url", message: "is required when status is completed" });
-  else if (!/^https?:\/\/\S+$/.test(body.pr_url)) errors.push({ path: "/pr_url", message: "must be an http(s) URL" });
+  else if (!(allowFile ? /^(https?|file):\/\/\S+$/ : /^https?:\/\/\S+$/).test(body.pr_url)) errors.push({ path: "/pr_url", message: "must be an http(s) URL" });
   if (!body.head_sha) errors.push({ path: "/head_sha", message: "is required when status is completed" });
   if (body.verify_exit_code !== 0) errors.push({ path: "/verify_exit_code", message: "must be 0 when status is completed" });
   return errors;
@@ -186,7 +187,7 @@ export async function report(ctx: AppContext, who: Principal, claimId: string, b
     if (existing || claim.status === "reported") throw new Problem("already-reported", `Claim ${claimId} already has a report.`);
     if (claim.status === "released") throw new Problem("claim-not-active", `Claim ${claimId} was released.`);
     if (body.status === "completed") {
-      const errors = completedProblems(body, `agentfund/${mid}-${claimShort(claim.publicId)}`);
+      const errors = completedProblems(body, `agentfund/${mid}-${claimShort(claim.publicId)}`, ctx.config.allowFileRepos);
       if (errors.length) throw new Problem("validation", "A completed report needs branch, pr_url, head_sha and verify_exit_code 0.", { errors });
     }
 

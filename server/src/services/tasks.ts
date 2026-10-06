@@ -185,6 +185,11 @@ export async function listTasks(
   return { items: await hydrate(ctx, ctx.db, page), next_cursor: more ? encodeCursor({ t: page[page.length - 1]!.manifest_id }) : null };
 }
 
+export async function taskByRef(ctx: AppContext, projectId: number, manifestId: string): Promise<Task | null> {
+  const list = await rows<TaskRow>(ctx.db, sql`SELECT tv.* FROM (${TASK_VIEW}) tv JOIN manifests m2 ON m2.id = tv.id WHERE m2.project_id = ${projectId} AND m2.manifest_id = ${manifestId}`);
+  return (await hydrate(ctx, ctx.db, list))[0] ?? null;
+}
+
 export async function taskByPk(ctx: AppContext, q: Queryable, manifestPk: number): Promise<Task> {
   const list = await rows<TaskRow>(q, sql`SELECT tv.* FROM (${TASK_VIEW}) tv WHERE tv.id = ${manifestPk}`);
   const [task] = await hydrate(ctx, q, list);

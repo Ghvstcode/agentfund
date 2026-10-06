@@ -74,6 +74,9 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_PER_MINUTE: int(30, 0, 1_000_000),
   TRUST_PROXY: bool(false),
   DB_POOL_MAX: int(10, 1, 200),
+  SOURCE_URL: optional,
+  INSTALL_COMMAND: optional,
+  DOCS_URL: optional,
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
 });
 
@@ -103,6 +106,9 @@ export interface Config {
   trustProxy: boolean;
   dbPoolMax: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  sourceUrl: string;
+  installCommand: string;
+  docsUrl: string | undefined;
   /** Human-readable notes about defaults that were applied; logged at boot. */
   warnings: string[];
 }
@@ -152,6 +158,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (authDevLogin) warnings.push("AUTH_DEV_LOGIN=true: anyone who can reach this instance can log in as any handle. Never use this on a public instance.");
     if (!authDevLogin && !githubOauth) warnings.push("Neither GitHub OAuth nor dev login is enabled: nobody can log in.");
   }
+  for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL]] as const) {
+    if (value && !/^https?:\/\/\S+$/.test(value)) problems.push(`  ${name}: must be an http(s) URL`);
+  }
   if (e.WEBHOOK_SECRET && e.WEBHOOK_SECRET.length < 16) problems.push("  WEBHOOK_SECRET: must be at least 16 characters");
   if (problems.length) throw new ConfigError(`Invalid configuration:\n${problems.join("\n")}`);
 
@@ -187,6 +196,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: e.TRUST_PROXY,
     dbPoolMax: e.DB_POOL_MAX,
     logLevel: e.LOG_LEVEL,
+    sourceUrl: e.SOURCE_URL ?? "https://github.com/agentfund/agentfund",
+    installCommand: e.INSTALL_COMMAND ?? "curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh",
+    docsUrl: e.DOCS_URL,
     warnings,
   };
 }

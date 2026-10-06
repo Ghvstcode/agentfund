@@ -33,7 +33,7 @@ async function gh<T>(ctx: AppContext, path: string): Promise<T | null> {
   const res = await ctx.fetch(`${API}${path}`, {
     headers: {
       accept: "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28",
+      "x-github-api-version": "2026-03-10",
       "user-agent": "agentfund-server",
       ...(ctx.config.githubToken ? { authorization: `Bearer ${ctx.config.githubToken}` } : {}),
     },

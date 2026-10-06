@@ -344,6 +344,21 @@ paths:
               schema: { $ref: "#/components/schemas/Donor" }
         "404": { $ref: "#/components/responses/Problem" }
 
+  /v1/tasks/{task_id}:
+    parameters:
+      - { $ref: "#/components/parameters/TaskId" }
+    get:
+      tags: [projects]
+      operationId: getTask
+      summary: One task with its manifest, state and latest report
+      responses:
+        "200":
+          description: Task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/Problem" }
+
   /v1/tasks/{task_id}/claim:
     parameters:
       - { $ref: "#/components/parameters/TaskId" }
@@ -927,6 +942,13 @@ components:
             ci_poll: { type: boolean, description: "Server also polls the CI provider, so webhooks need not reach it" }
             federation: { type: boolean }
           additionalProperties: true
+        links:
+          type: object
+          description: Operator-configured pointers UIs show to donors. All optional.
+          properties:
+            source_url: { type: string, description: Where this instance's software source lives }
+            install_command: { type: string, description: Shell one-liner that installs the worker CLI }
+            docs_url: { type: string }
         defaults:
           type: object
           properties:
@@ -1019,6 +1041,7 @@ components:
         pinned_commit: { type: string, description: Commit the task list was indexed from; what claims name }
         lock_sha256: { type: [string, "null"], description: SHA-256 of tasks/MANIFEST.lock at the pinned commit }
         lock_url: { type: [string, "null"], description: Browser URL of MANIFEST.lock at the pinned commit }
+        commit_url: { type: [string, "null"], description: Browser URL of the pinned commit on the git host }
         token_goal: { type: integer }
         totals: { $ref: "#/components/schemas/Totals" }
         tasks: { $ref: "#/components/schemas/TaskCounts" }
@@ -1257,6 +1280,10 @@ components:
         tokens: { type: integer }
         task_id: { type: [string, "null"] }
         task_title: { type: [string, "null"] }
+        delivery:
+          type: [string, "null"]
+          enum: [none, pending_ci, ci_failed, delivered, merged, closed, null]
+          description: For `report` entries, where the report currently sits (same values as Report.delivery)
         report_status: { type: [string, "null"] }
         pr_url: { type: [string, "null"] }
         ci_run_url: { type: [string, "null"] }

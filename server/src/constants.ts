@@ -23,5 +23,5 @@ export const DEFAULT_PORT = 8787;
 export const RESERVED_SLUGS = new Set([
   "v1", "v2", "u", "og", "api", "assets", "static", "problems", "healthz", "admin", "login", "logout", "auth",
   "new", "settings", "donors", "projects", "docs", "about", "explore", "search", "me", "account", "feed",
-  "sitemap", "robots", "favicon", "well-known", "events", "stats", "leaderboard", "keys", "dashboard",
+  "sitemap", "robots", "favicon", "maintain", "styleguide", "well-known", "events", "stats", "leaderboard", "keys", "dashboard",
 ]);
