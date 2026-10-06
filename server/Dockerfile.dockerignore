@@ -1,0 +1,20 @@
+# Applies to builds that use server/Dockerfile with the monorepo root as context.
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.vite
+**/*.tsbuildinfo
+**/*.log
+.git
+.env
+.env.*
+!.env.example
+.e2e
+data
+server/data
+server/test
+worker
+images
+docs
+examples

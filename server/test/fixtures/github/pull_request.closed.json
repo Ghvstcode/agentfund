@@ -1,0 +1,31 @@
+{
+  "action": "closed",
+  "number": 7,
+  "pull_request": {
+    "url": "https://api.github.com/repos/acme/widgets/pulls/7",
+    "id": 279147437,
+    "html_url": "https://github.com/acme/widgets/pull/7",
+    "number": 7,
+    "state": "closed",
+    "title": "0001-a: Task 0001-a",
+    "merged": true,
+    "merged_at": "2026-01-15T13:00:00Z",
+    "merge_commit_sha": "e5bd3914e2e596debea16f433f57875b5b90bcd6",
+    "closed_at": "2026-01-15T13:00:00Z",
+    "head": {
+      "label": "donor-fork:agentfund/0001-a-abcdefgh",
+      "ref": "agentfund/0001-a-abcdefgh",
+      "sha": "0000000000000000000000000000000000000000",
+      "repo": { "id": 990001, "name": "widgets", "full_name": "donor-fork/widgets", "fork": true }
+    },
+    "base": {
+      "label": "acme:main",
+      "ref": "main",
+      "sha": "6113728f27ae82c7b1a177c8d03f9e96e0adf246",
+      "repo": { "id": 1296269, "name": "widgets", "full_name": "acme/widgets", "fork": false }
+    },
+    "user": { "login": "donor-fork", "id": 5, "type": "User" }
+  },
+  "repository": { "id": 1296269, "name": "widgets", "full_name": "acme/widgets", "private": false, "html_url": "https://github.com/acme/widgets", "default_branch": "main" },
+  "sender": { "login": "maintainer", "id": 1, "type": "User" }
+}

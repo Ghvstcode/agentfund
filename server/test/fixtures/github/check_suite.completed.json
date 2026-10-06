@@ -1,0 +1,22 @@
+{
+  "action": "completed",
+  "check_suite": {
+    "id": 118578147,
+    "node_id": "MDEwOkNoZWNrU3VpdGUxMTg1NzgxNDc=",
+    "head_branch": null,
+    "head_sha": "0000000000000000000000000000000000000000",
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://api.github.com/repos/acme/widgets/check-suites/118578147",
+    "before": "6113728f27ae82c7b1a177c8d03f9e96e0adf246",
+    "after": "0000000000000000000000000000000000000000",
+    "pull_requests": [],
+    "app": { "id": 15368, "slug": "github-actions", "name": "GitHub Actions" },
+    "created_at": "2026-01-15T12:00:00Z",
+    "updated_at": "2026-01-15T12:03:10Z",
+    "latest_check_runs_count": 1,
+    "check_runs_url": "https://api.github.com/repos/acme/widgets/check-suites/118578147/check-runs"
+  },
+  "repository": { "id": 1296269, "name": "widgets", "full_name": "acme/widgets", "private": false, "html_url": "https://github.com/acme/widgets", "default_branch": "main" },
+  "sender": { "login": "donor-fork", "id": 5, "type": "User" }
+}

@@ -1,0 +1,67 @@
+# `docker compose up` works with no .env at all: Postgres + the app on http://localhost:8787,
+# dev login on (with a loud warning) until GitHub OAuth is configured, webhook secret generated
+# on first boot. Copy .env.example to .env to configure a real instance.
+name: agentfund
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agentfund
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentfund}
+      POSTGRES_DB: agentfund
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentfund -d agentfund"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published on the host; the app reaches it on the compose network.
+
+  app:
+    image: ghcr.io/agentfund/agentfund:${AGENTFUND_TAG:-latest}
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      args:
+        WEB_BUILD: ${WEB_BUILD:-auto}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${HOST_PORT:-8787}:8787"
+    environment:
+      PORT: "8787"
+      DATA_DIR: /data
+      DATABASE_URL: ${DATABASE_URL:-postgres://agentfund:${POSTGRES_PASSWORD:-agentfund}@postgres:5432/agentfund}
+      BASE_URL: ${BASE_URL:-http://localhost:${HOST_PORT:-8787}}
+      APP_NAME: ${APP_NAME:-}
+      INSTANCE_NAME: ${INSTANCE_NAME:-}
+      INSTANCE_DESCRIPTION: ${INSTANCE_DESCRIPTION:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
+      ADMIN_HANDLES: ${ADMIN_HANDLES:-}
+      AUTH_DEV_LOGIN: ${AUTH_DEV_LOGIN:-}
+      ALLOW_FILE_REPOS: ${ALLOW_FILE_REPOS:-}
+      CI_POLL: ${CI_POLL:-}
+      INDEX_INTERVAL_SECONDS: ${INDEX_INTERVAL_SECONDS:-}
+      SWEEP_INTERVAL_SECONDS: ${SWEEP_INTERVAL_SECONDS:-}
+      CI_POLL_INTERVAL_SECONDS: ${CI_POLL_INTERVAL_SECONDS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
+      DB_POOL_MAX: ${DB_POOL_MAX:-}
+      LOG_LEVEL: ${LOG_LEVEL:-}
+    volumes:
+      - appdata:/data
+
+volumes:
+  pgdata:
+  appdata:

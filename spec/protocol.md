@@ -199,3 +199,30 @@ Served by the reference server next to the API, for discoverability; not part of
 contract and not needed by workers: `/sitemap.xml`, `/feed.atom` (new projects + deliveries),
 `/og/<slug>.png` (generated card with the progress bar), `/healthz`, and the built SPA with
 per-route meta/OpenGraph/JSON-LD tags injected.
+
+## 13. Clarifications
+
+Readings fixed while building the reference server; they are normative.
+
+- **`follow_branch` defaults to `true`** on creation, so dependent tasks are claimed against a
+  commit that contains their merged dependencies.
+- **`agentfund.yaml` `repo_url` must equal the URL being registered** (else
+  `repo-unverifiable`), so a fork cannot be registered as the original.
+- **`Project.pubkey` is the newest key reached through a valid rotation chain** from the key
+  registered at creation; the change emits `project.key_rotated`.
+- **CI conclusions.** `success` passes. `failure`, `cancelled`, `timed_out`, `action_required`
+  fail. `skipped`, `neutral` and `stale` are recorded and decide nothing.
+- A failing run that arrives after a report is already `delivered` does not revert it.
+  A `ci_failed` report is terminal: the task reopens and a new run is a new claim.
+- A CI result that arrives before its report is stored and applied when the report arrives.
+- Pull-request events match on branch **and** `pr_url`, not head SHA, so a maintainer fix-up
+  commit on the PR still merges the report.
+- A lease past its expiry is expired for heartbeats and reports even before the sweeper runs.
+- Claim refusals are checked in this order: `project-not-active`, `task-not-open`,
+  `dependencies-unmet`, `claim-limit`, `project-task-cap`, `project-daily-cap`.
+- A manifest dropped from the lock makes `open`/`claimed` tasks `failed`; `delivered` and
+  `merged` tasks are untouched; a failed task that reappears becomes `open`.
+- `pending` and `removed` projects are `404` to everyone but their maintainer and admins and
+  are excluded from totals, feeds and leaderboards.
+- A release burn appears in ledger entries as `type: report` with `report_status: "released"`.
+- Public operations ignore an invalid token and answer as anonymous.

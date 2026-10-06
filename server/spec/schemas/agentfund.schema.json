@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentfund.dev/spec/v1/agentfund.schema.json",
+  "title": "agentfund.yaml — project descriptor (spec_version 1)",
+  "description": "Lives at the repo root. Declares the project and publishes the maintainer public key (channel one; the server UI is channel two).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["spec_version", "name", "description", "repo_url", "ci_provider", "pubkey"],
+  "properties": {
+    "spec_version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "description": "One-liner shown on cards and OG images.", "type": "string", "minLength": 1, "maxLength": 280 },
+    "repo_url": {
+      "description": "Canonical https clone URL of the project repo, without a trailing .git.",
+      "type": "string",
+      "pattern": "^(https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~/-]+|file:///.+)$",
+      "maxLength": 512
+    },
+    "ci_provider": {
+      "description": "Which CI adapter confirms delivery. `github` = GitHub Actions/checks; `generic` = HMAC-signed JSON posted to /v1/webhooks/ci.",
+      "enum": ["github", "generic"]
+    },
+    "pubkey": {
+      "description": "Maintainer Ed25519 public key in minisign format: base64 of 'Ed' || 8-byte key id || 32-byte key (56 base64 chars).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{56}$"
+    },
+    "base_branch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$", "default": "main" },
+    "homepage": { "type": "string", "format": "uri", "maxLength": 512 },
+    "language": { "description": "Primary language, for discovery filters.", "type": "string", "maxLength": 40 },
+    "tags": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" }
+    },
+    "token_goal": {
+      "description": "Funding goal in tokens. Usually the sum of max_tokens across manifests.",
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

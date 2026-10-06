@@ -1,0 +1,7 @@
+{
+  "zen": "Keep it logically awesome.",
+  "hook_id": 109948940,
+  "hook": { "type": "Repository", "id": 109948940, "name": "web", "active": true, "events": ["check_suite", "pull_request", "push", "workflow_run"], "config": { "content_type": "json", "insecure_ssl": "0", "url": "https://fund.example/v1/webhooks/ci" } },
+  "repository": { "id": 1296269, "name": "widgets", "full_name": "acme/widgets", "private": false },
+  "sender": { "login": "maintainer", "id": 1, "type": "User" }
+}
