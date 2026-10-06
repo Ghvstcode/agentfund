@@ -1554,7 +1554,7 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
-            /** @description Not claimable. Problem `type` ends in one of: `task-not-open`, `dependencies-unmet`, `project-not-active`, `claim-limit`. */
+            /** @description Not claimable. Problem `type` ends in one of: `task-not-open`, `dependencies-unmet`, `project-not-active`, `claim-limit`, `project-task-cap`, `project-daily-cap`. */
             409: {
                 headers: {
                     [name: string]: unknown;
