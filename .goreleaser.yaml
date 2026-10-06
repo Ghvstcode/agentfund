@@ -1,0 +1,55 @@
+# GoReleaser configuration for the AgentFund worker CLI.
+#   goreleaser check
+#   goreleaser build --snapshot --clean      # local binaries under worker/dist
+#   goreleaser release --clean               # on a tag: archives + checksums
+version: 2
+project_name: agentfund
+dist: worker/dist
+
+builds:
+  - id: agentfund
+    dir: worker
+    main: ./cmd/agentfund
+    binary: agentfund
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/agentfund/agentfund/worker/internal/app.Version={{ .Version }}
+      - -X github.com/agentfund/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
+      - -X github.com/agentfund/agentfund/worker/internal/app.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: agentfund
+    ids: [agentfund]
+    formats: [tar.gz]
+    # agentfund_<version>_<os>_<arch>.tar.gz — scripts/install.sh relies on this name.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - src: worker/README.md
+        dst: README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  disable: true
+
+release:
+  # Placeholder repository; scripts/install.sh downloads from the same one
+  # (override there with AGENTFUND_REPO).
+  github:
+    owner: agentfund
+    name: agentfund
+  draft: true
+  prerelease: auto

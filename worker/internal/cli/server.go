@@ -1,0 +1,321 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/agentfund/agentfund/worker/internal/api"
+	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/agentfund/agentfund/worker/internal/config"
+	"github.com/agentfund/agentfund/worker/internal/gitx"
+	"github.com/agentfund/agentfund/worker/internal/minisign"
+	"github.com/agentfund/agentfund/worker/internal/policy"
+	"github.com/agentfund/agentfund/worker/internal/spec"
+	"github.com/agentfund/agentfund/worker/internal/verify"
+)
+
+func signalContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	return ctx, cancel
+}
+
+func loginCmd(e *env) *cobra.Command {
+	var keyStdin bool
+	cmd := &cobra.Command{
+		Use:   "login <server-url>",
+		Short: "Store a server API key (af_…) after checking it",
+		Long: `Read an ` + app.AppName + ` API key (created in the server's UI, prefix af_), check it
+with GET /v1/me and store it in credentials.yaml (mode 0600), keyed by server
+URL. With --key-stdin the key is read from standard input without a prompt.
+
+This is the key for the ` + app.AppName + ` server only. Credentials for the coding
+agent are never stored by this tool.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			server, err := config.NormalizeServer(args[0])
+			if err != nil {
+				return exitWith(ExitUsage, "%v", err)
+			}
+			var key string
+			if keyStdin {
+				line, rerr := e.stdin().ReadString('\n')
+				if rerr != nil && line == "" {
+					return errors.New("no key on stdin")
+				}
+				key = strings.TrimSpace(line)
+			} else if key, err = e.readSecret("API key for " + server + " (af_…): "); err != nil {
+				return fmt.Errorf("read key: %w", err)
+			}
+			if !strings.HasPrefix(key, "af_") || strings.ContainsAny(key, " \t\r\n") {
+				return errors.New("that does not look like an API key (expected the af_ prefix)")
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			c := api.New(server, key)
+			if _, err := c.Negotiate(ctx, spec.SpecVersion); err != nil {
+				return err
+			}
+			me, err := c.Me(ctx)
+			if err != nil {
+				return fmt.Errorf("the server did not accept the key: %w", err)
+			}
+			creds, err := config.LoadCredentials()
+			if err != nil {
+				return err
+			}
+			creds.Servers[server] = config.ServerCredential{APIKey: key}
+			if err := creds.Save(); err != nil {
+				return err
+			}
+			fmt.Fprintf(e.out, "logged in to %s as %s (%s); key stored in %s\n", server, me.Handle, me.Role, config.CredentialsPath())
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read the API key from standard input")
+	return cmd
+}
+
+// readAt reads a regular file at a commit by tree lookup.
+func readAt(ctx context.Context, repo, commit, path string) ([]byte, error) {
+	entries, err := gitx.LsTree(ctx, repo, commit, "", false)
+	if err != nil {
+		return nil, err
+	}
+	for _, en := range entries {
+		if en.Path == path {
+			if !en.IsRegular() {
+				return nil, fmt.Errorf("%s is not a regular file", path)
+			}
+			return gitx.ReadBlob(ctx, repo, en.OID)
+		}
+	}
+	return nil, fmt.Errorf("%s does not exist at %s", path, commit)
+}
+
+func renderManifest(w io.Writer, m *spec.Manifest, sha string) {
+	fmt.Fprintf(w, "──────────────────────────────────────────────────────────────────────────────\n")
+	fmt.Fprintf(w, "TASK %s — %s\n", m.ID, m.Title)
+	fmt.Fprintf(w, "  manifest sha256: %s\n", sha)
+	fmt.Fprintf(w, "  max_tokens:      %d\n", m.MaxTokens)
+	fmt.Fprintf(w, "  timeout_minutes: %d\n", m.TimeoutMinutes)
+	fmt.Fprintf(w, "  base_branch:     %s\n", m.BaseBranch)
+	if len(m.DependsOn) > 0 {
+		fmt.Fprintf(w, "  depends_on:      %s\n", strings.Join(m.DependsOn, ", "))
+	}
+	fmt.Fprintf(w, "  scope.write (the agent may change ONLY these):\n")
+	for _, g := range m.Scope.Write {
+		fmt.Fprintf(w, "    - %s\n", g)
+	}
+	if m.ReadSet {
+		fmt.Fprintf(w, "  scope.read (everything else is removed from the sandbox):\n")
+		for _, g := range m.Scope.Read {
+			fmt.Fprintf(w, "    - %s\n", g)
+		}
+	} else {
+		fmt.Fprintf(w, "  scope.read: (unset — the whole repository is readable in the sandbox)\n")
+	}
+	fmt.Fprintf(w, "  verify (runs in the sandbox after the agent; exit 0 = pass):\n    %s\n", strings.ReplaceAll(m.Verify, "\n", "\n    "))
+	fmt.Fprintf(w, "  prompt (given to the agent verbatim):\n")
+	for _, line := range strings.Split(strings.TrimRight(m.Prompt, "\n"), "\n") {
+		fmt.Fprintf(w, "    │ %s\n", line)
+	}
+	fmt.Fprintln(w)
+}
+
+// page shows text through $PAGER when interactive, otherwise prints it.
+func (e *env) page(text string, usePager bool) {
+	if usePager && e.isTerminal() {
+		pager := os.Getenv("PAGER")
+		if pager == "" {
+			pager = "less -R"
+		}
+		cmd := exec.Command("sh", "-c", pager)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(text), e.out, e.err
+		if cmd.Run() == nil {
+			return
+		}
+	}
+	fmt.Fprint(e.out, text)
+}
+
+func approveCmd(e *env) *cobra.Command {
+	var yes, noPager bool
+	var pubkeyFlag, commitFlag string
+	cmd := &cobra.Command{
+		Use:   "approve <server-url>/<project>",
+		Short: "Review a project's signed tasks and pin its key and commit",
+		Long: `Fetch the project from the server, clone its repository, verify the task
+lock at the pinned commit against the maintainer key, show the key
+fingerprint and every manifest in full (prompt, scope, verify, caps), and —
+after you confirm — pin {pubkey, commit, lock hash} in config.yaml.
+
+Compare the fingerprint with the one on the server's Audit tab: the repository
+(agentfund.yaml) and the server are two separate channels for the same key.
+If they disagree, approve refuses unless you pass the key you trust with
+--pubkey. Running approve again re-approves a newer commit.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := config.ParseRef(args[0])
+			if err != nil {
+				return exitWith(ExitUsage, "%v", err)
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signalContext()
+			defer cancel()
+			client := api.New(ref.Server, "")
+			meta, err := client.Negotiate(ctx, spec.SpecVersion)
+			if err != nil {
+				return err
+			}
+			proj, err := client.Project(ctx, ref.Slug)
+			if err != nil {
+				return fmt.Errorf("fetch project: %w", err)
+			}
+			commit := proj.PinnedCommit
+			if commitFlag != "" {
+				commit = commitFlag
+			}
+			if !gitx.IsFullSHA1(commit) {
+				return fmt.Errorf("the project has no usable pinned commit (%q); the server may not have indexed it yet", commit)
+			}
+			if h, ok := policy.HostAllowed(cfg.Global.AllowedGitHosts, proj.RepoURL); !ok {
+				return fmt.Errorf("git host %q of %s is not in allowed_git_hosts (%s); add it to %s if you trust it",
+					h, proj.RepoURL, strings.Join(cfg.Global.AllowedGitHosts, ", "), config.Path())
+			}
+			fmt.Fprintf(e.out, "Instance:  %s (%s %s)\nProject:   %s — %s\nRepo:      %s\nStatus:    %s, trust tier %q\nCommit:    %s\n",
+				meta.Name, meta.App, meta.Version, proj.Name, proj.Description, proj.RepoURL, proj.Status, proj.Trust.Tier, commit)
+
+			repoDir := gitx.CachePath(config.ReposDir(), proj.RepoURL)
+			fmt.Fprintf(e.out, "Fetching the repository…\n")
+			if err := gitx.Fetch(ctx, repoDir, proj.RepoURL, commit); err != nil {
+				return err
+			}
+
+			// Two channels: the key the server registered, and the key the repo publishes.
+			serverKey := proj.Pubkey
+			repoKey := ""
+			if raw, err := readAt(ctx, repoDir, commit, app.DescriptorFile); err == nil {
+				if d, derr := spec.ParseDescriptor(raw); derr == nil {
+					repoKey = d.Pubkey
+				} else {
+					fmt.Fprintf(e.out, "warning: %s at %s is invalid: %v\n", app.DescriptorFile, commit[:12], derr)
+				}
+			}
+			pin := serverKey
+			if pubkeyFlag != "" {
+				pin = pubkeyFlag
+			}
+			pinKey, err := minisign.ParsePublicKey(pin)
+			if err != nil {
+				return fmt.Errorf("public key to pin is unusable: %w", err)
+			}
+			lr, verr := verify.Lock(ctx, repoDir, commit, pin)
+
+			fp := func(k string) string {
+				f, err := minisign.Fingerprint(k)
+				if err != nil {
+					return "(not a valid key)"
+				}
+				return f
+			}
+			fmt.Fprintf(e.out, "\nMaintainer key\n  server publishes:      %s\n                         %s\n", serverKey, fp(serverKey))
+			if repoKey != "" {
+				fmt.Fprintf(e.out, "  repo %s: %s\n                         %s\n", app.DescriptorFile, repoKey, fp(repoKey))
+			} else {
+				fmt.Fprintf(e.out, "  repo %s: (missing or unreadable)\n", app.DescriptorFile)
+			}
+			if pubkeyFlag != "" {
+				fmt.Fprintf(e.out, "  --pubkey (you):        %s\n                         %s\n", pin, pinKey.Fingerprint())
+			}
+			if verr != nil {
+				return fmt.Errorf("the task lock at %s does not verify against %s: %w", commit[:12], pinKey.Fingerprint(), verr)
+			}
+			switch {
+			case pubkeyFlag != "":
+				fmt.Fprintf(e.out, "  → pinning the key you passed with --pubkey.\n")
+			case repoKey == serverKey:
+				fmt.Fprintf(e.out, "  → repo key == server key: MATCH.\n")
+			case repoKey != "" && repoKey == lr.Signer.String() && lr.Rotations > 0:
+				fmt.Fprintf(e.out, "  → repo key differs from the server's registered key, but a valid rotation chain of %d link(s) signed by the registered key leads to it.\n", lr.Rotations)
+			default:
+				return fmt.Errorf("the key in the repository's %s and the key the server publishes DIFFER and no rotation chain connects them. "+
+					"One of the two channels is wrong or compromised. Ask the maintainer out of band which fingerprint is right, then re-run with --pubkey <key>", app.DescriptorFile)
+			}
+			fmt.Fprintf(e.out, "\nFINGERPRINT TO PIN:  %s\n  Compare it with the fingerprint on the project's Audit tab: %s/%s\n  (server says: %s)\n",
+				pinKey.Fingerprint(), ref.Server, ref.Slug, proj.PubkeyFingerprint)
+			if proj.PubkeyFingerprint != "" && pubkeyFlag == "" && proj.PubkeyFingerprint != pinKey.Fingerprint() {
+				return fmt.Errorf("the server's pubkey_fingerprint (%s) is not the fingerprint of the key it publishes (%s); refusing", proj.PubkeyFingerprint, pinKey.Fingerprint())
+			}
+			fmt.Fprintf(e.out, "Lock:      signature OK (signed by %s, %d rotation link(s)), %d manifest(s), sha256 %s\n\n",
+				lr.Signer.Fingerprint(), lr.Rotations, len(lr.Lock.Manifests), lr.LockSHA256)
+
+			var b strings.Builder
+			var total int64
+			deps := map[string][]string{}
+			for _, en := range lr.Lock.Manifests {
+				_, m, err := lr.ReadManifest(ctx, en.ID)
+				if err != nil {
+					return fmt.Errorf("manifest %s is invalid: %w", en.Path, err)
+				}
+				deps[m.ID] = m.DependsOn
+				total += m.MaxTokens
+				renderManifest(&b, m, en.SHA256)
+			}
+			fmt.Fprintf(&b, "%d task(s), up to %d tokens in total if every task runs to its cap.\n", len(lr.Lock.Manifests), total)
+			e.page(b.String(), !yes && !noPager)
+
+			if existing, ok := cfg.Projects[ref.Key()]; ok {
+				switch {
+				case existing.Pubkey != pin:
+					fmt.Fprintf(e.out, "\nNOTE: you previously pinned a DIFFERENT key for this project (%s). Approving replaces it.\n", fp(existing.Pubkey))
+				case existing.ApprovedCommit == commit:
+					fmt.Fprintf(e.out, "\nYou already approved this exact commit.\n")
+				default:
+					fmt.Fprintf(e.out, "\nRe-approval: previously approved commit %s.\n", existing.ApprovedCommit)
+				}
+			}
+			fmt.Fprintf(e.out, "\nApproving means: tasks from commit %s (and its ancestors), signed by the key above, may run on this machine\n"+
+				"in the sandbox, under your coding-agent credentials, within the caps in %s.\n", commit[:12], config.Path())
+			if !yes {
+				ok, err := e.confirm("Pin this key and commit?")
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return exitWith(ExitError, "not approved; nothing was changed")
+				}
+			}
+			p := cfg.Projects[ref.Key()]
+			if p == nil {
+				p = &config.Project{}
+				cfg.Projects[ref.Key()] = p
+			}
+			p.Server, p.Slug, p.Pubkey = ref.Server, ref.Slug, pin
+			p.ApprovedCommit, p.ApprovedLockSHA256, p.ApprovedAt = commit, lr.LockSHA256, time.Now().UTC().Truncate(time.Second)
+			if err := cfg.Save(); err != nil {
+				return err
+			}
+			fmt.Fprintf(e.out, "approved %s at %s; written to %s\nNext: %s dry-run %s   then   %s work %s\n",
+				ref.Key(), commit[:12], config.Path(), app.BinaryName, ref.Slug, app.BinaryName, ref.Slug)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "approve without asking (non-interactive); manifests are printed, not paged")
+	cmd.Flags().BoolVar(&noPager, "no-pager", false, "print manifests instead of opening $PAGER")
+	cmd.Flags().StringVar(&pubkeyFlag, "pubkey", "", "pin this maintainer key (minisign encoding) instead of the one the server publishes")
+	cmd.Flags().StringVar(&commitFlag, "commit", "", "approve this commit instead of the server's pinned commit")
+	return cmd
+}

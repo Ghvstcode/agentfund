@@ -1,0 +1,22 @@
+{
+  "lock_version": 1,
+  "spec_version": 1,
+  "manifests": [
+    {
+      "path": "tasks/0001-slugify.yaml",
+      "id": "0001-slugify",
+      "sha256": "9e2614a957738d542a76ca8c6266cd7cc2d5793511b69cb4ff11086f4b70dee7"
+    },
+    {
+      "path": "tasks/0002-truncate.yaml",
+      "id": "0002-truncate",
+      "sha256": "87cf1e96bd8fdb595f8a0b7ec85c48a6fa9662675ff729b9629ef6e4cec3a91d"
+    },
+    {
+      "path": "tasks/0003-cli.yaml",
+      "id": "0003-cli",
+      "sha256": "898111dd47536e5a10f7d3c0a200bbb6a8c18acdcc8064ef51698c7486e81499"
+    }
+  ],
+  "rotations": []
+}

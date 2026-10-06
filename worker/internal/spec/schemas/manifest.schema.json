@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentfund.dev/spec/v1/manifest.schema.json",
+  "title": "AgentFund task manifest (spec_version 1)",
+  "description": "One unit of work. Lives at tasks/<id>.yaml in the project repo. The worker builds the sandbox from this document and runs nothing outside it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["spec_version", "id", "title", "prompt", "scope", "verify", "max_tokens"],
+  "properties": {
+    "spec_version": {
+      "description": "Manifest format version. Workers reject unknown versions.",
+      "const": 1
+    },
+    "id": {
+      "description": "Unique within the repo. NNNN-slug; the number is an ordering hint only. Must equal the file name without the .yaml extension.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$",
+      "maxLength": 80
+    },
+    "title": {
+      "description": "Short human label for UI and PR titles.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "prompt": {
+      "description": "The full instruction given to the agent, verbatim.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["write"],
+      "properties": {
+        "write": {
+          "description": "Globs (repo-relative, doublestar syntax) the agent may create, modify or delete. Any change outside them discards the run.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/glob" }
+        },
+        "read": {
+          "description": "Globs present read-only in the sandbox beyond the write scope. Omitted = whole repo read-only.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/glob" }
+        }
+      }
+    },
+    "verify": {
+      "description": "Shell command run in the sandbox (sh -c, repo root as cwd) after the agent finishes. Exit 0 = pass.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "max_tokens": {
+      "description": "Hard spend cap for this task (input + output, including cache reads/writes). The worker kills the run at the cap.",
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 1000000000
+    },
+    "timeout_minutes": {
+      "description": "Wall-clock cap for agent + verify.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440,
+      "default": 60
+    },
+    "depends_on": {
+      "description": "Task ids that must be in state `merged` before this one is claimable.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$" },
+      "default": []
+    },
+    "base_branch": {
+      "description": "Branch to fork from and open the PR against.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "default": "main"
+    }
+  },
+  "$defs": {
+    "glob": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Repo-relative path glob. `*` matches within a segment, `**` across segments. No leading `/`, no `..` segments, never inside `.git/`.",
+      "not": {
+        "anyOf": [
+          { "pattern": "^/" },
+          { "pattern": "(^|/)\\.\\.(/|$)" },
+          { "pattern": "^\\.git(/|$)" },
+          { "pattern": "\\\\" }
+        ]
+      }
+    }
+  }
+}

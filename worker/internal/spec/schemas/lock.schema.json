@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentfund.dev/spec/v1/lock.schema.json",
+  "title": "tasks/MANIFEST.lock (lock_version 1)",
+  "description": "Lists every manifest with its SHA-256. The detached minisign signature over the exact bytes of this file lives next to it at tasks/MANIFEST.lock.minisig, so one signature covers the whole task set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lock_version", "spec_version", "manifests"],
+  "properties": {
+    "lock_version": { "const": 1 },
+    "spec_version": { "const": 1 },
+    "manifests": {
+      "description": "Sorted by path. Every tasks/*.yaml file in the commit must appear exactly once; extra or missing files fail verification.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "id", "sha256"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^tasks/[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\\.yaml$" },
+          "id": { "type": "string", "pattern": "^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$" },
+          "sha256": { "description": "Lowercase hex SHA-256 of the manifest file's raw bytes.", "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "rotations": {
+      "description": "Key rotation chain, oldest first. Each link is a statement signed by `from` authorising `to`.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "signature"],
+        "properties": {
+          "from": { "type": "string", "pattern": "^[A-Za-z0-9+/]{56}$" },
+          "to": { "type": "string", "pattern": "^[A-Za-z0-9+/]{56}$" },
+          "signature": {
+            "description": "Full minisign signature file text (4 lines) made with the `from` key over the UTF-8 bytes of: \"agentfund-key-rotation-v1\\nfrom: <from>\\nto: <to>\\n\".",
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
+      }
+    }
+  }
+}

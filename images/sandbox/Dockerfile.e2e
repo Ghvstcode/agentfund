@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+#
+# Test-only sandbox image. Same layout as the real sandbox image (user `agent`
+# 10001, /work, read-only friendly env), but the `claude` on PATH is the
+# worker's mock agent, and only python3 is installed (enough for the
+# hello-project verify commands).
+#
+# The mock's behaviour is chosen HERE, by the image (MOCK_AGENT_SCENARIO), not
+# by anything in the worker.
+#
+# Build (the mock binary must be cross-compiled into the build context first):
+#   make -C worker e2e-images
+# or by hand:
+#   (cd worker && CGO_ENABLED=0 GOOS=linux GOARCH=$(docker version --format '{{.Server.Arch}}') \
+#      go build -o ../images/sandbox/.build/mock-agent ./cmd/mock-agent)
+#   docker build -f images/sandbox/Dockerfile.e2e --build-arg MOCK_SCENARIO=happy \
+#      -t agentfund/sandbox-e2e:happy images/sandbox
+ARG BASE_IMAGE=debian:bookworm-slim
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git python3 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 agent \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/agent --shell /bin/bash agent \
+ && mkdir -p /work && chown root:root /work && chmod 0755 /work
+
+COPY .build/mock-agent /usr/local/bin/claude
+
+ARG MOCK_SCENARIO=happy
+ENV HOME=/home/agent \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPYCACHEPREFIX=/tmp/pycache \
+    MOCK_AGENT_SCENARIO=${MOCK_SCENARIO}
+
+USER 10001:10001
+WORKDIR /work
+CMD ["bash"]

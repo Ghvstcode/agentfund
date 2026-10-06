@@ -364,7 +364,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409":
-          description: "Not claimable. Problem `type` ends in one of: `task-not-open`, `dependencies-unmet`, `project-not-active`, `claim-limit`."
+          description: "Not claimable. Problem `type` ends in one of: `task-not-open`, `dependencies-unmet`, `project-not-active`, `claim-limit`, `project-task-cap`, `project-daily-cap`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }

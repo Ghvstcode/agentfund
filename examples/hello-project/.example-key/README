@@ -1,0 +1,12 @@
+TEST-ONLY KEY — DO NOT REUSE.
+
+example.key is an unencrypted minisign secret key that is committed to this
+public repository on purpose, so the spec validator, the worker's tests and the
+end-to-end test can sign and verify the hello-project fixture.
+
+It protects nothing. Never put its public half into a real project's
+agentfund.yaml. Generate your own key with `agentfund keygen`.
+
+Re-sign the fixture after editing a manifest:
+
+    agentfund sign examples/hello-project/tasks --key examples/hello-project/.example-key/example.key
