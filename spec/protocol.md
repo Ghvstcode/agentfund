@@ -233,3 +233,10 @@ Readings fixed while building the reference server; they are normative.
 - **Claim lost mid-run.** A worker whose heartbeat is answered `claim-not-active` stops and
   still sends its report; the server stores it `flagged_late`, so the burned tokens stay
   visible without being counted.
+- **Webhook secrets are per project.** Each project has its own HMAC secret
+  (`GET /v1/projects/{slug}/webhook`, maintainer only; `…/webhook/rotate` replaces it). A CI
+  webhook is accepted only when its signature verifies under the secret of the project its
+  payload names (the repository, for GitHub; `repo_url`, for generic), so one maintainer can
+  never sign results for another project. An operator may additionally configure an
+  instance-wide secret (`WEBHOOK_SECRET`) for organisation-level hooks; it is never shown to
+  maintainers. A webhook whose project cannot be determined is rejected `401 bad-signature`.

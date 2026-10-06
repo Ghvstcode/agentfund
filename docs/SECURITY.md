@@ -41,11 +41,12 @@ public's ability to **verify** every number the system shows.
 | Server shows donors one task and feeds workers another | Signed `MANIFEST.lock` + per-manifest SHA-256, verified by the worker against the donor-pinned key. The server cannot alter work. |
 | Malicious manifest added to the repo after approval | Approval pins a commit. Newer commits need re-approval, unless the donor opted into `follow_unchanged_lock` (byte-identical task set) or `auto_follow_signed_updates` (any validly signed set). Both default off. |
 | Maintainer key swapped in the repo | The worker never reads the key from the repo at run time. The server UI shows the registered key's fingerprint as a second channel; rotation requires a statement signed by the old key. |
-| Prompt injection exfiltrates repo or host data | No host mounts; the sandbox sits on an internal network whose only exit is a CONNECT-only proxy allowing the git host and `api.anthropic.com`. IP literals and private/loopback/link-local/metadata addresses are refused. |
+| Prompt injection exfiltrates repo or host data | No host mounts; the sandbox sits on an internal network whose only exit is a CONNECT-only proxy allowing `api.anthropic.com` (nothing else by default — not even the git host). IP literals and private/loopback/link-local/metadata addresses are refused. |
 | Agent writes outside its lane (backdoor in an unrelated file) | The worker diffs the sandbox against the claimed commit on the host. Any path outside `scope.write`, any symlink or special file, or any change to `agentfund.yaml`, `tasks/**` or `.github/**` discards the whole run. |
 | Budget burned on junk | Per-task `max_tokens` (kill at the cap) + donor daily/weekly caps + a per-task ceiling that refuses oversized manifests + schedule windows. |
 | Credential theft | The Claude Code token is injected as an environment variable at container start only — never in an image layer, argv, log, or report. Git credentials never enter the sandbox: the worker pushes from the host. |
 | Hostile PR content (CI abuse, malware in the diff) | Project side: CI on `pull_request` (never `pull_request_target`), no secrets on fork PRs, read-only token, pinned actions, human review before merge. See the maintainer guide. |
+| A maintainer forges CI results for someone else's project | CI webhook secrets are per project; with polling enabled the server asks the CI provider itself and needs no secret at all. |
 | Donor reports fake token numbers | Tokens count as **delivered** only when the CI provider confirms a passing run on the reported branch + commit. Leaderboards rank by delivered, never reported. |
 | Sybil donors inflating leaderboards | GitHub identity + delivered-only ranking: inflation costs real tokens and real passing work. |
 | New project farming trust | Per-task and per-day caps for projects with no merge history; they lift only with CI-passing merged work. Reputation is computed from the ledger. |
@@ -75,7 +76,7 @@ public's ability to **verify** every number the system shows.
    Read the terms:
    [Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
    [Usage Policy](https://www.anthropic.com/legal/aup),
-   [Claude Code legal and compliance](https://docs.claude.com/en/docs/claude-code/legal-and-compliance).
+   [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
 4. **A passing CI run is not a correctness proof.** `verify` and CI are as good as the tests the
    maintainer wrote. Merging remains a human decision.
 5. **Model output is reviewed by nobody before CI runs it.** Maintainers must treat every

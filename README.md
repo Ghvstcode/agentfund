@@ -15,7 +15,7 @@ keeps score — and only counts tokens once CI passes.
 $ agentfund approve https://fund.example/gridrs      # read every task, pin the key + commit
 $ agentfund work    https://fund.example/gridrs --budget 200m
   ✓ verified MANIFEST.lock  SHA256:9c1e…  commit 4f2a9d1
-  ▶ 0007-csv-parse   sandbox up · egress: github.com, api.anthropic.com
+  ▶ 0302-csv         sandbox up · egress: api.anthropic.com only
   ● 1,284,310 tokens · verify passed · PR opened → waiting for CI
 ```
 
@@ -59,7 +59,7 @@ Rust with zero dependencies — is built entirely this way, and is the example t
 - The **worker** verifies that signature and each content hash against the key and commit *you*
   approved — so no server, including a compromised one, can change what runs on your machine.
 - Work runs in a container with no host mounts, non-root, and one way out: a proxy that only
-  allows the git host and the model API.
+  allows the model API. Git credentials never enter the sandbox; the worker pushes from the host.
 - Anything the agent changes outside the task's declared scope discards the whole run.
 - The ledger has separate columns for **pledged → reported → delivered → merged**. Tokens are
   *delivered* only when the CI provider confirms a passing run. Burned-but-failed tokens stay
@@ -109,7 +109,9 @@ The build specification left these open; each has a default rather than a blocke
 | Agent backends | Claude Code only; a `Runner` interface exists from day one | Implement `Runner` for another agent |
 | Git host / CI | GitHub only; `GitHost` and `CiAdapter` interfaces, plus a `generic` signed-JSON CI adapter | Implement the interfaces |
 | Signature format | minisign, prehashed Ed25519, detached `MANIFEST.lock.minisig` | Spec change (`lock_version`) |
-| Following new commits | Off. Re-approve each new pin; opt into `follow_unchanged_lock` or `auto_follow_signed_updates` | Donor policy file |
+| Following new commits | Off, so a donor re-approves after every merge. `approve` offers `follow_unchanged_lock` (accept new commits while the signed task list is byte-identical); `auto_follow_signed_updates` accepts any validly signed list | Donor policy file |
+| Sandbox egress | Model API only. The build spec also listed the git host; the sandbox has no `.git` and no git credentials, so it was only an exfiltration path | `sandbox.allow_git_host`, `sandbox.extra_allow_hosts` |
+| CI webhook secrets | One per project, so a maintainer can only sign results for their own project | `…/webhook/rotate` |
 | CI confirmation when GitHub cannot reach the instance | The server also polls GitHub (`CI_POLL`) | Env |
 | Sandbox runtime | Docker CLI, internal network + Rust CONNECT proxy sidecar | `sandbox.*` in the policy file |
 
