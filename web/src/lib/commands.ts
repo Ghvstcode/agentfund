@@ -38,7 +38,7 @@ export function loginFromStdinCommand(baseUrl: string): string {
 export function backCommands(meta: Pick<Meta, 'base_url' | 'links'>, slug: string): CommandLine[] {
   const project = `${trimBase(meta.base_url)}/${slug}`;
   return [
-    { label: 'Install the worker', command: instanceLinks(meta).installCommand },
+    { label: 'Get the worker', command: instanceLinks(meta).installCommand },
     {
       label: 'Sign in to this instance',
       note: 'Prompts for an API key. Create one under Settings.',

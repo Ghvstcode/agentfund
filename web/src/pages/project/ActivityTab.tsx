@@ -76,10 +76,10 @@ export default function ActivityTab() {
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="pl-4">Pull request</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Donor</TableHead>
+                  <TableHead className="hidden md:table-cell">Donor</TableHead>
                   <TableHead className="text-right">Tokens</TableHead>
-                  <TableHead>Head</TableHead>
-                  <TableHead className="pr-4 text-right">Updated</TableHead>
+                  <TableHead className="hidden lg:table-cell">Head</TableHead>
+                  <TableHead className="hidden pr-4 text-right sm:table-cell">Updated</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -87,7 +87,7 @@ export default function ActivityTab() {
                   const stage = STAGES[pr.stage];
                   return (
                     <TableRow key={pr.url} className="hover:bg-muted/40">
-                      <TableCell className="pl-4">
+                      <TableCell className="w-full max-w-0 pl-4">
                         <span className="flex items-baseline gap-2">
                           {isWeb(pr.url) ? (
                             <a href={pr.url} rel="noreferrer" className="link num font-medium">
@@ -96,9 +96,9 @@ export default function ActivityTab() {
                           ) : (
                             <span className="num font-medium">{pullRequestLabel(pr.url)}</span>
                           )}
-                          <span className="max-w-64 truncate">{pr.taskTitle ?? 'Unknown task'}</span>
+                          <span className="min-w-0 truncate">{pr.taskTitle ?? 'Unknown task'}</span>
                         </span>
-                        {pr.taskId && <span className="num mt-0.5 block text-xs text-muted-foreground">{manifestId(pr.taskId)}</span>}
+                        {pr.taskId && <span className="num mt-0.5 block truncate text-xs text-muted-foreground">{manifestId(pr.taskId)}</span>}
                       </TableCell>
                       <TableCell>
                         <span className={cn('flex items-center gap-1.5 text-xs font-medium', stage.tone)}>
@@ -111,12 +111,12 @@ export default function ActivityTab() {
                           </a>
                         )}
                       </TableCell>
-                      <TableCell>{pr.donor ? <UserLink handle={pr.donor.handle} avatar /> : '—'}</TableCell>
+                      <TableCell className="hidden md:table-cell">{pr.donor ? <UserLink handle={pr.donor.handle} avatar /> : '—'}</TableCell>
                       <TableCell className="text-right">
                         <Num value={pr.tokens} />
                       </TableCell>
-                      <TableCell>{pr.headSha ? <Hash value={pr.headSha} label="head commit" /> : '—'}</TableCell>
-                      <TableCell className="pr-4 text-right text-muted-foreground">
+                      <TableCell className="hidden lg:table-cell">{pr.headSha ? <Hash value={pr.headSha} label="head commit" /> : '—'}</TableCell>
+                      <TableCell className="hidden pr-4 text-right text-muted-foreground sm:table-cell">
                         <Time value={pr.at} />
                       </TableCell>
                     </TableRow>
@@ -141,7 +141,7 @@ export default function ActivityTab() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">Entry</TableHead>
                 <TableHead>Donor</TableHead>
-                <TableHead>Task</TableHead>
+                <TableHead className="hidden sm:table-cell">Task</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
                 <TableHead className="pr-4 text-right">When</TableHead>
               </TableRow>
@@ -154,7 +154,7 @@ export default function ActivityTab() {
                     {entryNote(entry) && <span className="ml-2 text-xs font-normal text-muted-foreground">{entryNote(entry)}</span>}
                   </TableCell>
                   <TableCell>{entry.donor ? <UserLink handle={entry.donor.handle} avatar /> : '—'}</TableCell>
-                  <TableCell className="num text-xs text-muted-foreground">{entry.task_id ? manifestId(entry.task_id) : '—'}</TableCell>
+                  <TableCell className="num hidden text-xs text-muted-foreground sm:table-cell">{entry.task_id ? manifestId(entry.task_id) : '—'}</TableCell>
                   <TableCell className="text-right">
                     <Num value={entry.tokens} exact />
                   </TableCell>

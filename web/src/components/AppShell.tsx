@@ -42,7 +42,7 @@ function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           <span className="flex size-6 items-center justify-center rounded-md bg-foreground text-background shadow-card">
             <Zap className="size-3.5 fill-current" strokeWidth={0} aria-hidden="true" />
           </span>
-          <span className="max-w-40 truncate sm:max-w-none">{meta.data?.name ?? APP_NAME}</span>
+          <span className="max-w-40 truncate lg:max-w-none">{meta.data?.name ?? APP_NAME}</span>
         </Link>
         <nav aria-label="Main" className="hidden items-center gap-0.5 md:flex">
           <NavItem to="/" end>
@@ -57,11 +57,11 @@ function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
             onClick={onOpenPalette}
             aria-label="Search projects, donors and pages"
             aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
-            className="flex h-8 items-center gap-2 rounded-lg border bg-card px-2.5 text-sm text-muted-foreground shadow-card transition-colors hover:text-foreground sm:w-56"
+            className="flex h-8 items-center gap-2 rounded-lg border bg-card px-2.5 text-sm text-muted-foreground shadow-card transition-colors hover:text-foreground lg:w-56"
           >
             <Search className="size-4" strokeWidth={1.5} aria-hidden="true" />
-            <span className="hidden flex-1 text-left sm:inline">Search…</span>
-            <kbd className="hidden rounded border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium sm:inline">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+            <span className="hidden flex-1 text-left lg:inline">Search…</span>
+            <kbd className="hidden rounded border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium lg:inline">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
           </button>
           <ThemeToggle />
           {me.data ? (

@@ -8,22 +8,20 @@ interface CommandLineProps {
   className?: string;
 }
 
-/** One copyable shell line, set like a terminal row in both themes. */
+/**
+ * One copyable shell line, set like a terminal row in both themes. Long commands wrap inside
+ * the block (breaking anywhere if they must) rather than scrolling or pushing their container
+ * wider; the copy button always yields the command on one line.
+ */
 export function CommandLine({ command, label, className }: CommandLineProps) {
   return (
     <div
       className={cn(
-        'dark flex items-center gap-2 rounded-lg border border-white/10 bg-[#0b0b0d] py-1.5 pr-1.5 pl-3 text-zinc-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]',
+        'dark flex max-w-full min-w-0 items-start gap-2 rounded-lg border border-white/10 bg-[#0b0b0d] py-1.5 pr-1.5 pl-3 text-zinc-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]',
         className,
       )}
     >
-      {/* Scrollable so a long line never widens the page; focusable so keyboards can scroll it. */}
-      <pre
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        tabIndex={0}
-        aria-label={`Command: ${command}`}
-        className="min-w-0 flex-1 overflow-x-auto py-1 text-[0.8125rem] leading-5 whitespace-pre [scrollbar-width:none] focus-visible:outline-white"
-      >
+      <pre className="min-w-0 flex-1 py-1 text-[0.8125rem] leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]">
         <span className="text-zinc-500 select-none" aria-hidden="true">
           ${' '}
         </span>

@@ -45,6 +45,7 @@ handle.
 | `check:api` | fail if the generated types are stale (also part of `test`) |
 | `screenshots` | every page × theme × viewport × state into `dev/screenshots/` |
 | `audit` | Lighthouse and axe against the production build, reports in `dev/reports/` |
+| `overflow` | sweep every page at 1024 and 390px (or the widths you pass) for overflow and clipping |
 
 `src/api/schema.d.ts` is generated and committed, so a build needs nothing but `pnpm install`.
 After changing the spec, run `pnpm --filter web gen:api` and commit the result.

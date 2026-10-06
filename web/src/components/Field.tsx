@@ -68,15 +68,13 @@ export function SelectField({ label, hint, error, hideLabel, children, className
   return (
     <FieldShell label={label} hint={hint} error={error} hideLabel={hideLabel}>
       {({ id, describedBy }) => (
-        <span className="relative block">
+        // Sizing classes go on the wrapper, so the chevron always sits inside the control.
+        <span className={cn('relative block h-9', className)}>
           <select
             {...select}
             id={id}
             aria-describedby={describedBy}
-            className={cn(
-              'h-9 w-full appearance-none rounded-lg border border-input bg-transparent pr-8 pl-2.5 text-sm transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
-              className,
-            )}
+            className="size-full appearance-none rounded-lg border border-input bg-transparent pr-8 pl-2.5 text-sm transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
           >
             {children}
           </select>
@@ -106,7 +104,8 @@ export function SwitchField({ label, checked, onCheckedChange, disabled, classNa
     <div className={cn('flex min-h-9 items-center gap-2.5', className)}>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
       <Label htmlFor={id} className="text-sm leading-snug font-normal">
-        {label}
+        {/* One child, so the label's flex gap cannot split a sentence around inline code. */}
+        <span>{label}</span>
       </Label>
     </div>
   );

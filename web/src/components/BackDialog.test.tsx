@@ -65,12 +65,12 @@ describe('BackDialog', () => {
     expect(within(dialog).getByText('Copied to clipboard')).toBeInTheDocument();
   });
 
-  it('falls back to the built-in install line when the instance names none', async () => {
+  it('falls back to the build-from-source line when the instance names no install command', async () => {
     mockApi({ 'GET /v1/meta': () => ({ ...META, links: undefined }) });
     const { dialog } = await openDialog();
     expect(
       await within(dialog).findByText(
-        'curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh',
+        'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images',
       ),
     ).toBeInTheDocument();
   });

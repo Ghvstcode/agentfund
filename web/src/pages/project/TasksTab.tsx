@@ -55,7 +55,7 @@ function TaskCard({ task, slug }: { task: Task; slug: string }) {
   return (
     <li
       className={cn(
-        'relative grid gap-2 rounded-lg border bg-card p-3 shadow-card transition duration-200 ease-out focus-within:border-foreground/25 hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-raised',
+        'relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border bg-card p-3 shadow-card transition duration-200 ease-out focus-within:border-foreground/25 hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-raised',
         status.live && 'border-live/35 shadow-[0_0_0_1px_color-mix(in_oklab,var(--live)_12%,transparent),0_8px_28px_-12px_color-mix(in_oklab,var(--live)_45%,transparent)]',
       )}
     >
@@ -98,24 +98,25 @@ function TaskCard({ task, slug }: { task: Task; slug: string }) {
 
 function Board({ tasks, slug }: { tasks: Task[]; slug: string }) {
   return (
-    <div className="grid grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {BOARD_STATES.map((state) => {
         const column = tasks.filter((task) => task.state === state);
         const Icon = STATE_ICONS[state];
         return (
-          <section key={state} aria-labelledby={`column-${state}`} className="grid min-w-0 content-start gap-2 rounded-xl border bg-muted/40 p-2">
-            <header className="flex items-center gap-2 px-1.5 pt-1 pb-0.5">
-              <Icon className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+          <section key={state} aria-labelledby={`column-${state}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2 rounded-xl border bg-muted/40 p-2">
+            <header className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 pt-1 pb-0.5">
+              <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
               <h3 id={`column-${state}`} className="text-sm font-semibold tracking-tight">
                 {STATE_LABELS[state]}
               </h3>
               <span className="num text-xs text-muted-foreground">{column.length}</span>
-              <span className="ml-auto truncate text-xs text-muted-foreground">{STATE_HINTS[state]}</span>
+              {/* Wraps under the title when the column is narrow; never clipped. */}
+              <span className="ml-auto text-xs text-muted-foreground">{STATE_HINTS[state]}</span>
             </header>
             {column.length === 0 ? (
               <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">Nothing here</p>
             ) : (
-              <ul className="grid gap-2">
+              <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                 {column.map((task) => (
                   <TaskCard key={task.id} task={task} slug={slug} />
                 ))}
@@ -207,11 +208,11 @@ export default function TasksTab() {
   const { project } = useProjectContext();
   const { taskId } = useParams();
   const navigate = useNavigate();
-  const wide = useMediaQuery('(min-width: 64rem)');
+  const wide = useMediaQuery('(min-width: 48rem)');
   const [chosen, setChosen] = useState<View | null>(storedView);
   const query = useTasks(project.slug);
   const tasks = flatItems(query);
-  // The board needs room for four columns; narrow screens always get the table.
+  // The board is two columns from 768px and four from 1280px; phones always get the table.
   const view: View = wide ? (chosen ?? 'board') : 'table';
   const closed = tasks.filter((task) => task.state === 'failed');
   const running = tasks.filter((task) => task.active_claim).length;
@@ -247,7 +248,7 @@ export default function TasksTab() {
         {wide && <ViewToggle view={view} onChange={choose} />}
       </div>
       {query.isPending ? (
-        <Loading label="tasks" className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <Loading label="tasks" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }, (_, index) => (
             <Skeleton key={index} className="h-56 rounded-xl" />
           ))}

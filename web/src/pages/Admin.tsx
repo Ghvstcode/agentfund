@@ -88,7 +88,7 @@ function UserRow({ user, self }: { user: Me; self: boolean }) {
         <SelectField
           label={`Role of ${user.handle}`}
           hideLabel
-          className="h-8 w-36"
+          className="h-8 w-32"
           value={user.role}
           disabled={self || update.isPending}
           onChange={(event) => update.mutate({ role: event.target.value as Role })}
@@ -100,8 +100,8 @@ function UserRow({ user, self }: { user: Me; self: boolean }) {
           ))}
         </SelectField>
       </TableCell>
-      <TableCell>{user.github_login ?? <span className="text-muted-foreground">dev login</span>}</TableCell>
-      <TableCell className="text-muted-foreground tabular-nums">{formatDate(user.created_at)}</TableCell>
+      <TableCell className="hidden md:table-cell">{user.github_login ?? <span className="text-muted-foreground">dev login</span>}</TableCell>
+      <TableCell className="hidden md:table-cell text-muted-foreground tabular-nums">{formatDate(user.created_at)}</TableCell>
       <TableCell className="pr-5 text-right">
         {self ? (
           <span className="text-xs text-muted-foreground">You</span>
@@ -169,10 +169,10 @@ function Users({ me }: { me: Me }) {
                   <TableHead scope="col" className={COLUMN}>
                     Role
                   </TableHead>
-                  <TableHead scope="col" className={COLUMN}>
+                  <TableHead scope="col" className={`${COLUMN} hidden md:table-cell`}>
                     GitHub
                   </TableHead>
-                  <TableHead scope="col" className={COLUMN}>
+                  <TableHead scope="col" className={`${COLUMN} hidden md:table-cell`}>
                     Joined
                   </TableHead>
                   <TableHead scope="col" className={`${COLUMN} pr-5`}>
@@ -215,19 +215,19 @@ function ProjectRow({ project }: { project: Project }) {
   const { status } = project;
   return (
     <TableRow className="hover:bg-muted/40">
-      <TableHead scope="row" className="h-auto py-2.5 pl-5 font-normal">
-        <Link to={`/${project.slug}`} className="block font-medium underline-offset-4 hover:underline">
+      <TableHead scope="row" className="h-auto w-full max-w-0 py-2.5 pl-5 font-normal">
+        <Link to={`/${project.slug}`} className="block truncate font-medium underline-offset-4 hover:underline">
           {project.name}
         </Link>
-        <span className="num block text-xs text-muted-foreground">{project.repo_url.replace(/^https?:\/\//, '')}</span>
+        <span className="num block truncate text-xs text-muted-foreground">{project.repo_url.replace(/^https?:\/\//, '')}</span>
       </TableHead>
       <TableCell>
         <Badge variant={status === 'active' ? 'outline' : 'secondary'}>{STATUS_LABELS[status]}</Badge>
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden md:table-cell">
         <UserLink handle={project.maintainer.handle} avatar />
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="hidden md:table-cell text-right">
         <Num value={project.totals.delivered} />
       </TableCell>
       <TableCell className="pr-5 text-right">
@@ -330,10 +330,10 @@ function Projects() {
                   <TableHead scope="col" className={COLUMN}>
                     Status
                   </TableHead>
-                  <TableHead scope="col" className={COLUMN}>
+                  <TableHead scope="col" className={`${COLUMN} hidden md:table-cell`}>
                     Maintainer
                   </TableHead>
-                  <TableHead scope="col" className={`${COLUMN} text-right`}>
+                  <TableHead scope="col" className={`${COLUMN} text-right hidden md:table-cell`}>
                     Delivered
                   </TableHead>
                   <TableHead scope="col" className={`${COLUMN} pr-5`}>

@@ -26,8 +26,8 @@ interface BuildEnv {
   VITE_SOURCE_URL?: string;
 }
 
-const DEFAULT_INSTALL_COMMAND =
-  'curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh';
+// Build from source: it works before any release exists. Instances override it in meta.links.
+const DEFAULT_INSTALL_COMMAND = 'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images';
 const DEFAULT_SOURCE_URL = 'https://github.com/agentfund/agentfund';
 
 /**

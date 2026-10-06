@@ -159,10 +159,10 @@ function KeyRow({ apiKey }: { apiKey: ApiKey }) {
         {apiKey.label}
       </TableHead>
       <TableCell className="num text-[0.8125rem] text-muted-foreground">{apiKey.prefix}…</TableCell>
-      <TableCell className="text-muted-foreground">
+      <TableCell className="hidden sm:table-cell text-muted-foreground">
         <Time value={apiKey.created_at} />
       </TableCell>
-      <TableCell className="text-muted-foreground">{apiKey.last_used_at ? <Time value={apiKey.last_used_at} /> : 'Never'}</TableCell>
+      <TableCell className="hidden sm:table-cell text-muted-foreground">{apiKey.last_used_at ? <Time value={apiKey.last_used_at} /> : 'Never'}</TableCell>
       <TableCell className="pr-5 text-right">
         {apiKey.revoked_at ? (
           <span className="text-xs text-muted-foreground">
@@ -242,10 +242,10 @@ function ApiKeys() {
               <TableHead scope="col" className={COLUMN}>
                 Key
               </TableHead>
-              <TableHead scope="col" className={COLUMN}>
+              <TableHead scope="col" className={`${COLUMN} hidden sm:table-cell`}>
                 Created
               </TableHead>
-              <TableHead scope="col" className={COLUMN}>
+              <TableHead scope="col" className={`${COLUMN} hidden sm:table-cell`}>
                 Last used
               </TableHead>
               <TableHead scope="col" className={`${COLUMN} pr-5`}>

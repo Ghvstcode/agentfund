@@ -201,9 +201,9 @@ export default function Styleguide() {
       <Section id="type" title="Type" note="Geist for words. Geist Mono, with tabular figures, for every number, hash, commit and key. Radii step from 6 to 18px off one --radius.">
         <ul className="surface divide-y px-5">
           {TYPE.map(([name, className, use]) => (
-            <li key={name} className="grid items-baseline gap-x-6 gap-y-1 overflow-hidden py-4 sm:grid-cols-[6rem_minmax(0,1fr)_14rem]">
+            <li key={name} className="grid grid-cols-[minmax(0,1fr)] items-baseline gap-x-6 gap-y-1 py-4 sm:grid-cols-[6rem_minmax(0,1fr)_14rem]">
               <span className="label">{name}</span>
-              <span className={`${className} ${name === 'Display' ? 'counter !text-5xl' : ''} whitespace-nowrap`}>
+              <span className={`${className} ${name === 'Display' ? 'counter !text-4xl sm:!text-5xl' : ''} text-balance`}>
                 {name === 'Display' ? '12 400 000' : 'Fund open source with inference'}
               </span>
               <span className="text-xs text-muted-foreground">{use}</span>

@@ -15,7 +15,8 @@
     "gen:api": "openapi-typescript ../spec/openapi.yaml -o src/api/schema.d.ts",
     "check:api": "node scripts/check-api-types.mjs",
     "screenshots": "node dev/screenshots.mjs",
-    "audit": "node dev/audit.mjs"
+    "audit": "node dev/audit.mjs",
+    "overflow": "node dev/overflow-check.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

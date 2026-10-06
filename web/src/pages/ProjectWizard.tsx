@@ -290,7 +290,7 @@ function Review({ preview }: { preview: ProjectPreview }) {
                 <TableHead scope="col" className="h-9 text-xs font-medium text-muted-foreground">
                   Content hash
                 </TableHead>
-                <TableHead scope="col" className="h-9 pr-5 text-xs font-medium text-muted-foreground">
+                <TableHead scope="col" className="hidden h-9 pr-5 text-xs font-medium text-muted-foreground sm:table-cell">
                   Depends on
                 </TableHead>
               </TableRow>
@@ -298,17 +298,17 @@ function Review({ preview }: { preview: ProjectPreview }) {
             <TableBody>
               {manifests.map((manifest) => (
                 <TableRow key={manifest.id} className="hover:bg-muted/40">
-                  <TableHead scope="row" className="h-auto min-w-56 py-2.5 pl-5 font-normal whitespace-normal">
+                  <TableHead scope="row" className="h-auto w-full max-w-0 py-2.5 pl-5 font-normal whitespace-normal">
                     <span className="block font-medium">{manifest.title}</span>
-                    <span className="num block text-xs text-muted-foreground">{manifest.path}</span>
+                    <span className="num block text-xs text-muted-foreground [overflow-wrap:anywhere]">{manifest.path}</span>
                   </TableHead>
                   <TableCell className="text-right">
                     <Num value={manifest.max_tokens} />
                   </TableCell>
                   <TableCell>
-                    <Hash value={manifest.content_hash} label={`content hash of ${manifest.id}`} length={12} />
+                    <Hash value={manifest.content_hash} label={`content hash of ${manifest.id}`} length={8} />
                   </TableCell>
-                  <TableCell className="num pr-5 text-xs text-muted-foreground">
+                  <TableCell className="num hidden pr-5 text-xs text-muted-foreground sm:table-cell">
                     {manifest.depends_on?.length ? manifest.depends_on.join(', ') : '—'}
                   </TableCell>
                 </TableRow>

@@ -47,9 +47,9 @@ function Artifact({ icon: Icon, title, value, copy, copyLabel, children, verify,
         <div className="num min-w-0 flex-1 py-0.5 text-[0.8125rem] leading-6 [overflow-wrap:anywhere]">{value}</div>
         <CopyButton text={copy} label={copyLabel} />
       </div>
-      <div className="grid gap-2 text-sm text-pretty text-muted-foreground [&_code]:text-foreground">{children}</div>
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 text-sm text-pretty text-muted-foreground [&_code]:text-foreground [&_code]:[overflow-wrap:anywhere]">{children}</div>
       {verify && (
-        <div className="grid gap-1.5 pt-1">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5 pt-1">
           <p className="label">Verify it yourself</p>
           {verify.map((line) => (
             <CommandLine key={line.command} command={line.command} label={line.label} />
