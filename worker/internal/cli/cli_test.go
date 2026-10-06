@@ -14,6 +14,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/lockfile"
 	"github.com/agentfund/agentfund/worker/internal/minisign"
+	"github.com/agentfund/agentfund/worker/internal/testenv"
 	"github.com/agentfund/agentfund/worker/internal/testutil"
 	"github.com/agentfund/agentfund/worker/internal/verify"
 )
@@ -49,6 +50,36 @@ func isolate(t *testing.T) (cfgDir, dataDir string) {
 	t.Setenv(EnvSandboxImage, "")
 	t.Setenv(EnvProxyImage, "")
 	return
+}
+
+// useStubDocker rewrites the config so the "docker" binary is a shell stub in a
+// temp dir. It answers `version`, `image inspect` and the label listings the
+// worker makes at start-up, and fails (logging UNEXPECTED) for anything that
+// would create, run or remove something. It returns the stub's call log.
+func useStubDocker(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "calls.log")
+	stub := filepath.Join(dir, "docker-stub")
+	script := "#!/bin/sh\n" +
+		"case \"$1 $2\" in\n" +
+		"  'version '*) echo \"$*\" >>'" + logPath + "'; echo 0.0-stub ;;\n" +
+		"  'image inspect') echo \"$*\" >>'" + logPath + "'; echo sha256:stub ;;\n" +
+		"  'ps -a'|'volume ls'|'network ls') echo \"$*\" >>'" + logPath + "' ;;\n" +
+		"  *) echo \"UNEXPECTED $*\" >>'" + logPath + "'; exit 1 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Global.Sandbox.Docker = stub
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	return logPath
 }
 
 func allowFileRepos(t *testing.T) {
@@ -165,10 +196,46 @@ func TestMaintainerFlowKeygenValidateSignRotate(t *testing.T) {
 	}
 }
 
-func TestKeygenWithPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("scrypt with minisign's parameters is slow")
+// Signing with a password-protected key, at a small scrypt cost (the cost is
+// read from the key file), so this always runs — also under -race.
+func TestSignWithEncryptedKey(t *testing.T) {
+	isolate(t)
+	proj := copyHello(t)
+	key := testutil.Key(t)
+	enc, err := key.MarshalKDF("correct horse battery staple", minisign.KDFInteractive)
+	if err != nil {
+		t.Fatal(err)
 	}
+	keyPath := filepath.Join(t.TempDir(), "enc.key")
+	if err := os.WriteFile(keyPath, enc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tasks := filepath.Join(proj, "tasks")
+	t.Setenv(config.EnvKeyPass, "correct horse battery staple")
+	t.Setenv(config.EnvKey, keyPath) // default key from the environment
+	if out := mustRun(t, "", "sign", tasks); !strings.Contains(out, key.Public().Fingerprint()) {
+		t.Fatalf("sign with an encrypted key:\n%s", out)
+	}
+	lockRaw, _ := os.ReadFile(filepath.Join(tasks, "MANIFEST.lock"))
+	sig, _ := os.ReadFile(filepath.Join(tasks, "MANIFEST.lock.minisig"))
+	if err := minisign.Verify(key.Public(), lockRaw, sig); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvKeyPass, "wrong")
+	if code, _, errOut := run(t, "", "sign", tasks, "--key", keyPath); code == 0 || !strings.Contains(errOut, "wrong password") {
+		t.Fatalf("sign with a wrong password: %d %s", code, errOut)
+	}
+	// Without the variable the password is read from stdin (no terminal in tests).
+	t.Setenv(config.EnvKeyPass, "")
+	mustRun(t, "correct horse battery staple\n", "sign", tasks, "--key", keyPath)
+	if code, _, _ := run(t, "nope\n", "sign", tasks, "--key", keyPath); code == 0 {
+		t.Fatal("wrong password from stdin accepted")
+	}
+}
+
+// keygen always writes the stock tool's scrypt cost (1 GiB); see testenv.SkipIfHeavyKDF.
+func TestKeygenWithPassword(t *testing.T) {
+	testenv.SkipIfHeavyKDF(t)
 	isolate(t)
 	proj := copyHello(t)
 	t.Setenv(config.EnvKeyPass, "correct horse battery staple")
@@ -340,9 +407,14 @@ func TestApproveDryRunStatus(t *testing.T) {
 	h.Server.Unlock()
 	moved := "project moved to " + newer[:12] + "; run `agentfund approve " + ref + "` to review and approve it"
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-not-a-real-token-000000")
-	t.Setenv(EnvSandboxImage, "busybox") // any reference: Prepare only checks presence, and this test must never start a sandbox
-	if code, _, errOut := run(t, "", "work", h.Server.Slug, "--once"); !(code == ExitNothing && strings.Contains(errOut, moved)) && !strings.Contains(errOut, "not present locally") && !strings.Contains(errOut, "docker is not available") {
+	// Unit tests never talk to a real container engine: point the worker at a stub CLI
+	// that answers the start-up queries and records anything else.
+	stubLog := useStubDocker(t)
+	if code, _, errOut := run(t, "", "work", h.Server.Slug, "--once"); code != ExitNothing || !strings.Contains(errOut, moved) {
 		t.Fatalf("work after the project moved: exit %d\n%s", code, errOut)
+	}
+	if calls, _ := os.ReadFile(stubLog); strings.Contains(string(calls), "UNEXPECTED") || !strings.Contains(string(calls), "version") {
+		t.Fatalf("container CLI calls:\n%s", calls)
 	}
 	if n := len(h.Server.Outcomes()); n != 0 {
 		t.Fatalf("%d claim(s) for an unapproved commit", n)
@@ -354,7 +426,6 @@ func TestApproveDryRunStatus(t *testing.T) {
 		t.Fatalf("status after the project moved:\n%s", out)
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	t.Setenv(EnvSandboxImage, "")
 
 	// Re-approval of the newer commit; the project is now reported as new with tight server caps.
 	taskCap, dayCap := int64(500_000), int64(3_000_000)

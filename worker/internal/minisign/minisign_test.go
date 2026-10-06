@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	upstream "aead.dev/minisign"
+
+	"github.com/agentfund/agentfund/worker/internal/testenv"
 )
 
 func mustKey(t *testing.T) PrivateKey {
@@ -137,14 +139,54 @@ func TestPublicKeyParsing(t *testing.T) {
 	}
 }
 
-func TestPrivateKeyEncryption(t *testing.T) {
-	if testing.Short() {
-		t.Skip("scrypt with minisign's parameters is slow")
+func TestScryptParams(t *testing.T) {
+	// Values libsodium's pickparams yields for its named limits.
+	for kdf, want := range map[KDF][3]int{
+		KDFSensitive:                            {1 << 20, 8, 1},
+		KDFInteractive:                          {1 << 14, 8, 1},
+		{OpsLimit: 1, MemLimit: 16777216}:       {1 << 10, 8, 1}, // opslimit is clamped to 32768
+		{OpsLimit: 33554432, MemLimit: 1 << 24}: {1 << 14, 8, 64},
+	} {
+		n, r, p := kdf.scryptParams()
+		if [3]int{n, r, p} != want {
+			t.Errorf("%+v -> N=%d r=%d p=%d, want %v", kdf, n, r, p, want)
+		}
 	}
+}
+
+// The default (stock-tool) cost: one gibibyte. Run without -race and -short.
+func TestPrivateKeyEncryptionDefaultCost(t *testing.T) {
+	testenv.SkipIfHeavyKDF(t)
 	k := mustKey(t)
 	enc, err := k.Marshal("correct horse")
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Byte-for-byte what the reference implementation would decrypt.
+	up, err := upstream.DecryptKey("correct horse", enc)
+	if err != nil || up.ID() != k.k.ID() {
+		t.Fatalf("aead.dev/minisign cannot decrypt a default-cost key: %v", err)
+	}
+}
+
+func TestPrivateKeyEncryption(t *testing.T) {
+	k := mustKey(t)
+	enc, err := k.MarshalKDF("correct horse", KDFInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up, err := upstream.DecryptKey("correct horse", enc); err != nil || !up.Equal(k.k) {
+		t.Fatalf("aead.dev/minisign cannot decrypt our encrypted key: %v", err)
+	}
+	if again, _ := k.MarshalKDF("correct horse", KDFInteractive); bytes.Equal(again, enc) {
+		t.Fatal("two encryptions of the same key are identical (salt not random)")
+	}
+	for i := 60; i < len(enc)-1; i += 7 { // a damaged file never decrypts to a different key
+		bad := append([]byte{}, enc...)
+		bad[i] ^= 0x01
+		if got, err := ParsePrivateKey(bad, "correct horse"); err == nil && got.Public() != k.Public() {
+			t.Fatalf("flipping byte %d yields another key without an error", i)
+		}
 	}
 	if !IsEncrypted(enc) {
 		t.Fatal("expected an encrypted key file")

@@ -6,7 +6,9 @@
 // Verification is implemented directly on crypto/ed25519 and BLAKE2b-512 so
 // the security boundary is small and strict; legacy non-prehashed ("Ed")
 // signatures are rejected. Secret-key storage (scrypt-encrypted, compatible
-// with the stock minisign tool) is delegated to aead.dev/minisign.
+// with the stock minisign tool): the unencrypted layout and decryption come
+// from aead.dev/minisign; encryption is written here so its scrypt cost can be
+// chosen (the cost is recorded in the key file).
 package minisign
 
 import (
@@ -15,6 +17,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,6 +26,7 @@ import (
 
 	upstream "aead.dev/minisign"
 	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/scrypt"
 )
 
 const (
@@ -206,22 +210,106 @@ func GenerateKey() (PrivateKey, error) {
 	return PrivateKey{k: priv}, nil
 }
 
-// Marshal encodes the secret key in minisign's secret key file format. An
-// empty password writes an unencrypted key (like `minisign -G -W`).
-func (p PrivateKey) Marshal(password string) ([]byte, error) {
-	var (
-		out []byte
-		err error
-	)
-	if password == "" {
-		out, err = p.k.MarshalText()
-	} else {
-		out, err = upstream.EncryptKey(password, p.k)
+// KDF holds the scrypt cost of an encrypted secret key in libsodium's terms
+// (crypto_pwhash_scryptsalsa208sha256 opslimit/memlimit). The values are
+// stored in the key file, so any minisign implementation can decrypt a key
+// whatever cost it was written with.
+type KDF struct {
+	OpsLimit uint64
+	MemLimit uint64
+}
+
+var (
+	// KDFSensitive is what the stock minisign tool uses and what `keygen`
+	// writes: N = 2^20, r = 8 — one gibibyte of memory and a few seconds.
+	KDFSensitive = KDF{OpsLimit: 33554432, MemLimit: 1073741824}
+	// KDFInteractive is libsodium's cheap setting (N = 2^14, 16 MiB).
+	KDFInteractive = KDF{OpsLimit: 524288, MemLimit: 16777216}
+)
+
+// scryptParams mirrors libsodium's pickparams (r is always 8).
+func (k KDF) scryptParams() (n, r, p int) {
+	ops, mem := k.OpsLimit, k.MemLimit
+	if ops < 1<<15 {
+		ops = 1 << 15
 	}
+	r = 8
+	if ops < mem/32 {
+		p = 1
+		for i := 1; i < 63; i++ {
+			if n = 1 << i; uint64(n) > ops/(8*uint64(r)) {
+				break
+			}
+		}
+		return n, r, p
+	}
+	for i := 1; i < 63; i++ {
+		if n = 1 << i; uint64(n) > mem/(256*uint64(r)) {
+			break
+		}
+	}
+	if rp := (ops / 4) / uint64(n); rp < 0x3fffffff {
+		p = int(rp) / r
+	} else {
+		p = 0x3fffffff / r
+	}
+	return n, r, p
+}
+
+// Marshal encodes the secret key in minisign's secret key file format. An
+// empty password writes an unencrypted key (like `minisign -G -W`); otherwise
+// the key is encrypted with KDFSensitive, like the stock tool does.
+func (p PrivateKey) Marshal(password string) ([]byte, error) {
+	return p.MarshalKDF(password, KDFSensitive)
+}
+
+// Layout of the 158 decoded bytes of a secret key file:
+// sig alg(2) kdf alg(2) checksum alg(2) salt(32) opslimit(8) memlimit(8)
+// then 104 bytes: key id(8) secret key(64) checksum(32), XORed with the scrypt
+// output when encrypted. checksum = BLAKE2b-256(sig alg || key id || secret key).
+const (
+	skSize     = 158
+	skSaltOff  = 6
+	skOpsOff   = 38
+	skMemOff   = 46
+	skBodyOff  = 54
+	skBodySize = 104
+)
+
+// MarshalKDF is Marshal with an explicit scrypt cost.
+func (p PrivateKey) MarshalKDF(password string, kdf KDF) ([]byte, error) {
+	plain, err := p.k.MarshalText()
 	if err != nil {
 		return nil, fmt.Errorf("minisign: encode secret key: %w", err)
 	}
-	return append(bytes.TrimRight(out, "\n"), '\n'), nil
+	if password == "" {
+		return append(bytes.TrimRight(plain, "\n"), '\n'), nil
+	}
+	lines := strings.Split(strings.TrimRight(string(plain), "\n"), "\n")
+	raw, err := base64.StdEncoding.DecodeString(lines[len(lines)-1])
+	if err != nil || len(raw) != skSize {
+		return nil, errors.New("minisign: encode secret key: unexpected plain key layout")
+	}
+	copy(raw[2:4], "Sc")
+	copy(raw[4:6], "B2")
+	salt := raw[skSaltOff:skOpsOff]
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("minisign: encode secret key: %w", err)
+	}
+	binary.LittleEndian.PutUint64(raw[skOpsOff:], kdf.OpsLimit)
+	binary.LittleEndian.PutUint64(raw[skMemOff:], kdf.MemLimit)
+	body := raw[skBodyOff:]
+	sum := blake2b.Sum256(append(append([]byte{}, raw[:2]...), body[:72]...))
+	copy(body[72:], sum[:])
+	n, r, pp := kdf.scryptParams()
+	stream, err := scrypt.Key([]byte(password), salt, n, r, pp, skBodySize)
+	if err != nil {
+		return nil, fmt.Errorf("minisign: derive key-encryption key: %w", err)
+	}
+	for i := range stream {
+		body[i] ^= stream[i]
+	}
+	return []byte("untrusted comment: minisign encrypted secret key\n" + base64.StdEncoding.EncodeToString(raw) + "\n"), nil
 }
 
 // IsEncrypted reports whether a secret key file needs a password.

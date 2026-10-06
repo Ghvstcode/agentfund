@@ -59,6 +59,8 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...
+      # Full-cost key encryption (1 GiB scrypt) is skipped under -race; cover it here.
+      - run: go test -count=1 -run 'KeygenWithPassword|DefaultCost' ./internal/cli ./internal/minisign
 
   worker-build:
     runs-on: ubuntu-latest
