@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 236" width="1200" height="236" role="img" aria-label="The path of one task: manifest, lock, signature in the repository; claim, sandbox, pull request on the backer's machine; CI and ledger in public.">
+<rect x="0.75" y="34" width="422.5" height="150" rx="14" fill="none" stroke="#d9d9de" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="4" y="20" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#62626a" text-anchor="start">In the repository · the maintainer</text>
+<rect x="16" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="74.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">manifest</text>
+<text x="74.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">one task, as YAML</text>
+<rect x="154" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="212.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">lock</text>
+<text x="212.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">SHA-256 of each</text>
+<path d="M135 109H144" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M143 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="292" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="350.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">signature</text>
+<text x="350.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">minisign, Ed25519</text>
+<path d="M273 109H282" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M281 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="454.75" y="34" width="422.5" height="150" rx="14" fill="none" stroke="#d9d9de" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="458" y="20" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#62626a" text-anchor="start">On the backer's machine · the worker</text>
+<rect x="470" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="528.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">claim</text>
+<text x="528.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">a lease, not a lock-in</text>
+<path d="M411 109H460" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M459 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="608" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="666.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">sandbox</text>
+<text x="666.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">agent + verify</text>
+<path d="M589 109H598" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M597 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="746" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="804.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">pull request</text>
+<text x="804.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">pushed from the host</text>
+<path d="M727 109H736" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M735 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="908.75" y="34" width="284.5" height="150" rx="14" fill="none" stroke="#bd3509" stroke-width="1.5" stroke-dasharray="0"/>
+<text x="912" y="20" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#bd3509" text-anchor="start">In public · CI and the server</text>
+<rect x="924" y="66" width="116" height="86" rx="10" fill="#ffffff" stroke="#d9d9de" stroke-width="1.5"/>
+<text x="982.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#0a0a0b" text-anchor="middle">CI</text>
+<text x="982.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">passes, or it doesn't</text>
+<path d="M865 109H914" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M913 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1062" y="66" width="116" height="86" rx="10" fill="#bd350914" stroke="#bd3509" stroke-width="1.5"/>
+<text x="1120.0" y="104" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#bd3509" text-anchor="middle">ledger</text>
+<text x="1120.0" y="127" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="middle">delivered, merged</text>
+<path d="M1043 109H1052" stroke="#62626a" stroke-width="1.5" fill="none"/><path d="M1051 104l8 5-8 5" stroke="#62626a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="216" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#62626a" text-anchor="start">Everything left of CI can be re-checked from the repository and your own logs. Everything right of it links to the pull request and CI run that justify it.</text>
+</svg>

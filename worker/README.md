@@ -10,6 +10,11 @@
 The worker runs the **unmodified Claude Code CLI** as its coding agent, under the donor's own
 credentials, on the donor's own machine. See [Whose credentials, whose bill](#whose-credentials-whose-bill).
 
+New here? Run `make demo` from the repository root ([Quickstart](../docs/quickstart.md)): it drives
+this binary through a full run without spending tokens. The task-oriented guides are the
+[Donor guide](../docs/donors.md) and the [Maintainer guide](../docs/maintainers.md); this page is the
+reference for the tool itself.
+
 The normative contract lives in [`../spec`](../spec): `manifest.md` (manifests, lock, signature,
 verification chain), `protocol.md` + `openapi.yaml` (wire protocol v1).
 

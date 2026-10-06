@@ -10,3 +10,5 @@ coverage/
 worker/bin/
 .e2e/
 *.tsbuildinfo
+.demo/
+docs/assets/.raw/

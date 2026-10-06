@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 334" width="1200" height="334" role="img" aria-label="How AgentFund works: a maintainer signs task manifests; a backer's worker verifies and runs them in a sandbox; CI decides which tokens count as delivered.">
+<rect x="0.75" y="8" width="358.5" height="318" rx="14" fill="#0f0f12" stroke="#34343a" stroke-width="1.5"/>
+<circle cx="40" cy="50" r="15" fill="#f4f4f5"/>
+<text x="40" y="55" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="14" font-weight="600" fill="#0f0f12" text-anchor="middle">1</text>
+<text x="66" y="46" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">A maintainer signs the work</text>
+<text x="66" y="66" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a0a0ab" text-anchor="start">Maintainer · in the project's repo</text>
+<rect x="24" y="94" width="312" height="110" rx="8" fill="#1b1b1f"/>
+<text x="40" y="128" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">tasks/0302-csv.yaml</text>
+<text x="40" y="154" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">tasks/MANIFEST.lock</text>
+<text x="40" y="180" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">tasks/MANIFEST.lock.minisig</text>
+<text x="24" y="240" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">Each task: a prompt, the files it may write,</text>
+<text x="24" y="261" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">a verify command and a token cap.</text>
+<text x="24" y="282" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">One signature covers every task.</text>
+<path d="M372 50H401" stroke="#a0a0ab" stroke-width="1.5" fill="none"/><path d="M400 45l8 5-8 5" stroke="#a0a0ab" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="420.75" y="8" width="358.5" height="318" rx="14" fill="#0f0f12" stroke="#34343a" stroke-width="1.5"/>
+<circle cx="460" cy="50" r="15" fill="#f4f4f5"/>
+<text x="460" y="55" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="14" font-weight="600" fill="#0f0f12" text-anchor="middle">2</text>
+<text x="486" y="46" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Your worker runs it, sandboxed</text>
+<text x="486" y="66" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a0a0ab" text-anchor="start">Backer · on your machine</text>
+<rect x="444" y="94" width="312" height="110" rx="8" fill="#1b1b1f"/>
+<text x="460" y="128" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">verify signature + hashes</text>
+<text x="460" y="154" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">sandbox: no host mounts, non-root</text>
+<text x="460" y="180" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">egress: the model API, nothing else</text>
+<text x="444" y="240" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">Your own coding-agent login, your own caps.</text>
+<text x="444" y="261" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">A change outside the task's write scope</text>
+<text x="444" y="282" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">discards the whole run.</text>
+<path d="M792 50H821" stroke="#a0a0ab" stroke-width="1.5" fill="none"/><path d="M820 45l8 5-8 5" stroke="#a0a0ab" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="840.75" y="8" width="358.5" height="318" rx="14" fill="#0f0f12" stroke="#ff6a33" stroke-width="1.5"/>
+<circle cx="880" cy="50" r="15" fill="#ff6a33"/>
+<text x="880" y="55" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="14" font-weight="600" fill="#0f0f12" text-anchor="middle">3</text>
+<text x="906" y="46" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">CI decides what counts</text>
+<text x="906" y="66" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#ff6a33" text-anchor="start">Public · CI and the ledger</text>
+<rect x="864" y="94" width="312" height="110" rx="8" fill="#1b1b1f"/>
+<text x="880" y="128" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">pull request opened from a fork</text>
+<text x="880" y="154" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="600" fill="#ff6a33" text-anchor="start">CI passes   → delivered</text>
+<text x="880" y="180" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13.5" font-weight="400" fill="#f4f4f5" text-anchor="start">PR merges   → merged</text>
+<text x="864" y="240" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">The server is a scoreboard anyone can run.</text>
+<text x="864" y="261" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">It can stall work. It cannot change what</text>
+<text x="864" y="282" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#a0a0ab" text-anchor="start">runs, and failed tokens never count.</text>
+</svg>

@@ -1,21 +1,46 @@
 # Maintainer guide
 
+New here? Run the [zero-token demo](quickstart.md) first; [Concepts](concepts.md) explains the
+moving parts.
+
 AgentFund lets strangers spend their own AI inference on your project. You write small,
 signed task manifests; their workers run each one in a sandbox and open a pull request; your
 CI decides whether it counts; you decide whether it merges.
 
-The signing, the dashboard and the CI wiring take an afternoon. The hard part is
-**decomposition**: turning a project into tasks that an agent which cannot ask you anything
-can finish, in parallel with other agents it will never meet, judged by a test it cannot
-edit. Most of this guide is about that. The running example is
-[gridrs](https://github.com/agentfund/gridrs), a terminal spreadsheet in Rust split into 23
-manifests (the `agentfund` organisation name is a placeholder until launch).
+## The short version
 
-**Status at the time of writing.** Only GitHub is supported as a git host, and only the
-Claude Code runner exists. The worker's GitHub publisher (fork, push, `gh pr create`) and a
-run against the real model API inside the sandbox have not been exercised end to end; the
-pipeline is tested against a mock agent and a local repository. gridrs's manifests were
-dry-run by agents outside the sandbox (see [What dry-running taught us](#what-dry-running-taught-us)).
+```sh
+agentfund validate tasks/        # schema-check and lint every manifest
+agentfund keygen                 # once: your signing key; prints the public key
+$EDITOR agentfund.yaml           # pubkey: RWQ...
+agentfund sign tasks/            # writes tasks/MANIFEST.lock and MANIFEST.lock.minisig
+git add agentfund.yaml tasks/ && git commit -m "tasks: sign task set" && git push
+# on the instance: Maintain → Register a project, then add the CI webhook to the repository
+agentfund approve <instance>/<slug>                # be your own first donor:
+agentfund work <slug> --once --task <task-id>      # one task, in the real sandbox
+```
+
+That part takes an afternoon. The hard part is **decomposition**: turning a project into
+tasks that an agent which cannot ask you anything can finish, in parallel with other agents
+it will never meet, judged by a test it cannot edit. Most of this guide is about that. The
+running example is [gridrs](https://github.com/agentfund/gridrs), a terminal spreadsheet in
+Rust split into 23 manifests (the `agentfund` organisation name is a placeholder until launch).
+
+> [!IMPORTANT]
+> This is pre-release software. Only GitHub is supported as a git host, and only the Claude
+> Code runner exists. The full loop is proven against a mock agent and the GitHub path has
+> been proven once by hand; a real model inside the sandbox has not been run yet. The
+> [Status section of the README](../README.md#status) is kept current. gridrs's manifests
+> were dry-run by agents outside the sandbox (see
+> [What dry-running taught us](#what-dry-running-taught-us)).
+
+**Contents:** [1. Fit](#1-is-your-project-a-fit) · [2. Mechanics](#2-the-mechanics-end-to-end) ·
+[3. Decomposing](#3-how-to-decompose-a-project-into-manifests) ·
+[4. Good/bad pairs](#4-three-goodbad-pairs) · [Dry-running](#what-dry-running-taught-us) ·
+[5. Re-signing](#5-re-signing-after-edits) · [6. Keys](#6-key-management) ·
+[7. CI hardening](#7-ci-hardening-checklist) ·
+[8. Reviewing PRs](#8-reviewing-and-merging-agentfund-pull-requests) ·
+[9. Generic CI](#9-ci-that-is-not-github-actions-the-generic-adapter) · [10. FAQ](#10-faq)
 
 ## 1. Is your project a fit?
 
@@ -33,56 +58,51 @@ every behaviour should be chosen and written down by you first.
 
 ## 2. The mechanics, end to end
 
-A project repository carries three things ([spec](../spec/manifest.md)):
-`agentfund.yaml` (descriptor and your public key), `tasks/NNNN-slug.yaml` (one manifest per
-task), and `tasks/MANIFEST.lock` + `tasks/MANIFEST.lock.minisig` (hash of every manifest, and
-one signature over the list). [`examples/hello-project`](../examples/hello-project) is a
-minimal template.
+A project repository carries three things ([spec](../spec/manifest.md)).
+[`examples/hello-project`](../examples/hello-project) is a minimal template.
 
-```sh
-# 1. Write manifests (section 3), then check them.
-agentfund validate tasks/            # add --strict to fail on warnings
+| File | Holds |
+| --- | --- |
+| `agentfund.yaml` | The descriptor and your public key. |
+| `tasks/NNNN-slug.yaml` | One manifest per task. |
+| `tasks/MANIFEST.lock`, `tasks/MANIFEST.lock.minisig` | The hash of every manifest, and one signature over the list. |
 
-# 2. Generate your signing key (once). Prompts for a password.
-agentfund keygen
-#   secret key:  ~/.config/agentfund/keys/default.key
-#   public key:  RWQ...
-#   fingerprint: SHA256:...
-
-# 3. Put the public key in agentfund.yaml:   pubkey: RWQ...
-
-# 4. Sign. Writes tasks/MANIFEST.lock and tasks/MANIFEST.lock.minisig.
-agentfund sign tasks/
-
-# 5. Commit both lock files with the manifests, and push.
-git add agentfund.yaml tasks/ && git commit -m "tasks: sign task set" && git push
-```
-
-A minimal `agentfund.yaml`:
-
-```yaml
-spec_version: 1
-name: gridrs
-description: A terminal spreadsheet in Rust.
-repo_url: https://github.com/you/gridrs     # must equal the URL you register
-ci_provider: github                         # or: generic (section 9)
-pubkey: RWQ...                              # from `agentfund keygen`
-base_branch: main
-token_goal: 58500000                        # optional; validate warns if below the sum of max_tokens
-```
+1. Write manifests ([section 3](#3-how-to-decompose-a-project-into-manifests)), then check them:
+   `agentfund validate tasks/` (add `--strict` to fail on warnings).
+2. Generate your signing key, once. `agentfund keygen` prompts for a password and prints:
+   ```
+   secret key:  ~/.config/agentfund/keys/default.key
+   public key:  RWQ...
+   fingerprint: SHA256:...
+   ```
+3. Put the public key in `agentfund.yaml`:
+   ```yaml
+   spec_version: 1
+   name: gridrs
+   description: A terminal spreadsheet in Rust.
+   repo_url: https://github.com/you/gridrs     # must equal the URL you register
+   ci_provider: github                         # or: generic (section 9)
+   pubkey: RWQ...                              # from `agentfund keygen`
+   base_branch: main
+   token_goal: 58500000                        # optional; validate warns if below the sum of max_tokens
+   ```
+4. Sign: `agentfund sign tasks/` writes both lock files.
+5. Commit the lock files with the manifests, and push:
+   `git add agentfund.yaml tasks/ && git commit -m "tasks: sign task set" && git push`
 
 `validate` checks strict YAML (no anchors, aliases, merge keys, tags or multiple documents),
 the JSON Schema, that `id` equals the file name, and that `depends_on` exists and has no
 cycles. Errors block signing. Warnings do not, but each one is something a donor reading
 your manifest is right to refuse:
 
-| Warning | Trigger |
+| Finding | Trigger |
 | --- | --- |
-| `scope.write "**" is too broad` | A write glob of `**`, `*`, `**/*` and similar. |
-| `verify "..." is trivially true` | `true`, `:`, `exit 0`, a bare `echo`, or anything ending in `\|\| true` / `; true`. |
-| `prompt is only N characters` | Under 80 characters. |
-| `max_tokens N is above 5000000` | Above the default per-task cap for new projects. |
-| `timeout_minutes is not set (defaults to 60)` | Missing. |
+| Warning: `scope.write "**" is too broad` | A write glob of `**`, `*`, `**/*` and similar. |
+| Warning: `verify "..." is trivially true` | `true`, `:`, `exit 0`, a bare `echo`, or anything ending in `\|\| true` / `; true`. |
+| Warning: `prompt is only N characters` | Under 80 characters. |
+| Warning: `max_tokens N is above 5000000` | Above the default per-task cap for new projects. |
+| Warning: `timeout_minutes is not set (defaults to 60)` | Missing. |
+| Warning: `token_goal N is below the sum of max_tokens` | `agentfund.yaml` promises less than the tasks can cost. |
 | **Error:** `addresses a never-writable path` | A write glob naming `agentfund.yaml`, `tasks/` or `.github/`. |
 
 The lint catches the lazy cases. It cannot tell whether a prompt is precise or a `verify` is
@@ -90,26 +110,27 @@ independent; that is on you.
 
 ### Register the project
 
-Sign in to the instance, open **Maintain → Register a project**, and paste the repository URL.
-The wizard clones it, verifies the lock signature against the key in `agentfund.yaml`, and
-shows you the key fingerprint, the commit, the lock hash and the manifest list before
-anything is created. The key in `agentfund.yaml` at that moment becomes the **registered
-key**; from then on it changes only through a signed rotation (section 6). Publish the
-fingerprint somewhere else you control (README, website): donors compare.
+1. Sign in to the instance, open **Maintain → Register a project**, and paste the repository
+   URL. The wizard clones it, verifies the lock signature against the key in `agentfund.yaml`,
+   and shows you the key fingerprint, the commit, the lock hash and the manifest list before
+   anything is created.
+2. Confirm. The key in `agentfund.yaml` at that moment becomes the **registered key**; from
+   then on it changes only through a signed [rotation](#rotation). If the instance requires
+   approval for new projects, yours starts `pending` until an admin activates it.
+3. Publish the fingerprint somewhere else you control (README, website). Donors compare.
+4. Add the CI webhook, so the instance hears from GitHub. Every project has its own webhook
+   secret, generated at registration; the wizard and the **Maintain** page show it with the
+   payload URL, and let you rotate it (the old secret stops working immediately). In the
+   repository: Settings → Webhooks, payload URL `<instance>/v1/webhooks/ci`, content type
+   `application/json`, that secret, events *Workflow runs*, *Check suites*, *Pull requests*
+   and *Pushes*.
 
-If the instance requires approval for new projects, yours starts `pending` until an admin
-activates it.
-
-For CI confirmation the instance must hear from GitHub. Add a webhook to the repository
-(Settings → Webhooks): payload URL `<instance>/v1/webhooks/ci`, content type
-`application/json`, events *Workflow runs*, *Check suites*, *Pull requests* and *Pushes*. The
-secret is the instance's webhook secret, which is instance-wide and held by the operator, so
-you have to ask them for it. An instance run with `CI_POLL=true` polls GitHub instead and
-needs no webhook. See [self-hosting](self-hosting.md#ci-confirmation).
+An instance run with `CI_POLL=true` polls GitHub instead and needs no webhook. Operator side:
+[self-hosting](self-hosting.md).
 
 ### What happens on each push
 
-For every project the instance keeps a clone and re-indexes on creation, on a push webhook to
+For every project the instance keeps a clone. It re-indexes on creation, on a push webhook to
 the base branch, on a timer (default every 60 s), and when you press **Re-pin**:
 
 1. It resolves the target commit: the head of `base_branch` when **Follow** is on.
@@ -120,9 +141,7 @@ the base branch, on a timer (default every 60 s), and when you press **Re-pin**:
 4. On failure the pin stays where it was, the dashboard shows *The latest commit was not
    indexed* with the reason, and donors keep working from the last good pin.
 
-Dashboard controls:
-
-| Control | Effect |
+| Dashboard control | Effect |
 | --- | --- |
 | **Follow `main`** (on by default) | The pin advances to each validly signed head. Needed so tasks with dependencies are claimed against a commit that contains the merged work. |
 | **Re-pin** | Index now. Empty pins the branch head; a 40-hex commit pins that commit. |
@@ -131,12 +150,13 @@ Dashboard controls:
 
 **Every merge moves the pin, and donors' approvals are per commit.** By default a donor's
 worker runs only the commit they approved and its ancestors. After your first merge the pin
-is a new commit; their worker does not claim tasks at it until they re-approve, unless they
-enabled `follow_unchanged_lock` (accept newer commits whose `MANIFEST.lock` is byte-identical;
-`agentfund approve` asks donors about it). Tell
-your donors this in your README, and avoid touching `tasks/` unless you mean to: a merge that
-leaves the lock byte-identical costs opted-in donors nothing, while any lock change sends
-every donor back to `approve`.
+is a new commit, and their worker claims nothing at it until they re-approve. The exception
+is `follow_unchanged_lock`, which `agentfund approve` asks donors about: it accepts newer
+commits whose `MANIFEST.lock` is byte-identical. So:
+
+- Tell your donors this in your README.
+- Do not touch `tasks/` unless you mean to. A merge that leaves the lock byte-identical costs
+  opted-in donors nothing; any lock change sends every donor back to `approve`.
 
 ## 3. How to decompose a project into manifests
 
@@ -159,9 +179,11 @@ the module list is pre-declared; the function library dispatches through a froze
 
 Tasks in the same layer run at the same time, on different machines, from the same base
 commit. If two of them can write the same file, the second pull request conflicts and that
-donor's tokens are wasted. So every source file is owned by exactly one task, `scope.write`
-is a list of literal paths (gridrs uses no globs at all), and a script
-(`ci/scope-audit.sh collisions`) proves no two tasks share a writable path. Typical scope:
+donor's tokens are wasted. So in gridrs:
+
+- every source file is owned by exactly one task;
+- `scope.write` is a list of literal paths, with no globs at all;
+- a script (`ci/scope-audit.sh collisions`) proves no two tasks share a writable path.
 
 ```yaml
 scope:
@@ -185,9 +207,9 @@ layer 4   app
 layer 5   cli
 ```
 
-Width comes from interfaces that do not need each other's implementations: the evaluator
-calls functions through a trait, so its test brings its own; the renderer draws anything
-implementing `GridSource`, so it does not need the sheet; the reference rewriter works on
+Width comes from interfaces that do not need each other's implementations. The evaluator
+calls functions through a trait, so its test brings its own. The renderer draws anything
+implementing `GridSource`, so it does not need the sheet. The reference rewriter works on
 hand-built trees, so it does not need the parser. If task B only needs A's *signature*, B
 does not depend on A.
 
@@ -217,6 +239,11 @@ scopes (`acceptance/test_0302_csv.py`, `acceptance/0302_csv_test.go` as its own 
 marker directory, and a short script that loops over markers and runs
 `python3 -m unittest acceptance.test_<id>` or `go test ./acceptance/<id>/...` for each.
 
+Markers are not required either. Any `verify` that fails before and passes after, cannot be
+satisfied by editing files in scope, and runs offline in the sandbox image will do. The
+marker pattern is what lets one shared gate script serve every task and every later pull
+request.
+
 ### `verify` must fail first, and must not be satisfiable by weakening tests
 
 Two checks before you sign, for every task:
@@ -233,41 +260,31 @@ are not the judge.
 
 What `verify` and the agent actually get:
 
-- **No network** except the model API. By default the sandbox can reach `api.anthropic.com`
-  and nothing else: no package registry and, unless the donor opts in, not even the git
-  host. `cargo fetch`, `npm install`, `pip install`, `go mod download` all fail. Vendor your
-  dependencies into the repository or stay standard-library-only, and make the commands
-  offline-safe (`cargo --offline --locked`, `GOFLAGS=-mod=vendor`).
-- **No `.git`, no `tasks/`, no `agentfund.yaml`.** They are removed from the working tree.
-  `verify` must not call `git`, and scripts that read manifests must tolerate their absence
-  (gridrs's `ci/lock-check.sh` skips when `tasks/` has no manifests). Say everything the
-  agent needs in the prompt; it cannot read the manifest file.
-- **A read-only tree.** Only paths matching `scope.write` are writable. Build output cannot
-  go into the repository directory (`./target`, `./node_modules/.cache`, `__pycache__`); it
-  must go to `/tmp` or `$HOME`, both tmpfs. The reference image sets `CARGO_TARGET_DIR`,
-  `GOCACHE`, `PYTHONPYCACHEPREFIX` and the npm cache accordingly.
-- **The reference sandbox image**, not your CI image: Debian with Node 22, Python 3, Go,
-  Rust (stable, *minimal* profile: no clippy, no rustfmt), a C toolchain, `git`, `jq`. If
-  `verify` needs a tool that is not there, it fails for every donor. gridrs's gate runs
-  clippy only if it is installed, and only deny-by-default lints fail it, so a sandbox
-  without clippy cannot produce work that CI with clippy then rejects over style.
-- **`scope.read`** (optional) removes everything matching neither it nor `scope.write` from
-  the sandbox. Unset means the whole repository is readable.
-- Unprivileged user, read-only root file system, 2 CPUs / 4 GB / 512 processes by default.
+| In the sandbox | Consequence for you |
+| --- | --- |
+| **No network** except the model API. By default it reaches `api.anthropic.com` and nothing else: no package registry and, unless the donor opts in, not even the git host. | `cargo fetch`, `npm install`, `pip install`, `go mod download` all fail. Vendor your dependencies or stay standard-library-only, and make the commands offline-safe (`cargo --offline --locked`, `GOFLAGS=-mod=vendor`). |
+| **No `.git`, no `tasks/`, no `agentfund.yaml`.** They are removed from the working tree. | `verify` must not call `git`. Scripts that read manifests must tolerate their absence (gridrs's `ci/lock-check.sh` skips when `tasks/` has no manifests). Say everything the agent needs in the prompt: it gets the `prompt` text verbatim on standard input and cannot read the manifest file. |
+| **A read-only tree.** Only paths matching `scope.write` are writable. | Build output cannot go into the repository directory (`./target`, `./node_modules/.cache`, `__pycache__`); it must go to `/tmp` or `$HOME`, both tmpfs. The reference image sets `CARGO_TARGET_DIR`, `GOCACHE`, `PYTHONPYCACHEPREFIX` and the npm cache accordingly. |
+| **The reference sandbox image**, not your CI image: Debian with Node 22, Python 3, Go, Rust (stable, *minimal* profile: no clippy, no rustfmt), a C toolchain, `git`, `jq`. | If `verify` needs a tool that is not there, it fails for every donor. gridrs's gate runs clippy only if it is installed, and only deny-by-default lints fail it, so a sandbox without clippy cannot produce work that CI with clippy then rejects over style. |
+| **`scope.read`** (optional). | Removes everything matching neither it nor `scope.write` from the sandbox. Unset means the whole repository is readable. |
+| **Limits.** Unprivileged user, read-only root file system, 2 CPUs / 4 GB / 512 processes by default. | Donors can change the resource numbers. |
 
 ### Size `max_tokens` and `timeout_minutes`
 
 `max_tokens` counts input (including cache reads and cache writes) plus output over every
-model call; an agent that reads a lot burns it quickly. The sandbox is killed at the cap and
-the run is reported `budget_exceeded`: the donor paid, nothing was delivered. Too small is
-worse than too large. `timeout_minutes` covers agent plus `verify`.
+model call; an agent that reads a lot burns it quickly. `timeout_minutes` covers agent plus
+`verify`.
+
+> [!WARNING]
+> The sandbox is killed at the cap and the run is reported `budget_exceeded`: the donor paid,
+> nothing was delivered. Too small is worse than too large.
 
 gridrs uses 1.5M to 4M tokens and 20 to 45 minutes: small enough that a failed run is a
 shrug, large enough to be a real unit of work (a parser, a file format, a renderer). These
 figures are estimates; no gridrs task has yet been run by a real worker.
 
 Until **3 tasks have merged**, a project is `new`, and three limits apply. Plan layer 0
-around them:
+around them. They are instance and donor settings; the numbers are the defaults.
 
 | Limit | Default | Consequence |
 | --- | --- | --- |
@@ -275,13 +292,14 @@ around them:
 | Server: per UTC day | 25,000,000 (sum of `max_tokens` of claims granted) | gridrs's layer 0 is 18.5M and layer 1 is 23M, so the first two layers take two days on a fresh instance. |
 | Donor: `new_project_max_tokens_per_task` | 5,000,000 in the default donor config (the same as the server's per-task cap) | A donor may lower it; the worker uses the minimum of this, the donor's `max_tokens_per_task` and the server's cap. Smaller early tasks are claimable by more donors. |
 
-These are instance settings and donor settings; the numbers are the defaults.
-
 ### Never-writable paths
 
 Regardless of `scope.write`, no task can change `agentfund.yaml`, `tasks/**`, `.github/**` or
-anything under `.git`. A run that tries is discarded. The same goes for symlinks, hard
-links, files over 5 MB and change sets over 50 MB.
+anything under `.git`. `.github/**` is the judge and the other two are the rules: a task that
+could edit either could approve itself, or change what the next donor's agent is told after
+that donor reviewed it. The worker discards a run that tries, and `validate` rejects a
+manifest that asks. If CI needs to change, change it yourself, on `main`. Also discarded:
+symlinks, hard links, files over 5 MB and change sets over 50 MB.
 
 ## 4. Three good/bad pairs
 
@@ -296,7 +314,12 @@ prompt: |
   absolute references). Add tests.
 ```
 
-Good (gridrs `tasks/0001-cell-addresses.yaml`, trimmed; the original is 94 lines):
+Good. The length is edge cases, not adjectives: every sentence is there because without it
+two implementers would have disagreed. It also says what exists, what must not be touched,
+how the result is judged, and which side wins when prompt and test disagree.
+
+<details>
+<summary>gridrs <code>tasks/0001-cell-addresses.yaml</code>, trimmed (the original is 94 lines)</summary>
 
 ```yaml
 spec_version: 1
@@ -346,9 +369,7 @@ timeout_minutes: 20
 depends_on: []
 ```
 
-The length is edge cases, not adjectives. Every sentence is there because without it two
-implementers would have disagreed. It also says what exists, what must not be touched, how
-the result is judged, and which side wins when prompt and test disagree.
+</details>
 
 ### An over-broad scope vs a narrow one
 
@@ -360,17 +381,10 @@ scope:
   write: ["**"]            # or the subtler: ["src/**", "tests/**", "Cargo.toml"]
 ```
 
-Good:
-
-```yaml
-scope:
-  write:
-    - src/io/csv.rs
-    - ci/done/0302-csv
-```
-
-If a task seems to need a wide scope, the skeleton is missing something. Add the stub, the
-shared type or the `mod` line yourself, on `main`, and narrow the task.
+Good: the two literal paths shown under
+[One task, one or two files](#one-task-one-or-two-files). If a task seems to need a wide
+scope, the skeleton is missing something. Add the stub, the shared type or the `mod` line
+yourself, on `main`, and narrow the task.
 
 ### A self-satisfiable verify vs an independent one
 
@@ -386,7 +400,7 @@ verify: python3 -m unittest discover -s tests -p "test_slugify.py"
 ```
 
 This is the shape of the manifests in `examples/hello-project`, which is a format template,
-not a decomposition example. Note that `agentfund validate` reports no warning for it.
+not a decomposition example. `agentfund validate` reports no warning for it.
 
 Good. The test already exists, fails on the untouched repository, and is outside the scope:
 
@@ -400,40 +414,31 @@ verify: python3 -m unittest acceptance.test_slugify
 
 Before signing, every gridrs task was implemented once by a separate agent that was given
 **only the manifest prompt** and the repository. The log (`dev/dry-run-fix-log.md` in gridrs)
-records what that forced. Three kinds of defect, none of which `validate` can see:
+records three kinds of defect, none of which `validate` can see:
 
-**Prompts silent on edge cases.** Four prompts (`0002`, `0104`, `0203`, `0204`) said nothing
-about cases such as rounding non-finite input, the order in which call arguments are
-evaluated, or which bound `INDEX` checks first. The implementers guessed, and all the guesses
-happened to pass. The app task left Enter/Tab at the last row and the End key unspecified.
-Each got one sentence in the prompt and, where it mattered, an assertion in the test. A
-guess that passes today is a disagreement between two donors' agents tomorrow.
-
-**A prompt that was wrong.** `0402-sheet` told the implementer to register a formula's
-precedents with the dependency graph and evaluate whatever the recalculation plan returned.
-A formula with no references (`=1+2`, `=1/0`) has no precedents, so the graph never planned
-it and its value stayed empty. Two acceptance tests caught it, at the cost of one failed
-iteration; with a real donor that is a failed run someone paid for. The prompt now says
-reference-free formulas are evaluated on entry, and there is a dedicated test.
-
-**Tests looser than the prompt.** In seven tasks the prompt stated a rule that the acceptance
-test never exercised (a lone CR after a closing quote in CSV, a paste clipped at the last
-row, `:B12 x` not being a goto). Every existing implementation passed once the assertions
-were added, but a lazier one would have been "delivered" while wrong. Where prompt and test
-differ, the test is the real specification, so make it say everything the prompt does.
+| Defect | What happened | Fix |
+| --- | --- | --- |
+| **Prompts silent on edge cases** | Four prompts (`0002`, `0104`, `0203`, `0204`) said nothing about cases such as rounding non-finite input, the order in which call arguments are evaluated, or which bound `INDEX` checks first. The implementers guessed, and all the guesses happened to pass. The app task left Enter/Tab at the last row and the End key unspecified. | One sentence each in the prompt and, where it mattered, an assertion in the test. A guess that passes today is a disagreement between two donors' agents tomorrow. |
+| **A prompt that was wrong** | `0402-sheet` told the implementer to register a formula's precedents with the dependency graph and evaluate whatever the recalculation plan returned. A formula with no references (`=1+2`, `=1/0`) has no precedents, so the graph never planned it and its value stayed empty. Two acceptance tests caught it, at the cost of one failed iteration; with a real donor that is a failed run someone paid for. | The prompt now says reference-free formulas are evaluated on entry, and there is a dedicated test. |
+| **Tests looser than the prompt** | In seven tasks the prompt stated a rule that the acceptance test never exercised (a lone CR after a closing quote in CSV, a paste clipped at the last row, `:B12 x` not being a goto). Every existing implementation passed once the assertions were added, but a lazier one would have been "delivered" while wrong. | Where prompt and test differ, the test is the real specification, so make it say everything the prompt does. |
 
 A process note from the same log: two first attempts were stopped because the agent wrote
 files and ran the check in one compound shell command. Not a manifest problem, but a reason
 to keep the "Finishing" steps as separate, plain commands.
 
 **The advice: dry-run every manifest with an agent that sees only the prompt, before you
-sign.** Give it a fresh checkout, the prompt text and nothing else: no issue tracker, no
-chat with you, no reference implementation. Then run `verify` on the result and diff the
-changed paths against `scope.write`. Read what it asks, what it guesses and where it fails,
-and fix the manifest, not the agent. Be clear about what this does not test: the gridrs
-dry-runs were not inside the AgentFund sandbox, so offline behaviour, the read-only tree and
-the image's toolchain still need a real worker run (`agentfund work <project> --once --task
-<id>` on your own account).
+sign.**
+
+1. Give it a fresh checkout, the prompt text and nothing else: no issue tracker, no chat with
+   you, no reference implementation.
+2. Run `verify` on the result and diff the changed paths against `scope.write`.
+3. Read what it asks, what it guesses and where it fails. Fix the manifest, not the agent.
+
+This does not test everything. The gridrs dry-runs were not inside the AgentFund sandbox, so
+offline behaviour, the read-only tree and the image's toolchain still need a real worker run.
+Do one per manifest shape, under your own credentials, before asking anyone else:
+`agentfund approve`, then `agentfund work <project> --once --task <id>`
+([donor guide](donors.md)).
 
 ## 5. Re-signing after edits
 
@@ -445,27 +450,36 @@ agentfund validate tasks/ && agentfund sign tasks/
 git add tasks/ && git commit -m "tasks: ..." && git push
 ```
 
-Until you do, the instance refuses to index the new head and stays on the old pin. A cheap
-CI check that the lock matches the manifests (gridrs: `ci/lock-check.sh`, hashes only)
-catches "edited and forgot to sign". Do not verify the *signature* in CI as a trust
-decision: CI runs code from the pull request.
-
-For donors, a changed lock means `approve` again, reading the new task set, unless they
-opted into `auto_follow_signed_updates`. `follow_unchanged_lock` does not help them here; the
-lock changed. Batch manifest edits, and say what changed.
+- Until you do, the instance refuses to index the new head and stays on the old pin.
+- A cheap CI check that the lock matches the manifests (gridrs: `ci/lock-check.sh`, hashes
+  only) catches "edited and forgot to sign". Do not verify the *signature* in CI as a trust
+  decision: CI runs code from the pull request.
+- For donors, a changed lock means `approve` again, reading the new task set, unless they
+  opted into `auto_follow_signed_updates`. `follow_unchanged_lock` does not help them here;
+  the lock changed. Batch manifest edits, and say what changed.
 
 ## 6. Key management
 
 - **Password-protect the key.** `keygen` encrypts the secret key (scrypt; the file is
   compatible with stock `minisign`) unless you pass `--no-password`. The password comes from
-  a prompt or `$AGENTFUND_KEY_PASSWORD`. Use `--name` and `--out` for more than one key;
-  `sign` takes `--key PATH` or `$AGENTFUND_KEY`.
-- **Back it up offline.** `~/.config/agentfund/keys/default.key` is the only copy. If you lose
-  it you cannot sign, and you cannot rotate either, because rotation is signed by the old
-  key. The only way out is a new project registration and every donor approving a new key.
+  a prompt or `$AGENTFUND_KEY_PASSWORD`.
 - **Never put it in CI** or in the repository. Signing is something you do at your desk.
 - Anyone can check your signature with the stock tool:
   `minisign -Vm tasks/MANIFEST.lock -P "$(yq .pubkey agentfund.yaml)"`.
+
+> [!WARNING]
+> Back the key up offline. `~/.config/agentfund/keys/default.key` is the only copy. If you
+> lose it you cannot sign, and you cannot rotate either, because rotation is signed by the old
+> key. The only way out is a new project registration and every donor approving a new key.
+
+| Flag or variable | Effect |
+| --- | --- |
+| `keygen --name NAME` | Key name and file stem (default `default`), for more than one key. |
+| `keygen --out DIR` | Directory for the key files (default `~/.config/agentfund/keys`). |
+| `keygen --no-password` | Write the secret key unencrypted. |
+| `keygen --force` | Overwrite an existing key of the same name. |
+| `sign --key PATH`, `$AGENTFUND_KEY` | Secret key to sign with. Default: the only key in the keys directory. |
+| `sign --rotate-from OLDKEY` | Append a rotation link from the old key to `--key`. |
 
 ### Rotation
 
@@ -499,14 +513,12 @@ The worker's scope check limits *where* the change is, not what it does.
 
 - [ ] **Trigger on `pull_request`, never `pull_request_target`.** For `pull_request` from a
   fork, "the `GITHUB_TOKEN` has read-only permissions" and, apart from that token, "secrets
-  are not passed to the runner". `pull_request_target` runs in the context of the base
-  repository with its secrets; GitHub warns that running untrusted code on it "may lead to
-  security vulnerabilities". The same goes for `workflow_run` workflows that check out PR
-  code. ([events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull-request-events-for-forked-repositories),
+  are not passed to the runner". `pull_request_target` runs in the base repository's context
+  with its secrets; GitHub warns that untrusted code there "may lead to security
+  vulnerabilities". Same for `workflow_run` workflows that check out PR code. ([events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull-request-events-for-forked-repositories),
   [secure use](https://docs.github.com/en/actions/reference/security/secure-use))
 - [ ] **`permissions: contents: read`** at the top of the workflow, and nothing else. Set the
-  repository default to read-only as well (Settings → Actions → General → Workflow
-  permissions).
+  repository default to read-only too (Settings → Actions → General → Workflow permissions).
 - [ ] **No secrets in any job that runs PR code.** No deploy keys, no registry tokens, no
   self-hosted runners (GitHub: they "can be persistently compromised by untrusted code").
 - [ ] **Pin actions by full commit SHA**, e.g.
@@ -520,10 +532,9 @@ The worker's scope check limits *where* the change is, not what it does.
     cancel-in-progress: true
   ```
 - [ ] **Require approval for fork workflow runs.** Settings → Actions → General → *Approval
-  for running fork pull request workflows from contributors*. The default requires approval
-  for first-time contributors; *Require approval for all external contributors* is the
-  strict choice. Consequence: a donor's tokens stay *reported* until you click approve and
-  CI finishes, so check the queue.
+  for running fork pull request workflows from contributors*. The default covers first-time
+  contributors; *Require approval for all external contributors* is the strict choice. A
+  donor's tokens stay *reported* until you click approve and CI finishes, so check the queue.
   ([docs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks))
 - [ ] **Branch protection on the base branch:** require a pull request with at least one
   human review, and require your CI check to pass, before merging.
@@ -558,15 +569,14 @@ AgentFund-Manifest-SHA256: <sha256 of tasks/0302-csv.yaml as signed>
 
 The PR body repeats the task, claim, **manifest SHA-256**, base commit, tokens in/out, the
 runner version, the verify command, the list of changed paths, and a pointer to the run's
-report on the instance, where the worker's log digest is published. Check before reading the diff:
+report on the instance, where the worker's log digest is published. Before reading the diff:
 
-```sh
-shasum -a 256 tasks/0302-csv.yaml      # must equal the Manifest SHA-256 in the PR body
-```
+1. Check the manifest hash. It must equal the Manifest SHA-256 in the PR body:
+   `shasum -a 256 tasks/0302-csv.yaml`
+2. Check that the changed paths are inside that manifest's `scope.write`.
 
-and that the changed paths are inside that manifest's `scope.write`. An honest worker
-enforces both, but the pull request is just a pull request: anyone can open one that looks
-like this. Your CI and your review are the checks that matter.
+An honest worker enforces both, but the pull request is just a pull request: anyone can open
+one that looks like this. Your CI and your review are the checks that matter.
 
 | State | Meaning | Evidence |
 | --- | --- | --- |
@@ -574,24 +584,22 @@ like this. Your CI and your review are the checks that matter.
 | **delivered** | Every completed CI run for the PR's head commit succeeded. | GitHub (webhook or poll). |
 | **merged** | You merged the PR. The task is done and its dependents become claimable. | GitHub. |
 
-- **CI fails:** the report is marked `ci_failed`, the task reopens, and a new attempt is a
-  new claim and a new pull request. Close the old one.
-- **You close without merging:** the task reopens for another donor. If CI had already
-  passed, those tokens stay delivered (CI did pass) and are never counted as merged.
-- **You push a fix-up commit to the PR and merge:** it still counts as merged; merges are
-  matched on branch and PR URL, not head SHA.
-- **A task that keeps producing bad PRs** is a manifest problem. Pause, fix the prompt or the
-  test, re-sign.
+| When | What happens |
+| --- | --- |
+| CI fails | The report is marked `ci_failed`, the task reopens, and a new attempt is a new claim and a new pull request. Close the old one. |
+| You close without merging | The task reopens for another donor. If CI had already passed, those tokens stay delivered (CI did pass) and are never counted as merged. |
+| You push a fix-up commit to the PR and merge | It still counts as merged; merges are matched on branch and PR URL, not head SHA. |
+| A task keeps producing bad PRs | A manifest problem. Pause, fix the prompt or the test, re-sign. |
 
 ## 9. CI that is not GitHub Actions: the generic adapter
 
 Set `ci_provider: generic` in `agentfund.yaml` and have your CI post one signed JSON document
 per finished run to the instance. The body is a `GenericCiResult`; the header carries the
-HMAC-SHA256 of the raw body under the instance webhook secret:
+HMAC-SHA256 of the raw body under the project's webhook secret:
 
 ```sh
 body='{"provider":"generic","repo_url":"https://github.com/you/proj","branch":"agentfund/0001-x-ab12cd34","head_sha":"<40 hex>","conclusion":"success","run_url":"https://ci.example/runs/42"}'
-sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
+sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$PROJECT_WEBHOOK_SECRET" | sed 's/^.* //')
 curl -X POST "$BASE_URL/v1/webhooks/ci" \
   -H "X-AgentFund-Signature: sha256=$sig" \
   -H 'content-type: application/json' \
@@ -602,39 +610,37 @@ curl -X POST "$BASE_URL/v1/webhooks/ci" \
 | Field | Required | Value |
 | --- | --- | --- |
 | `provider` | yes | `"generic"` |
-| `repo_url` | yes | The project repository (as registered). |
+| `repo_url` | yes | The project repository (as registered). It selects the project whose secret is checked. |
 | `branch`, `head_sha` | yes | The PR's branch and its 40-hex head commit. They must equal what the worker reported. |
 | `conclusion` | yes | `success`, `failure` or `cancelled`. |
 | `run_url` | no | Shown in the ledger as the evidence link. |
 | `merged` / `closed` | no | `true` when the PR merged / was closed unmerged. |
 
-Things to know before choosing it:
+Before choosing it:
 
 - The repository must still be on **github.com**: the worker can only publish there. The
   generic adapter replaces GitHub Actions as the judge, not GitHub as the host.
 - A `generic` project ignores GitHub webhooks and is not polled. Your CI must also report
   merges (`"merged": true`) or tasks never reach *merged* and dependents never open; and
   re-indexing after a push relies on the timer or the **Re-pin** button.
-- The signing job holds the instance webhook secret, so it must not run PR-controlled code.
-  Run the tests in one job and sign in a separate, trusted one. The secret is instance-wide.
+- The signing job holds the project's webhook secret, so it must not run PR-controlled code.
+  Run the tests in one job and sign in a separate, trusted one.
 - Sign the exact bytes you send. `printf '%s'` and `-d "$body"` keep them identical.
 
 ## 10. FAQ
 
-**Why can't tasks edit CI or manifests?** `.github/**` is the judge and `tasks/**` plus
-`agentfund.yaml` are the rules. A task that could edit either could approve itself, or change
-what the next donor's agent is told after that donor reviewed it. The worker discards any
-run that touches them, and `validate` rejects a manifest that asks. If CI needs to change,
-change it yourself, on `main`.
+General questions are in the [FAQ](faq.md). These three are maintainer-only.
 
-**A task keeps failing. What do I do?** Look at how. `budget_exceeded` or `timeout`: the task
-is too big or the prompt sends the agent exploring; split it or raise the cap. `failed`
-(verify): the ledger shows the failed report but not why (the reason is in the donor's local
-log), so reproduce it with an agent that sees only the prompt; usually the prompt and the test disagree, or `verify` needs something the
-sandbox does not have (network, a tool, a writable build directory). `verification_failed`
-with a scope violation: the prompt implies changes outside `scope.write`; add the missing
-stub yourself. Each donor's worker waits 24 hours by default before retrying a task that
-failed on that machine, so a broken task quietly starves; fix and re-sign rather than wait.
+**A task keeps failing. What do I do?** Look at how:
+
+| Outcome | Likely cause | Do |
+| --- | --- | --- |
+| `budget_exceeded` or `timeout` | The task is too big, or the prompt sends the agent exploring. | Split it or raise the cap. |
+| `failed` (verify) | The prompt and the test disagree, or `verify` needs something the sandbox does not have (network, a tool, a writable build directory). | The ledger shows the failed report but not why (the reason is in the donor's local log), so reproduce it with an agent that sees only the prompt. |
+| `verification_failed` with a scope violation | The prompt implies changes outside `scope.write`. | Add the missing stub yourself. |
+
+Each donor's worker waits 24 hours by default before retrying a task that failed on that
+machine, so a broken task quietly starves. Fix and re-sign rather than wait.
 
 **Can I change a task mid-flight?** Yes: edit, `sign`, push. If the task is open it is
 updated in place. If it is claimed, that claim continues against the commit it was granted
@@ -646,15 +652,3 @@ reopened by an edit. Donors must re-approve the new lock.
 `failed`; a delivered or merged one is untouched in the ledger. A manifest that reappears
 later reopens. You do not need to delete manifests of merged tasks; leaving them keeps the
 lock stable.
-
-**Do I have to use the marker mechanism?** No. Any `verify` that fails before and passes
-after, cannot be satisfied by editing files in scope, and runs offline in the sandbox image
-will do. The marker pattern is what makes one shared gate script serve every task and every
-later pull request.
-
-**Will the agent see my manifest?** Only the `prompt` text, verbatim, on standard input. The
-manifest file itself is removed from the sandbox.
-
-**Can I run my own tasks?** Yes, and you should, once per manifest shape, before asking
-anyone else: `agentfund approve`, then `agentfund work <project> --once --task <id>` under
-your own credentials. See the [donor guide](donors.md).

@@ -4,6 +4,10 @@ AgentFund asks people to run other people's prompts on their own machine, under 
 subscription. This document says exactly what protects them, what does not, and how to report
 a problem.
 
+Shorter versions of the same material: the trust table in the
+[README](../README.md#why-you-can-trust-it), the walk-through in [Concepts](concepts.md), and
+the questions in the [FAQ](faq.md). This is the full text.
+
 ## Reporting a vulnerability
 
 Please report privately, not in a public issue:

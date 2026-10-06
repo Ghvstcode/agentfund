@@ -7,6 +7,10 @@ It is a static single-page app (React, Vite, TypeScript) that talks **only** to 
 described in [`spec/openapi.yaml`](../spec/openapi.yaml). There are no private endpoints, so
 anyone can host this UI, or a fork of it, against any AgentFund instance.
 
+Part of [AgentFund](../README.md). The API it talks to is implemented by [`server/`](../server/README.md);
+`make demo` from the repository root shows the two together with a real worker run
+([Quickstart](../docs/quickstart.md)).
+
 ## Develop
 
 ```sh

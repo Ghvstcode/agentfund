@@ -1,5 +1,9 @@
 # Self-hosting an AgentFund instance
 
+New here? `make demo` runs a throwaway instance with a sample project and a worker in one
+command ([Quickstart](quickstart.md)); [Concepts](concepts.md) explains what the server is and
+is not trusted with. This page is about running one for real.
+
 One container serves the API (`/v1`), the live stream, the web UI and the discovery routes
 (`/sitemap.xml`, `/feed.atom`, `/og/<slug>.png`). It needs Postgres 16+ and a directory for
 git clones. Nothing else: the claim queue is Postgres row locks, live fan-out is Postgres

@@ -16,6 +16,10 @@ to an `--internal` Docker network. This proxy is attached to that network and
 to the default bridge. The sandbox is given `HTTPS_PROXY=http://<proxy>:3128`;
 anything that is not an HTTPS tunnel to an allowlisted `host:port` is refused.
 
+Part of [AgentFund](../../README.md). The container it guards is the
+[sandbox image](../sandbox/README.md); what the pair does and does not protect against is in
+[Security](../../docs/SECURITY.md).
+
 Rust, one runtime dependency (`tokio`), `#![forbid(unsafe_code)]`, static musl
 binary in a `scratch` image (about 0.4 MB), runs as uid 65532.
 
