@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0b0c" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Static defaults for standalone hosting. A server that renders per-route tags replaces
+         the marker below with its own title, description, OpenGraph and JSON-LD. -->
+    <title>AgentFund · Fund open source with inference</title>
+    <meta
+      name="description"
+      content="Fund open-source projects by donating AI inference. Donors run signed, publicly auditable tasks on their own machines; every token is metered and every result is public."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AgentFund · Fund open source with inference" />
+    <meta
+      property="og:description"
+      content="Donors run signed, publicly auditable tasks on their own machines. Every token is metered and every result is public."
+    />
+    <meta name="twitter:card" content="summary" />
+    <!--app-head-->
+    <script>
+      // Apply a saved theme before first paint so the page never flashes the other palette.
+      try {
+        var saved = localStorage.getItem('agentfund.theme');
+        if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+      } catch (error) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>This interface needs JavaScript. The same data is available as JSON under /v1/.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
