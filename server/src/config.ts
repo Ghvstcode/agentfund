@@ -197,7 +197,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPoolMax: e.DB_POOL_MAX,
     logLevel: e.LOG_LEVEL,
     sourceUrl: e.SOURCE_URL ?? "https://github.com/agentfund/agentfund",
-    installCommand: e.INSTALL_COMMAND ?? "curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh",
+    installCommand: e.INSTALL_COMMAND ?? "git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images",
     docsUrl: e.DOCS_URL,
     warnings,
   };

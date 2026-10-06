@@ -82,7 +82,7 @@ describe("every operation, validated against the document", () => {
     // meta
     const meta = (await t.call<Schemas["Meta"]>("getMeta")).body;
     expect(meta).toMatchObject({ app: "AgentFund", base_url: "http://af.test", protocol_versions: ["v1"], spec_versions: [1] });
-    expect(meta.links).toEqual({ source_url: "https://github.com/agentfund/agentfund", install_command: "curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh" });
+    expect(meta.links).toEqual({ source_url: "https://github.com/agentfund/agentfund", install_command: "git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images" });
     expect(meta.instance_pubkey).toMatch(/^[A-Za-z0-9+/]{56}$/);
     expect(Buffer.from(meta.instance_pubkey!, "base64").subarray(0, 2).toString()).toBe("Ed");
     await t.call("getStats");
