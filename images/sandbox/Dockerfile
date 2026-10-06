@@ -3,7 +3,8 @@
 # AgentFund sandbox image: where the coding agent and the manifest's `verify`
 # command run. Polyglot on purpose (Python, Node, Rust, Go, C toolchain) so
 # common verify commands work without fetching toolchains at run time — the
-# sandbox can reach nothing but the model API and the project's git host.
+# sandbox can reach nothing but the model API (the project's git host only when
+# the donor sets sandbox.allow_git_host; other hosts only via extra_allow_hosts).
 #
 # Build:   docker build -t agentfund/sandbox:dev images/sandbox
 # Pin:     reference the result by digest in config.yaml

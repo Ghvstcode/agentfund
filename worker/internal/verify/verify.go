@@ -291,7 +291,42 @@ func taskFrom(ctx context.Context, lr *LockResult, taskID, contentHash string) (
 }
 
 func approve(ctx context.Context, req Request, lr *LockResult) (Basis, error) {
-	a := req.Approval
+	return approval(ctx, req.RepoDir, req.Commit, req.Approval, req.Policy, func() string { return lr.LockSHA256 })
+}
+
+// Approved runs only step 4 for a commit: is it covered by the donor's
+// approval (the approved commit, an ancestor, or a follow policy)? It is used
+// before claiming, so that a project whose pin moved past the approval is
+// skipped instead of claimed and refused. It does not check signatures — the
+// full chain still runs against the claim.
+func Approved(ctx context.Context, repoDir, commit string, a Approval, pol Policy) (Basis, error) {
+	if !gitx.IsFullSHA1(commit) || !gitx.CommitExists(ctx, repoDir, commit) {
+		return "", fail(StepFetch, nil, "commit %q does not exist in the repository", commit)
+	}
+	return approval(ctx, repoDir, commit, a, pol, func() string {
+		entries, err := gitx.LsTree(ctx, repoDir, commit, lockfile.Dir, false)
+		if err != nil {
+			return ""
+		}
+		for _, e := range entries {
+			if e.Path == lockfile.Path && e.IsRegular() {
+				if raw, err := gitx.ReadBlob(ctx, repoDir, e.OID); err == nil {
+					return lockfile.SHA256Hex(raw)
+				}
+			}
+		}
+		return ""
+	})
+}
+
+// IsApprovalError reports whether err is a step-4 refusal.
+func IsApprovalError(err error) bool {
+	var ve *Error
+	return errors.As(err, &ve) && ve.Step == StepApproval
+}
+
+func approval(ctx context.Context, repoDir, commit string, a Approval, pol Policy, lockSHA func() string) (Basis, error) {
+	req := Request{RepoDir: repoDir, Commit: commit, Policy: pol}
 	if !gitx.IsFullSHA1(a.ApprovedCommit) {
 		return "", fail(StepApproval, nil, "approval record has no valid approved commit; run `approve` again")
 	}
@@ -305,7 +340,7 @@ func approve(ctx context.Context, req Request, lr *LockResult) (Basis, error) {
 	if anc {
 		return BasisAncestor, nil
 	}
-	if req.Policy.FollowUnchangedLock && a.ApprovedLockSHA256 != "" && lr.LockSHA256 == a.ApprovedLockSHA256 {
+	if req.Policy.FollowUnchangedLock && a.ApprovedLockSHA256 != "" && lockSHA() == a.ApprovedLockSHA256 {
 		return BasisUnchangedLock, nil
 	}
 	if req.Policy.AutoFollowSignedUpdates {

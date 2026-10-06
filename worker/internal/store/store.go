@@ -44,6 +44,8 @@ type Run struct {
 	Branch    string    `json:"branch,omitempty"`
 	PRURL     string    `json:"pr_url,omitempty"`
 	LogFile   string    `json:"log_file,omitempty"`
+	// RetryCleared lifts retry_failed_after for this run (set when the donor re-approves the project).
+	RetryCleared bool `json:"retry_cleared,omitempty"`
 }
 
 // Counted is how many tokens the run counts against caps: the reservation
@@ -284,7 +286,7 @@ func LastFailure(st *State, project, task string) (time.Time, string) {
 	var when time.Time
 	status := ""
 	for _, r := range st.Runs {
-		if r.Project != project || r.Task != task || !r.Settled {
+		if r.Project != project || r.Task != task || !r.Settled || r.RetryCleared {
 			continue
 		}
 		switch r.Status {
@@ -295,4 +297,23 @@ func LastFailure(st *State, project, task string) (time.Time, string) {
 		}
 	}
 	return when, status
+}
+
+// ClearRetries lifts the retry cooldown of every finished run of a project.
+// Token accounting is untouched.
+func (s *Store) ClearRetries(project string) (int, error) {
+	n := 0
+	err := s.Update(func(st *State) error {
+		for i := range st.Runs {
+			r := &st.Runs[i]
+			if r.Project == project && r.Settled && !r.RetryCleared {
+				if when, _ := LastFailure(&State{Runs: []Run{*r}}, project, r.Task); !when.IsZero() {
+					r.RetryCleared = true
+					n++
+				}
+			}
+		}
+		return nil
+	})
+	return n, err
 }

@@ -149,6 +149,7 @@ func TestStructsMatchOpenAPI(t *testing.T) {
 
 	// Responses the worker decodes.
 	checkStruct(t, "Meta", reflect.TypeOf(api.Meta{}), sc("Meta"), false)
+	checkStruct(t, "MetaLinks", reflect.TypeOf(api.MetaLinks{}), sc("Meta").Properties["links"].Value, false)
 	checkStruct(t, "Me", reflect.TypeOf(api.Me{}), sc("Me"), false)
 	checkStruct(t, "UserRef", reflect.TypeOf(api.UserRef{}), sc("UserRef"), false)
 	checkStruct(t, "Project", reflect.TypeOf(api.Project{}), sc("Project"), false)
@@ -252,6 +253,13 @@ func TestClientAgainstSpecValidatedFake(t *testing.T) {
 	all, err := c.Tasks(ctx, "hello-project", false)
 	if err != nil || len(all) != 2 {
 		t.Fatalf("tasks: %v %v", all, err)
+	}
+	one, err := c.Task(ctx, "hello-project:0002-truncate")
+	if err != nil || one.TaskID != "0002-truncate" || one.Claimable || one.Manifest.Prompt != "p" {
+		t.Fatalf("get task: %+v %v", one, err)
+	}
+	if _, err := c.Task(ctx, "hello-project:0009-nope"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("missing task: %v", err)
 	}
 	claimable, _ := c.Tasks(ctx, "hello-project", true)
 	if len(claimable) != 1 || claimable[0].ID != "hello-project:0001-slugify" || claimable[0].Manifest.MaxTokens != 1000 {

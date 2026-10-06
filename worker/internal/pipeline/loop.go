@@ -74,20 +74,43 @@ func (w *Worker) Work(ctx context.Context, opts LoopOptions) error {
 			wg.Wait()
 			return f
 		}
-		// Refresh the project (trust tier and status can change) and the queue.
-		if p, perr := w.API.Project(ctx, w.Ref.Slug); perr == nil {
-			proj = p
-		}
 		wait := opts.Poll
 		started := false
 		why := ""
+		// Honour a 429 Retry-After from the server before asking it anything else.
+		if d := w.serverWait(); d > 0 {
+			why = fmt.Sprintf("the server asked to slow down (429); waiting %s", d.Round(time.Second))
+			wait = d
+			goto idle
+		}
+		// Refresh the project (trust tier and status can change) and the queue.
+		if p, perr := w.API.Project(ctx, w.Ref.Slug); perr == nil {
+			proj = p
+		} else {
+			w.noteServerLimit(perr)
+		}
 		if proj.Status != "active" {
 			why = "project is " + proj.Status
 		} else {
-			tasks, terr := w.API.Tasks(ctx, w.Ref.Slug, true)
+			var tasks []api.Task
+			var terr error
+			if opts.TaskID != "" {
+				var one *api.Task
+				if one, terr = w.API.Task(ctx, w.Ref.Slug+":"+opts.TaskID); terr == nil && one.Claimable {
+					tasks = []api.Task{*one}
+				} else if terr == nil {
+					why = fmt.Sprintf("task %s is %s and not claimable right now", opts.TaskID, one.State)
+					if len(one.BlockedBy) > 0 {
+						why += fmt.Sprintf(" (blocked by %v)", one.BlockedBy)
+					}
+				}
+			} else {
+				tasks, terr = w.API.Tasks(ctx, w.Ref.Slug, true)
+			}
 			if terr != nil {
+				w.noteServerLimit(terr)
 				why = "cannot list tasks: " + terr.Error()
-			} else if len(tasks) == 0 {
+			} else if len(tasks) == 0 && why == "" {
 				why = "no claimable tasks"
 			}
 			for _, t := range tasks {
@@ -98,13 +121,19 @@ func (w *Worker) Work(ctx context.Context, opts LoopOptions) error {
 					continue
 				}
 				d := w.Precheck(t, proj)
+				if d.Allow {
+					d = w.approvalCheck(ctx, proj.RepoURL, t.Commit)
+				}
 				if !d.Allow {
 					why = fmt.Sprintf("%s skipped: %s", t.TaskID, d.Reason)
 					if d.RetryAfter > 0 && d.RetryAfter < wait {
 						wait = d.RetryAfter
 					}
 					if d.Code == policy.OutsideSchedule || d.Code == policy.Backoff || d.Code == policy.Concurrency ||
-						d.Code == policy.DailyCap || d.Code == policy.WeeklyCap || d.Code == "session-budget" {
+						d.Code == policy.DailyCap || d.Code == policy.WeeklyCap || d.Code == "session-budget" || d.Code == CodeNeedsApproval {
+						if d.Code == CodeNeedsApproval {
+							why = d.Reason
+						}
 						if d.RetryAfter > wait {
 							wait = min(d.RetryAfter, 15*time.Minute)
 						}
@@ -259,6 +288,9 @@ func (w *Worker) DryRun(ctx context.Context, n int) ([]Preview, error) {
 		})
 		if verr != nil {
 			pv.Why = verr.Error()
+			if verify.IsApprovalError(verr) {
+				pv.Why = NeedsApprovalMessage(t.Commit, w.Ref.Key())
+			}
 			out = append(out, pv)
 			continue
 		}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/agentfund/agentfund/worker/internal/api"
 	"github.com/agentfund/agentfund/worker/internal/apitest"
+	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/gitx"
 	"github.com/agentfund/agentfund/worker/internal/lockfile"
 	"github.com/agentfund/agentfund/worker/internal/logs"
@@ -361,6 +362,9 @@ func TestIntegrationBudgetKill(t *testing.T) {
 		t.Fatalf("results %+v report %+v", res, o.Report)
 	}
 	total := o.Report["tokens_in"].(float64) + o.Report["tokens_out"].(float64)
+	if float64(res[0].TokensIn+res[0].TokensOut) != total || o.Report["tokens_out"].(float64) == 0 {
+		t.Fatalf("tokens burned up to the kill must be reported: result %+v report %+v", res[0], o.Report)
+	}
 	if total < 1_000_000 || total > 1_400_000 {
 		t.Fatalf("killed at %v tokens; the cap is 1,000,000 and the mock burns 105k per step", total)
 	}
@@ -559,27 +563,52 @@ func TestIntegrationShutdownReleasesClaim(t *testing.T) {
 	f.noBranchPushed()
 }
 
-func TestIntegrationClaimLostAbortsRun(t *testing.T) {
-	f := integration(t, "hang", nil)
-	f.srv.Lock()
-	f.srv.HeartbeatProblemAfter = 2
-	f.srv.Unlock()
-	start := time.Now()
-	res, err := f.once()
-	if err != nil {
-		t.Fatal(err)
+// protocol.md §13: a worker whose heartbeat is answered claim-not-active stops
+// and still sends its report, so the burned tokens stay visible (flagged late).
+func TestIntegrationClaimLostStopsAndStillReports(t *testing.T) {
+	for _, rejectLate := range []bool{false, true} {
+		name := map[bool]string{false: "server stores the late report", true: "server answers 409"}[rejectLate]
+		t.Run(name, func(t *testing.T) {
+			f := integration(t, "hang", nil)
+			f.srv.Lock()
+			f.srv.HeartbeatProblemAfter = 2
+			f.srv.RejectLateReports = rejectLate
+			f.srv.Unlock()
+			start := time.Now()
+			res, err := f.once()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if time.Since(start) > 2*time.Minute {
+				t.Fatalf("stopping took %s", time.Since(start))
+			}
+			if len(res) != 1 || res[0].Outcome != api.StatusFailed || !strings.Contains(res[0].Reason, "claim lost") || res[0].TokensIn != 700 || res[0].TokensOut != 7 {
+				t.Fatalf("results: %+v", res)
+			}
+			o := f.onlyOutcome()
+			if o.Release != nil {
+				t.Fatalf("a lost claim cannot be released: %+v", o)
+			}
+			reports := f.srv.Calls("/report")
+			if len(reports) != 1 || reports[0].Body["status"] != api.StatusFailed || reports[0].Body["tokens_in"] != float64(700) ||
+				reports[0].Body["tokens_out"] != float64(7) || !strings.Contains(reports[0].Body["message"].(string), "claim lost: lease no longer active") {
+				t.Fatalf("report requests: %+v", reports)
+			}
+			side, _ := os.ReadFile(logs.SidecarPath(res[0].LogFile))
+			if rejectLate {
+				if o.Report != nil || !bytes.Contains(side, []byte("report_error")) || !bytes.Contains(side, []byte("claim-not-active")) {
+					t.Fatalf("a refused late report must be logged, not stored: outcome %+v sidecar %s", o, side)
+				}
+			} else if o.Report == nil || !o.FlaggedLate || !bytes.Contains(side, []byte(`"flagged_late": true`)) {
+				t.Fatalf("late report should be stored flagged_late: outcome %+v sidecar %s", o, side)
+			}
+			st, _ := f.w.Store.Snapshot()
+			if g, _, active := store.UsageOf(st, time.Now(), f.w.Ref.Key()); g.Day != 707 || active != 0 {
+				t.Fatalf("local accounting after a lost claim: %+v active=%d", g, active)
+			}
+			f.noBranchPushed()
+		})
 	}
-	if len(res) != 1 || res[0].Outcome != OutcomeAborted {
-		t.Fatalf("results: %+v", res)
-	}
-	o := f.onlyOutcome()
-	if o.Report != nil || o.Release != nil {
-		t.Fatalf("an aborted run must neither report nor release: %+v", o)
-	}
-	if time.Since(start) > 2*time.Minute {
-		t.Fatalf("abort took %s", time.Since(start))
-	}
-	f.noBranchPushed()
 }
 
 // TestIntegrationSandboxIsolation exercises the sandbox directly: file
@@ -602,9 +631,14 @@ func TestIntegrationSandboxIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The allowlist the worker computes for a GitHub project with default config.
+	defaultAllow := (&Worker{Cfg: config.Default(), Runner: runner.NewClaudeCode()}).egressAllowlist("https://github.com/example/hello-project")
+	if strings.Join(defaultAllow, ",") != "api.anthropic.com" {
+		t.Fatalf("default egress allowlist: %v", defaultAllow)
+	}
 	s, err := sandbox.Start(ctx, docker, sandbox.Spec{
 		RunID: "isolation-" + strings.ToLower(strings.ReplaceAll(t.Name()[:4], "_", "")) + "-1", Image: img, ProxyImage: proxyImage,
-		CPUs: "1", Memory: "512m", PIDs: 128, AllowHosts: []string{"api.anthropic.com"},
+		CPUs: "1", Memory: "512m", PIDs: 128, AllowHosts: defaultAllow,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -659,6 +693,7 @@ func TestIntegrationSandboxIsolation(t *testing.T) {
 	expect("external DNS does not resolve inside the sandbox", "getent hosts example.com", false, "")
 	expect("IP-literal CONNECT is refused", "curl -sS -m 20 -o /dev/null https://93.184.216.34", false, "403")
 	expect("allowlisted host on another port is refused", "curl -sS -m 20 -o /dev/null https://api.anthropic.com:8443", false, "403")
+	expect("the git host is not reachable by default", "curl -sS -m 20 -o /dev/null https://github.com", false, "403")
 
 	// The allowlisted host works — when this machine has internet at all.
 	if conn, err := net.DialTimeout("tcp", "api.anthropic.com:443", 5*time.Second); err == nil {

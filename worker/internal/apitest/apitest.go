@@ -99,10 +99,21 @@ type Server struct {
 	SpecVersions     []int
 	HeartbeatSeconds int
 	Tasks            []TaskSpec
+	// ClaimCommit, when set, is the commit claims name instead of Commit (a pin that moved between listing and claim).
+	ClaimCommit string
 	// ClaimProblem, when set, makes every claim fail with this 409 problem code.
 	ClaimProblem string
 	// HeartbeatProblemAfter makes heartbeats fail with claim-not-active after N successes (0 = never).
 	HeartbeatProblemAfter int
+	// TasksRateLimited makes the next N task listings answer 429 with Retry-After: RetryAfterSeconds.
+	TasksRateLimited  int
+	RetryAfterSeconds int
+	// ReportFailures makes the next N report/release requests fail with 503.
+	ReportFailures int
+	// ReportProblem, when set, makes every report fail with this 422 problem code.
+	ReportProblem string
+	// RejectLateReports makes reports for expired claims fail with 409 instead of being stored flagged_late.
+	RejectLateReports bool
 
 	calls      []Call
 	claims     map[string]*claimState
@@ -112,7 +123,8 @@ type Server struct {
 
 type claimState struct {
 	task     TaskSpec
-	status   string // active, reported, released
+	status   string // active, reported, released, expired
+	late     bool
 	report   map[string]any
 	release  map[string]any
 	beats    []map[string]any
@@ -159,6 +171,8 @@ type Outcome struct {
 	Report     map[string]any
 	Release    map[string]any
 	Heartbeats []map[string]any
+	// FlaggedLate is true when the report arrived after the claim expired.
+	FlaggedLate bool
 }
 
 // Outcomes lists every claim granted, in order.
@@ -169,7 +183,7 @@ func (s *Server) Outcomes() []Outcome {
 	for i := 1; i <= s.nextClaim; i++ {
 		id := claimID(i)
 		c := s.claims[id]
-		out = append(out, Outcome{ClaimID: id, Task: c.task.ManifestID, Status: c.status, Report: c.report, Release: c.release, Heartbeats: c.beats})
+		out = append(out, Outcome{ClaimID: id, Task: c.task.ManifestID, Status: c.status, Report: c.report, Release: c.release, Heartbeats: c.beats, FlaggedLate: c.late})
 	}
 	return out
 }
@@ -179,6 +193,7 @@ func claimID(n int) string { return fmt.Sprintf("clm_%016d", n) }
 var (
 	reProject = regexp.MustCompile(`^/v1/projects/([a-z0-9-]+)$`)
 	reTasks   = regexp.MustCompile(`^/v1/projects/([a-z0-9-]+)/tasks$`)
+	reTask    = regexp.MustCompile(`^/v1/tasks/([a-z0-9-]+):([0-9a-z-]+)$`)
 	reClaim   = regexp.MustCompile(`^/v1/tasks/([a-z0-9-]+:[0-9a-z-]+)/claim$`)
 	reClaimOp = regexp.MustCompile(`^/v1/claims/(clm_[a-z0-9]+)/(heartbeat|report|release)$`)
 )
@@ -234,6 +249,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.reply(w, r, "/v1/projects/{slug}", 200, s.projectJSON())
+	case r.Method == "GET" && reTasks.MatchString(r.URL.Path) && s.TasksRateLimited > 0:
+		s.TasksRateLimited--
+		w.Header().Set("Retry-After", fmt.Sprint(s.RetryAfterSeconds))
+		s.problem(w, 429, "rate-limited", "slow down (fixture)")
 	case r.Method == "GET" && reTasks.MatchString(r.URL.Path):
 		items := []any{}
 		for _, t := range s.Tasks {
@@ -243,6 +262,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			items = append(items, s.taskJSON(t))
 		}
 		s.reply(w, r, "/v1/projects/{slug}/tasks", 200, map[string]any{"items": items, "next_cursor": nil})
+	case r.Method == "GET" && reTask.MatchString(r.URL.Path):
+		m := reTask.FindStringSubmatch(r.URL.Path)
+		for _, t := range s.Tasks {
+			if m[1] == s.Slug && t.ManifestID == m[2] {
+				tj := s.taskJSON(t)
+				tj["claimable"] = t.Claimable && !s.taskClaimed(t.ManifestID)
+				s.reply(w, r, "/v1/tasks/{task_id}", 200, tj)
+				return
+			}
+		}
+		s.problem(w, 404, "not-found", "no such task")
 	case r.Method == "POST" && reClaim.MatchString(r.URL.Path):
 		if !authed {
 			s.problem(w, 401, "unauthorized", "missing or invalid API key")
@@ -266,10 +296,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		default:
 			s.nextClaim++
 			id := claimID(s.nextClaim)
+			claimCommit := s.Commit
+			if s.ClaimCommit != "" {
+				claimCommit = s.ClaimCommit
+			}
 			s.claims[id] = &claimState{task: *task, status: "active", claimed: time.Now(), fullTask: full}
 			s.reply(w, r, "/v1/tasks/{task_id}/claim", 201, map[string]any{
 				"claim_id": id, "task": s.taskJSON(*task), "project": s.Slug, "repo_url": s.RepoURL, "base_branch": "main",
-				"commit": s.Commit, "content_hash": task.ContentHash, "lease_expires_at": now(),
+				"commit": claimCommit, "content_hash": task.ContentHash, "lease_expires_at": now(),
 				"lease_seconds": 7200, "heartbeat_interval_seconds": s.HeartbeatSeconds,
 			})
 		}
@@ -290,9 +324,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, 422, "validation", err.Error())
 			return
 		}
+		if m[2] != "heartbeat" && s.ReportFailures > 0 {
+			s.ReportFailures--
+			s.problem(w, 503, "internal", "temporarily unavailable (fixture)")
+			return
+		}
+		if m[2] == "report" && s.ReportProblem != "" {
+			s.problem(w, 422, s.ReportProblem, "report refused by fixture")
+			return
+		}
 		switch m[2] {
 		case "heartbeat":
-			if c.status != "active" || (s.HeartbeatProblemAfter > 0 && s.heartbeats >= s.HeartbeatProblemAfter) {
+			if c.status == "active" && s.HeartbeatProblemAfter > 0 && s.heartbeats >= s.HeartbeatProblemAfter {
+				c.status = "expired" // the lease ran out underneath the worker
+			}
+			if c.status != "active" {
 				s.problem(w, 409, "claim-not-active", "claim is no longer active")
 				return
 			}
@@ -308,6 +354,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 				s.problem(w, 409, "claim-not-active", "claim was released")
 				return
 			}
+			late := c.status == "expired"
+			if late && s.RejectLateReports {
+				s.problem(w, 409, "claim-not-active", "late reports are refused by this fixture")
+				return
+			}
 			if body["status"] == "completed" {
 				want := "agentfund/" + c.task.ManifestID + "-" + strings.TrimPrefix(m[1], "clm_")[:8]
 				if body["branch"] != want || body["pr_url"] == nil || body["head_sha"] == nil || body["verify_exit_code"] != float64(0) {
@@ -315,13 +366,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			c.status, c.report = "reported", body
+			c.status, c.report, c.late = "reported", body, late
 			rep := map[string]any{
 				"id": "rep_" + m[1][4:], "claim_id": m[1], "task_id": c.fullTask, "project": s.Slug,
 				"donor":  map[string]any{"id": s.URL + "/u/donor", "handle": "donor"},
 				"status": body["status"], "tokens_in": body["tokens_in"], "tokens_out": body["tokens_out"],
-				"cost_estimate": body["cost_estimate"], "log_digest": body["log_digest"], "flagged_late": false,
-				"delivery": map[bool]string{true: "pending_ci", false: "none"}[body["status"] == "completed"], "created_at": now(),
+				"cost_estimate": body["cost_estimate"], "log_digest": body["log_digest"], "flagged_late": late,
+				"delivery": map[bool]string{true: "pending_ci", false: "none"}[body["status"] == "completed" && !late], "created_at": now(),
 			}
 			s.reply(w, r, tmpl, 201, rep)
 		case "release":

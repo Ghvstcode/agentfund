@@ -43,6 +43,7 @@ type Sandbox struct {
 	CPUs             string   `yaml:"cpus"`
 	Memory           string   `yaml:"memory"`
 	PIDs             int      `yaml:"pids"`
+	AllowGitHost     bool     `yaml:"allow_git_host"`
 	ExtraAllowHosts  []string `yaml:"extra_allow_hosts"`
 	PassEnv          []string `yaml:"pass_env"`
 	Docker           string   `yaml:"docker"`
@@ -104,7 +105,7 @@ func Default() *Config {
 			TokensPerDay:               10_000_000,
 			TokensPerWeek:              40_000_000,
 			MaxTokensPerTask:           5_000_000,
-			NewProjectMaxTokensPerTask: 2_000_000,
+			NewProjectMaxTokensPerTask: 5_000_000,
 			Schedule:                   []string{},
 			MaxConcurrent:              1,
 			AllowedGitHosts:            []string{"github.com"},
@@ -370,8 +371,12 @@ func (c *Config) render() ([]byte, error) {
 	w("    memory: %q\n", g.Sandbox.Memory)
 	w("    # Maximum number of processes in the sandbox (docker --pids-limit).\n")
 	w("    pids: %d\n", g.Sandbox.PIDs)
+	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com).\n")
+	w("    # The sandbox has no .git and no git credentials; turn on only if a project's\n")
+	w("    # verify step must fetch from the git host.\n")
+	w("    allow_git_host: %t\n", g.Sandbox.AllowGitHost)
 	w("    # Extra host[:port] entries the sandbox may reach besides the model API\n")
-	w("    # (api.anthropic.com) and the project's git host. Keep this empty unless needed.\n")
+	w("    # (api.anthropic.com). Keep this empty unless needed.\n")
 	w("    extra_allow_hosts: %s\n", yamlList(g.Sandbox.ExtraAllowHosts))
 	w("    # Names of additional environment variables to pass from your shell into the\n")
 	w("    # agent process (e.g. ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, AWS_REGION).\n")

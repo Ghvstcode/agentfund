@@ -106,6 +106,9 @@ func (r *run) heartbeat(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		if r.w.serverWait() > 0 && r.w.serverWait() < time.Duration(r.claim.LeaseSeconds)*time.Second/2 {
+			continue // the server asked us to slow down; the lease comfortably outlasts the wait
+		}
 		in, out := r.usage()
 		phase, _ := r.phase.Load().(string)
 		hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -122,6 +125,7 @@ func (r *run) heartbeat(ctx context.Context) {
 		case ctx.Err() != nil:
 			return
 		default:
+			r.w.noteServerLimit(err)
 			r.log.Event("heartbeat", map[string]any{"error": err.Error(), "action": "retry"})
 		}
 	}
@@ -148,6 +152,7 @@ func (w *Worker) RunTask(ctx context.Context, task api.Task, proj *api.Project) 
 
 	claim, cerr := w.API.Claim(ctx, task.ID)
 	if cerr != nil {
+		w.noteServerLimit(cerr)
 		if code := api.CodeOf(cerr); code != "" {
 			res.Reason = "claim refused: " + code
 			return res, nil
@@ -275,31 +280,35 @@ func (r *run) finish(ctx context.Context, status, message string, verifyExit *in
 	if pub != nil {
 		rep.Branch, rep.PRURL, rep.HeadSHA = &pub.Branch, &pub.PRURL, &pub.HeadSHA
 	}
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Minute)
 	defer cancel()
-	var (
-		resp    *api.Report
-		sendErr error
-	)
-	for attempt := 0; attempt < 3; attempt++ {
-		resp, sendErr = r.w.API.Report(rctx, r.claim.ClaimID, rep)
-		if sendErr == nil || api.CodeOf(sendErr) != "" {
-			break
-		}
-		time.Sleep(time.Duration(attempt+1) * time.Second)
-	}
+	var resp *api.Report
+	sendErr := r.w.deliver(rctx, func() error {
+		var err error
+		resp, err = r.w.API.Report(rctx, r.claim.ClaimID, rep)
+		return err
+	})
 	side := map[string]any{"claim_id": r.claim.ClaimID, "log_file": r.log.Path(), "log_digest": digest, "report": rep}
 	if sendErr != nil {
 		side["report_error"] = sendErr.Error()
-		r.w.say("%s: could not deliver the report: %v", r.taskID, sendErr)
+		r.w.say("%s: the server did not accept the report (%v); it is kept in %s", r.taskID, sendErr, logs.SidecarPath(r.log.Path()))
 	} else {
 		side["server_response"] = resp
 	}
 	_ = r.log.WriteSidecar(side)
-	r.settle(status, message, pub)
+	localMsg := message
+	if sendErr != nil {
+		localMsg = strings.TrimSpace("REPORT NOT ACCEPTED (" + sendErr.Error() + ") " + message)
+	}
+	r.settle(status, localMsg, pub)
 
 	res := r.result(status, message)
 	res.LogDigest = digest
+	accepted := sendErr == nil
+	res.ReportAccepted = &accepted
+	if sendErr != nil {
+		res.ReportError = r.log.Scrub(sendErr.Error())
+	}
 	if pub != nil {
 		res.Branch, res.PRURL, res.HeadSHA = pub.Branch, pub.PRURL, pub.HeadSHA
 	}
@@ -326,9 +335,9 @@ func (r *run) release(ctx context.Context, reason string) Result {
 	if in+out > 0 {
 		rel.TokensIn, rel.TokensOut = &in, &out
 	}
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
-	err := r.w.API.Release(rctx, r.claim.ClaimID, rel)
+	err := r.w.deliver(rctx, func() error { return r.w.API.Release(rctx, r.claim.ClaimID, rel) })
 	side := map[string]any{"claim_id": r.claim.ClaimID, "log_file": r.log.Path(), "log_digest": digest, "release": rel}
 	if err != nil {
 		side["release_error"] = err.Error()
@@ -337,19 +346,11 @@ func (r *run) release(ctx context.Context, reason string) Result {
 	r.settle(store.StatusReleased, reason, nil)
 	res := r.result(OutcomeReleased, reason)
 	res.LogDigest = digest
-	return res
-}
-
-// abort ends a run whose claim the server no longer honours: nothing is
-// reported (a report would be refused or flagged late); usage is kept locally.
-func (r *run) abort(reason string) Result {
-	r.stopHeartbeat()
-	r.log.Event("outcome", map[string]any{"status": OutcomeAborted, "message": reason})
-	digest, _ := r.log.Freeze()
-	_ = r.log.WriteSidecar(map[string]any{"claim_id": r.claim.ClaimID, "log_digest": digest, "aborted": reason})
-	r.settle(store.StatusAborted, reason, nil)
-	res := r.result(OutcomeAborted, reason)
-	res.LogDigest = digest
+	accepted := err == nil
+	res.ReportAccepted = &accepted
+	if err != nil {
+		res.ReportError = r.log.Scrub(err.Error())
+	}
 	return res
 }
 
@@ -358,7 +359,9 @@ func (r *run) abort(reason string) Result {
 func (r *run) interrupted(ctx context.Context) (Result, bool) {
 	switch r.stopReason() {
 	case stopClaimLost:
-		return r.abort("the server reported the claim as no longer active"), true
+		// protocol.md §13: stop and still report, so the burned tokens stay visible
+		// (the server stores the report flagged_late; a 409/404 answer is logged).
+		return r.finish(ctx, api.StatusFailed, "claim lost: lease no longer active", nil, nil), true
 	case stopShutdown:
 		return r.release(ctx, "worker is shutting down"), true
 	case stopBudget:
@@ -623,13 +626,14 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	}
 	taskRef := w.Ref.Slug + ":" + r.taskID
 	in, outTok := r.usage()
-	preDigest, _ := logs.DigestFile(lg.Path())
 	body := fmt.Sprintf("Automated change produced by an %s worker run.\n\n"+
 		"| | |\n|---|---|\n| Task | `%s` — %s |\n| Claim | `%s` |\n| Manifest SHA-256 | `%s` |\n| Base commit | `%s` |\n"+
-		"| Tokens | %d in / %d out |\n| Runner | %s |\n| Verify | `%s` exited 0 in the sandbox |\n| Worker log digest (at push) | `%s` |\n\n"+
-		"Changed paths (all inside the manifest's `scope.write`):\n\n```\n%s```\n",
-		app.AppName, taskRef, m.Title, claim.ClaimID, claim.ContentHash, claim.Commit, in, outTok, out.Version, short(m.Verify, 200), preDigest, scope.Summary(changes))
-	lg.Event("publish", map[string]any{"host": host.Name(), "branch": branch, "base_branch": claim.BaseBranch, "log_digest_at_push": preDigest})
+		"| Tokens | %d in / %d out |\n| Runner | %s |\n| Verify | `%s` exited 0 in the sandbox |\n\n"+
+		"Changed paths (all inside the manifest's `scope.write`):\n\n```\n%s```\n\n"+
+		"The SHA-256 digest of the worker's run log is published with this run's report on the instance: %s (project page: %s).\n",
+		app.AppName, taskRef, m.Title, claim.ClaimID, claim.ContentHash, claim.Commit, in, outTok, out.Version, short(m.Verify, 200), scope.Summary(changes),
+		w.Ref.Server+"/v1/tasks/"+taskRef, w.Ref.Key())
+	lg.Event("publish", map[string]any{"host": host.Name(), "branch": branch, "base_branch": claim.BaseBranch})
 	pub, perr := host.Publish(ctx, githost.Request{
 		RepoDir: repoDir, RepoURL: claim.RepoURL, BaseBranch: claim.BaseBranch, BaseCommit: claim.Commit, Branch: branch,
 		Changes: tree, Title: m.Title + " (" + r.taskID + ")", Body: lg.Scrub(body),
@@ -672,4 +676,42 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// transient reports whether a delivery error is worth retrying: no HTTP
+// answer at all, a 5xx, or 429.
+func transient(err error) (bool, time.Duration) {
+	var ae *api.Error
+	if !errors.As(err, &ae) {
+		return true, 0
+	}
+	return ae.HTTPStatus >= 500 || ae.HTTPStatus == 429, ae.RetryAfter
+}
+
+// deliver calls send, retrying transient failures a few times with backoff.
+// A definite refusal (4xx problem) is returned at once.
+func (w *Worker) deliver(ctx context.Context, send func() error) error {
+	delay := w.ReportRetryDelay
+	if delay <= 0 {
+		delay = 2 * time.Second
+	}
+	var err error
+	for attempt := 1; ; attempt++ {
+		if err = send(); err == nil {
+			return nil
+		}
+		retry, after := transient(err)
+		if !retry || attempt >= 5 {
+			return err
+		}
+		wait := delay << (attempt - 1)
+		if after > wait {
+			wait = min(after, 30*time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+	}
 }

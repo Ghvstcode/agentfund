@@ -68,7 +68,7 @@ agentfund status
 | Command | What it does |
 | --- | --- |
 | `login <server-url> [--key-stdin]` | Reads the server API key, checks it with `GET /v1/me`, stores it in `credentials.yaml`. |
-| `approve <server-url>/<project> [--yes] [--no-pager] [--pubkey KEY] [--commit SHA]` | Negotiates the protocol, clones the repo, verifies the lock at the server's pinned commit, prints the **key fingerprint** (compare it with the server's Audit tab) and whether the key in the repo's `agentfund.yaml` equals the key the server publishes, shows every manifest in full through `$PAGER`, asks, then pins `{pubkey, approved_commit, approved_lock_sha256}`. Refuses when the two key channels disagree (and no valid rotation chain connects them) unless you pass the key you trust with `--pubkey`. Run again to approve a newer commit. |
+| `approve <server-url>/<project> [--yes] [--no-pager] [--pubkey KEY] [--commit SHA] [--follow-unchanged-lock \| --no-follow]` | Negotiates the protocol, clones the repo, verifies the lock at the server's pinned commit, prints the **key fingerprint** (compare it with the server's Audit tab) and whether the key in the repo's `agentfund.yaml` equals the key the server publishes, shows every manifest in full through `$PAGER`, then the server's trust tier and caps next to yours and which one binds, asks, then pins `{pubkey, approved_commit, approved_lock_sha256}`. Refuses when the two key channels disagree (and no valid rotation chain connects them) unless you pass the key you trust with `--pubkey`. Run again to approve a newer commit; re-approving also clears the `retry_failed_after` cooldown of that project's earlier failed runs. It also asks whether to keep working when the project moves to a newer commit whose signed task list is byte-identical (stored per project as `follow_unchanged_lock`; `--follow-unchanged-lock` / `--no-follow` non-interactively, `--yes` alone leaves it off): the prompts cannot change, the repository's code may have, and it runs only inside the sandbox. |
 | `dry-run <project> [-n 5]` | Fetches and verifies like `work`, evaluates your policy, prints the next N open tasks with full signed prompts and the reason for every skip. No claims, no execution. |
 | `work <project> [--budget 200m] [--schedule "02:00-06:00"] [--max-concurrent 1] [--once] [--task ID] [--json] [--poll 30s] [--sandbox-image REF] [--egress-proxy-image REF]` | The loop described below. SIGINT/SIGTERM stops the sandbox and releases active claims. |
 | `status [--json] [--recent 10]` | Running and recent runs, tokens today/this week against the caps, rate-limit backoff, and active claims according to each server (`GET /v1/me/claims`). |
@@ -77,10 +77,12 @@ agentfund status
 
 `<project>` is `<server-url>/<slug>`, or just the slug when it is unique among your approvals.
 
-`work --once` exit status: `0` a task completed · `3` nothing could be started · `4` a task was
-claimed but did not complete · `1` error. With `--json` each finished attempt is one JSON object on
+`work --once` exit status: `0` a task completed and its report was accepted · `3` nothing could be
+started (nothing claimable, policy, or the project moved past your approval) · `4` a task was
+claimed but did not complete, or the server did not accept its report · `1` error. With `--json` each finished attempt is one JSON object on
 stdout (`task`, `claim`, `outcome`, `reason`, `tokens_in`, `tokens_out`, `branch`, `pr_url`,
-`head_sha`, `log_file`, `log_digest`).
+`head_sha`, `log_file`, `log_digest`, `report_accepted`, and `report_error` when the server refused
+or could not be reached — transient failures are retried a few times with backoff first).
 
 ### Environment variables
 
@@ -104,7 +106,7 @@ global:
   tokens_per_day: 10m                    # per local calendar day, all projects
   tokens_per_week: 40m                   # Monday 00:00 – Monday 00:00, local time
   max_tokens_per_task: 5m                # manifests above this are refused
-  new_project_max_tokens_per_task: 2m    # while the server reports trust tier "new"
+  new_project_max_tokens_per_task: 5m    # while the server reports trust tier "new"
   schedule: []                           # ["02:00-06:00"], ["22:00-06:00"] (wraps); [] = always
   max_concurrent: 1
   allowed_git_hosts: ["github.com"]      # "file" allows file:// URLs (tests)
@@ -118,6 +120,7 @@ global:
     cpus: "2"
     memory: "4g"
     pids: 512
+    allow_git_host: false                # true only if verify must fetch from the git host
     extra_allow_hosts: []                # extra host[:port] the sandbox may reach
     pass_env: []                         # extra variable NAMES passed to the agent process
     docker: "docker"
@@ -145,9 +148,15 @@ publishes — nothing a server says ever loosens your policy.
 
 ## What `work` does for each task
 
-1. **Policy pre-check** against the task listing, then **claim**. A heartbeat goroutine extends the
+1. **Policy pre-check** against the task listing, and an **approval pre-check**: the repository is
+   fetched and the task's commit must be covered by your approval (the approved commit, an
+   ancestor, or a follow policy you enabled). If the project has moved on, nothing is claimed;
+   `work`, `dry-run` and `status` say "project moved to <sha>; run `agentfund approve <ref>` to
+   review and approve it". Then **claim**. A heartbeat goroutine extends the
    lease every `heartbeat_interval_seconds`, carrying cumulative tokens and the phase; if the server
-   answers `claim-not-active`, the run is aborted.
+   answers `claim-not-active`, the run is stopped and a `failed` report ("claim lost: lease no
+   longer active", real tokens) is still sent; the server stores it flagged late, and a refusal
+   is only logged.
 2. **Verification chain** (spec/manifest.md §4, steps 1–4) on a host-side bare clone under
    `~/.local/share/agentfund/repos/`: the claimed commit exists; the lock's minisign signature
    (prehashed variant only, file signature *and* global signature) chains to the key **you pinned**,
@@ -159,7 +168,8 @@ publishes — nothing a server says ever loosens your policy.
 3. **Policy** against the verified manifest (caps, ceilings, schedule, concurrency, git host,
    backoff), with the reservation made atomically. A refusal **releases** the claim.
 4. **Sandbox**: a per-run `--internal` Docker network; the egress proxy sidecar attached to that
-   network and the default bridge with `ALLOW_HOSTS=api.anthropic.com,<git host>[,extras]`; the
+   network and the default bridge with `ALLOW_HOSTS=api.anthropic.com[,extras]` (the project's git host only with
+   `sandbox.allow_git_host: true`); the
    sandbox container on the internal network only, `--cap-drop ALL`, `no-new-privileges`,
    read-only root, tmpfs `/tmp` and home, pids/CPU/memory limits, no bind mounts, no Docker socket.
    The repository at the claimed commit is streamed in as a tar built on the host from git objects:
@@ -189,6 +199,7 @@ publishes — nothing a server says ever loosens your policy.
 9. **Report** `completed` (branch, PR URL, head SHA, `verify_exit_code` 0, log digest) or the
    failure status, then tear everything down — also on panic or signal. Orphaned containers,
    networks and volumes labelled `agentfund.run` are removed at the next start.
+  Report and release requests are retried a few times with backoff on network errors, 5xx and 429; a `429` from the server with `Retry-After` pauses the loop for that long.
 
 ### Logs
 
@@ -232,9 +243,10 @@ from every line.
 - Keep the agent and `verify` away from your files, your SSH and git credentials, your `gh`
   session and the Docker socket: nothing from the host is mounted, and publishing happens on the
   host from data.
-- Limit network egress to HTTPS `CONNECT` tunnels to the model API and the project's git host
-  (plus what you add). Everything else is refused and logged by the proxy; the sandbox has no other
-  route and no external DNS.
+- Limit network egress to HTTPS `CONNECT` tunnels to the model API (plus what you add). The
+  project's git host is **not** reachable by default — the sandbox has no `.git` and no git
+  credentials. Everything else is refused and logged by the proxy; the sandbox has no other route
+  and no external DNS.
 - Make out-of-scope changes impossible to publish: permissions stop most of them inside the
   sandbox, and the host-side scope check discards the whole run for the rest.
 - Bound spend (token cap, wall-clock cap, day/week caps) and resources (CPU, memory, pids).
@@ -249,8 +261,9 @@ from every line.
 - Hide your agent credential from the agent. The CLI needs it, so it is in the environment of a
   process that executes a prompt written by someone else, and that process can reach the allowlisted
   hosts. A malicious prompt could try to send the credential to a destination on an allowlisted host
-  (for example the git host). Mitigations: you read every prompt before approving and prompts cannot
-  change without your re-approval (unless you enabled a follow policy); the allowlist is two hosts;
+  (which is why the git host is off the allowlist by default — every host you add with
+  `allow_git_host` or `extra_allow_hosts` widens this). Mitigations: you read every prompt before approving and prompts cannot
+  change without your re-approval (unless you enabled a follow policy); the default allowlist is one host;
   a change set containing the credential is discarded; the token from `claude setup-token` can only
   make model requests and can be revoked. Use a dedicated, revocable credential.
 - Judge the work. `verify` and the project's CI decide whether a change is good; the scope check

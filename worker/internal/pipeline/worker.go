@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/agentfund/agentfund/worker/internal/api"
+	"github.com/agentfund/agentfund/worker/internal/app"
 	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/githost"
 	"github.com/agentfund/agentfund/worker/internal/gitx"
@@ -30,23 +32,26 @@ import (
 const (
 	OutcomeReleased = "released"
 	OutcomeSkipped  = "skipped"
-	OutcomeAborted  = "aborted"
 )
 
 // Result summarises one task attempt.
 type Result struct {
-	Task      string  `json:"task"`
-	Claim     string  `json:"claim,omitempty"`
-	Outcome   string  `json:"outcome"`
-	Reason    string  `json:"reason,omitempty"`
-	TokensIn  int64   `json:"tokens_in"`
-	TokensOut int64   `json:"tokens_out"`
-	Cost      float64 `json:"cost_estimate,omitempty"`
-	Branch    string  `json:"branch,omitempty"`
-	PRURL     string  `json:"pr_url,omitempty"`
-	HeadSHA   string  `json:"head_sha,omitempty"`
-	LogFile   string  `json:"log_file,omitempty"`
-	LogDigest string  `json:"log_digest,omitempty"`
+	// ReportAccepted says whether the server accepted the report (or release)
+	// for this attempt; nil when nothing was sent (skipped).
+	ReportAccepted *bool   `json:"report_accepted,omitempty"`
+	ReportError    string  `json:"report_error,omitempty"`
+	Task           string  `json:"task"`
+	Claim          string  `json:"claim,omitempty"`
+	Outcome        string  `json:"outcome"`
+	Reason         string  `json:"reason,omitempty"`
+	TokensIn       int64   `json:"tokens_in"`
+	TokensOut      int64   `json:"tokens_out"`
+	Cost           float64 `json:"cost_estimate,omitempty"`
+	Branch         string  `json:"branch,omitempty"`
+	PRURL          string  `json:"pr_url,omitempty"`
+	HeadSHA        string  `json:"head_sha,omitempty"`
+	LogFile        string  `json:"log_file,omitempty"`
+	LogDigest      string  `json:"log_digest,omitempty"`
 }
 
 // ErrFatal wraps conditions under which the worker must stop claiming tasks
@@ -75,14 +80,18 @@ type Worker struct {
 	// Out receives human-readable progress lines.
 	Out io.Writer
 	Now func() time.Time
+	// ReportRetryDelay is the base delay between report delivery attempts (default 2s).
+	ReportRetryDelay time.Duration
 	// SessionBudget caps the tokens reserved by this invocation (0 = none).
 	SessionBudget int64
 
 	meta        *api.Meta
 	creds       runner.Credentials
 	sessionUsed atomic.Int64
-	repoLocks   sync.Map // repo cache dir -> *sync.Mutex
-	inFlight    sync.Map // manifest id -> struct{}
+	repoLocks   sync.Map     // repo cache dir -> *sync.Mutex
+	inFlight    sync.Map     // manifest id -> struct{}
+	slowUntil   atomic.Int64 // unix nanos until which the server asked us to slow down (429 Retry-After)
+	approvals   sync.Map     // commit -> string ("" = covered by the approval, else why not)
 	active      atomic.Int32
 }
 
@@ -180,6 +189,104 @@ func (w *Worker) Precheck(t api.Task, proj *api.Project) policy.Decision {
 	return w.decide(t.Manifest.MaxTokens, proj.RepoURL, trustOf(proj), g, p, active, st.Backoff)
 }
 
+// noteServerLimit remembers a 429 from the AgentFund server: its Retry-After
+// (or one minute when absent) is honoured before the next request that is
+// not needed to finish a running task.
+func (w *Worker) noteServerLimit(err error) {
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.HTTPStatus != 429 {
+		return
+	}
+	d := ae.RetryAfter
+	if d <= 0 {
+		d = time.Minute
+	}
+	if d > 30*time.Minute {
+		d = 30 * time.Minute
+	}
+	if until := w.now().Add(d).UnixNano(); until > w.slowUntil.Load() {
+		w.slowUntil.Store(until)
+	}
+}
+
+// serverWait returns how long the server asked us to stay quiet (0 = not at all).
+func (w *Worker) serverWait() time.Duration {
+	d := time.Unix(0, w.slowUntil.Load()).Sub(w.now())
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// CodeNeedsApproval marks a refusal because the project moved past the donor's approval.
+const CodeNeedsApproval policy.Code = "needs-approval"
+
+// NeedsApprovalMessage is what work, dry-run and status say in that case.
+func NeedsApprovalMessage(commit, ref string) string {
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	return fmt.Sprintf("project moved to %s; run `%s approve %s` to review and approve it", commit, app.BinaryName, ref)
+}
+
+// ApprovalCovers reports whether the donor's approval (and follow policies)
+// covers commit, fetching the repository when asked. ok is true when it does;
+// otherwise why explains. Infrastructure errors are returned as err.
+func ApprovalCovers(ctx context.Context, cfg *config.Config, p *config.Project, ref config.Ref, reposDir, repoURL, commit string, fetch bool) (ok bool, why string, err error) {
+	if commit == p.ApprovedCommit {
+		return true, "", nil
+	}
+	_, _, vpol, err := EffectiveLimits(cfg, p)
+	if err != nil {
+		return false, "", err
+	}
+	if _, allowed := policy.HostAllowed(cfg.Global.AllowedGitHosts, repoURL); !allowed {
+		return true, "", nil // refused by policy elsewhere, with its own message
+	}
+	repoDir := gitx.CachePath(reposDir, repoURL)
+	if fetch {
+		if err := gitx.Fetch(ctx, repoDir, repoURL, commit, p.ApprovedCommit); err != nil {
+			return false, "", err
+		}
+	}
+	_, verr := verify.Approved(ctx, repoDir, commit, verify.Approval{Pubkey: p.Pubkey, ApprovedCommit: p.ApprovedCommit, ApprovedLockSHA256: p.ApprovedLockSHA256}, vpol)
+	switch {
+	case verr == nil:
+		return true, "", nil
+	case verify.IsApprovalError(verr):
+		return false, NeedsApprovalMessage(commit, ref.Key()), nil
+	case !fetch:
+		// Not fetched yet, so the commit is unknown locally: it is certainly not the approved one.
+		return false, NeedsApprovalMessage(commit, ref.Key()), nil
+	}
+	// Anything else (e.g. the commit does not exist) is for the full chain to report against a claim.
+	return true, "", nil
+}
+
+// approvalCheck is ApprovalCovers with a per-commit cache.
+func (w *Worker) approvalCheck(ctx context.Context, repoURL, commit string) policy.Decision {
+	if v, ok := w.approvals.Load(commit); ok {
+		if why := v.(string); why != "" {
+			return policy.Decision{Code: CodeNeedsApproval, Reason: why}
+		}
+		return policy.Decision{Allow: true}
+	}
+	dir := gitx.CachePath(w.ReposDir, repoURL)
+	lock := w.repoLock(dir)
+	lock.Lock()
+	ok, why, err := ApprovalCovers(ctx, w.Cfg, w.Project, w.Ref, w.ReposDir, repoURL, commit, true)
+	lock.Unlock()
+	if err != nil {
+		return policy.Decision{Code: policy.InvalidTask, Reason: "cannot check the approval: " + err.Error()}
+	}
+	if !ok {
+		w.approvals.Store(commit, why)
+		return policy.Decision{Code: CodeNeedsApproval, Reason: why}
+	}
+	w.approvals.Store(commit, "")
+	return policy.Decision{Allow: true}
+}
+
 // Prepare negotiates with the instance, resolves the agent credentials and
 // checks the container engine. It must succeed before any task is claimed.
 func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
@@ -229,9 +336,9 @@ func (w *Worker) repoLock(dir string) *sync.Mutex {
 	return m.(*sync.Mutex)
 }
 
-// egressAllowlist is the model API plus the project's git host plus whatever
-// the donor explicitly added. Nothing from the claim or the repository can
-// widen it beyond the git host the donor's policy already allowed.
+// egressAllowlist is the model API plus whatever the donor explicitly added
+// (extra_allow_hosts; the project's git host only with allow_git_host).
+// Nothing from the claim or the repository can widen it.
 func (w *Worker) egressAllowlist(repoURL string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -245,8 +352,10 @@ func (w *Worker) egressAllowlist(repoURL string) []string {
 	for _, h := range w.Runner.APIHosts() {
 		add(h)
 	}
-	if h, err := policy.GitHostOf(repoURL); err == nil && h != "file" {
-		add(h)
+	if w.Cfg.Global.Sandbox.AllowGitHost {
+		if h, err := policy.GitHostOf(repoURL); err == nil && h != "file" {
+			add(h)
+		}
 	}
 	for _, h := range w.Cfg.Global.Sandbox.ExtraAllowHosts {
 		add(h)

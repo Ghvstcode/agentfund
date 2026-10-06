@@ -131,8 +131,9 @@ Dashboard controls:
 
 **Every merge moves the pin, and donors' approvals are per commit.** By default a donor's
 worker runs only the commit they approved and its ancestors. After your first merge the pin
-is a new commit; their worker refuses it until they re-approve, unless they enabled
-`follow_unchanged_lock` (accept newer commits whose `MANIFEST.lock` is byte-identical). Tell
+is a new commit; their worker does not claim tasks at it until they re-approve, unless they
+enabled `follow_unchanged_lock` (accept newer commits whose `MANIFEST.lock` is byte-identical;
+`agentfund approve` asks donors about it). Tell
 your donors this in your README, and avoid touching `tasks/` unless you mean to: a merge that
 leaves the lock byte-identical costs opted-in donors nothing, while any lock change sends
 every donor back to `approve`.
@@ -272,7 +273,7 @@ around them:
 | --- | --- | --- |
 | Server: per task | 5,000,000 | Claims on larger manifests are refused (`project-task-cap`). `validate` warns. |
 | Server: per UTC day | 25,000,000 (sum of `max_tokens` of claims granted) | gridrs's layer 0 is 18.5M and layer 1 is 23M, so the first two layers take two days on a fresh instance. |
-| Donor: `new_project_max_tokens_per_task` | 2,000,000 in the default donor config | A donor with default settings refuses your tasks above 2M while you are `new`. Make sure at least three early tasks are at or under 2M, or the caps never lift for those donors. |
+| Donor: `new_project_max_tokens_per_task` | 5,000,000 in the default donor config (the same as the server's per-task cap) | A donor may lower it; the worker uses the minimum of this, the donor's `max_tokens_per_task` and the server's cap. Smaller early tasks are claimable by more donors. |
 
 These are instance settings and donor settings; the numbers are the defaults.
 
@@ -556,8 +557,8 @@ AgentFund-Manifest-SHA256: <sha256 of tasks/0302-csv.yaml as signed>
 ```
 
 The PR body repeats the task, claim, **manifest SHA-256**, base commit, tokens in/out, the
-runner version, the verify command, the worker's log digest at push, and the list of changed
-paths. Check before reading the diff:
+runner version, the verify command, the list of changed paths, and a pointer to the run's
+report on the instance, where the worker's log digest is published. Check before reading the diff:
 
 ```sh
 shasum -a 256 tasks/0302-csv.yaml      # must equal the Manifest SHA-256 in the PR body

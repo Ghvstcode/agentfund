@@ -18,7 +18,7 @@ RUN_ID="afe2e-$$"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/$RUN_ID.XXXXXX")
 PORT=${E2E_PORT:-18787}
 BASE="http://127.0.0.1:$PORT"
-SECRET="e2e-webhook-secret-0123456789"
+OTHER_SECRET="e2e-not-this-projects-secret-0123456789"   # any secret that is not project hello's
 PG="$RUN_ID-pg"
 SERVER_PID=""
 SSE_PID=""
@@ -89,7 +89,7 @@ PGPORT=$(docker port "$PG" 5432/tcp | head -n1 | sed 's/.*://')
 (
   cd "$ROOT/server"
   PORT=$PORT BASE_URL=$BASE DATABASE_URL="postgres://postgres:e2e@127.0.0.1:$PGPORT/agentfund" \
-  AUTH_DEV_LOGIN=true ALLOW_FILE_REPOS=true WEBHOOK_SECRET=$SECRET DATA_DIR="$WORK/server-data" \
+  AUTH_DEV_LOGIN=true ALLOW_FILE_REPOS=true DATA_DIR="$WORK/server-data" \
   INDEX_INTERVAL_SECONDS=2 SWEEP_INTERVAL_SECONDS=2 INSTANCE_NAME="E2E Instance" LOG_LEVEL=warn \
   exec node dist/main.js
 ) >"$WORK/server.log" 2>&1 &
@@ -109,6 +109,8 @@ PROJECT=$(api POST /v1/projects "{\"repo_url\":\"$REPO_URL\",\"slug\":\"hello\"}
 [ "$(echo "$PROJECT" | json 'v.pinned_commit')" = "$HEAD0" ] || fail "project not pinned at head"
 FPR=$(echo "$PROJECT" | json 'v.pubkey_fingerprint')
 ok "project hello pinned, key $FPR"
+SECRET=$(api GET /v1/projects/hello/webhook "" "$MAINT" | json 'v.secret')   # per-project webhook secret (maintainer only)
+[ -n "$SECRET" ] || fail "no webhook secret for project hello"
 api POST /v1/projects/hello/pledges '{"token_amount":3000000}' "$DONOR" >/dev/null
 [ "$(api GET /v1/projects/hello | json 'v.totals.pledged')" = "3000000" ] || fail "pledge not counted"
 ok "pledged 3,000,000"
@@ -170,6 +172,10 @@ BODY="{\"provider\":\"generic\",\"repo_url\":\"$REPO_URL\",\"branch\":\"$BRANCH\
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/webhooks/ci" -H 'content-type: application/json' -H 'X-AgentFund-Signature: sha256=00' -d "$BODY")
 [ "$CODE" = "401" ] || fail "forged CI result accepted ($CODE)"
 ok "forged signature rejected (401)"
+OTHER_SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$OTHER_SECRET" | sed 's/^.*= //')
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/v1/webhooks/ci" -H 'content-type: application/json' -H "X-AgentFund-Signature: sha256=$OTHER_SIG" -d "$BODY")
+[ "$CODE" = "401" ] || fail "CI result signed with another secret accepted ($CODE)"
+ok "result signed with a secret that is not this project's rejected (401)"
 WRONG="{\"provider\":\"generic\",\"repo_url\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"head_sha\":\"$HEAD0\",\"conclusion\":\"success\"}"
 ci_result "$WRONG" >/dev/null
 [ "$(api GET /v1/projects/hello | json 'v.totals.delivered')" = "0" ] || fail "CI result for a different commit delivered the report"
@@ -194,13 +200,19 @@ wait_for "indexer to follow the branch to $HEAD1" pinned
 ok "indexer followed the signed head; 0002-truncate is now claimable"
 
 say "approval pin: the worker refuses the new commit until re-approved"
+CLAIMS_BEFORE=$(api GET /v1/projects/hello/events | json 'v.items.filter(e=>e.action==="task.claimed").length')
 set +e; "$AF" work hello --once --json >"$WORK/work2.json" 2>"$WORK/work2.err"; RC=$?; set -e
-[ $RC -ne 0 ] || fail "worker ran a commit the donor never approved"
+[ $RC -eq 3 ] || { cat "$WORK/work2.err"; fail "worker should exit 3 (nothing started) on a commit the donor never approved, got $RC"; }
+grep -q "project moved to .*agentfund approve $BASE/hello" "$WORK/work2.err" || { cat "$WORK/work2.err"; fail "worker did not say to re-approve"; }
 [ "$(api GET /v1/projects/hello | json 'v.totals.reported')" = "$TOKENS" ] || fail "tokens were burned on an unapproved commit"
-ok "refused (exit $RC), nothing executed, no tokens burned"
+[ "$(api GET /v1/tasks/hello:0002-truncate | json 'v.state')" = "open" ] || fail "task was claimed at an unapproved commit"
+[ "$(api GET /v1/projects/hello/events | json 'v.items.filter(e=>e.action==="task.claimed").length')" = "$CLAIMS_BEFORE" ] || fail "a claim was made at an unapproved commit"
+"$AF" dry-run hello -n 1 2>&1 | grep -q "project moved to" || fail "dry-run did not say the project moved"
+"$AF" status 2>&1 | grep -q "project moved to" || fail "status did not say the project moved"
+ok "not claimed (exit 3): task still open, no new task.claimed event, no tokens burned; dry-run and status say to re-approve"
 "$AF" approve "$BASE/hello" --yes --no-pager >/dev/null 2>&1
 "$AF" work hello --once --json >"$WORK/work3.json" 2>"$WORK/work3.err" || { cat "$WORK/work3.err"; fail "second task after re-approval"; }
-[ "$(tail -n 1 "$WORK/work3.json" | json 'v.outcome+" "+v.task')" = "completed hello:0002-truncate" ] || [ "$(tail -n 1 "$WORK/work3.json" | json 'v.outcome')" = "completed" ] || fail "second task: $(tail -n 1 "$WORK/work3.json")"
+[ "$(tail -n 1 "$WORK/work3.json" | json 'v.outcome+" "+v.task+" "+v.report_accepted')" = "completed 0002-truncate true" ] || fail "second task: $(tail -n 1 "$WORK/work3.json")"
 ok "after re-approval the dependent task ran and completed"
 
 say "tampering: a changed manifest without a new signature is never indexed"

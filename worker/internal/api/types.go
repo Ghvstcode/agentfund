@@ -22,7 +22,15 @@ type Meta struct {
 	SpecVersions     []int           `json:"spec_versions"`
 	InstancePubkey   string          `json:"instance_pubkey,omitempty"`
 	Capabilities     json.RawMessage `json:"capabilities"`
+	Links            *MetaLinks      `json:"links,omitempty"`
 	Defaults         *MetaDefaults   `json:"defaults,omitempty"`
+}
+
+// MetaLinks are operator-configured pointers.
+type MetaLinks struct {
+	SourceURL      string `json:"source_url,omitempty"`
+	InstallCommand string `json:"install_command,omitempty"`
+	DocsURL        string `json:"docs_url,omitempty"`
 }
 
 // MetaDefaults are the instance's lease defaults.
@@ -74,6 +82,7 @@ type Project struct {
 	PubkeyFingerprint string       `json:"pubkey_fingerprint"`
 	PinnedCommit      string       `json:"pinned_commit"`
 	LockSHA256        *string      `json:"lock_sha256,omitempty"`
+	CommitURL         *string      `json:"commit_url,omitempty"`
 	TokenGoal         int64        `json:"token_goal"`
 	Trust             ProjectTrust `json:"trust"`
 	IndexError        *string      `json:"index_error,omitempty"`

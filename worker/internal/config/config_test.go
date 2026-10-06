@@ -70,7 +70,7 @@ func TestConfigRoundTripKeepsCommentsAndValues(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, "config.yaml"))
 	for _, knob := range []string{"tokens_per_day", "tokens_per_week", "max_tokens_per_task", "new_project_max_tokens_per_task",
 		"schedule", "max_concurrent", "allowed_git_hosts", "auto_follow_signed_updates", "follow_unchanged_lock",
-		"retry_failed_after", "claude_token_command", "image", "egress_proxy_image", "cpus", "memory", "pids", "extra_allow_hosts", "pass_env", "docker", "name", "model"} {
+		"retry_failed_after", "claude_token_command", "image", "egress_proxy_image", "cpus", "memory", "pids", "allow_git_host", "extra_allow_hosts", "pass_env", "docker", "name", "model"} {
 		idx := strings.Index(string(raw), "\n  "+knob+":")
 		if idx < 0 {
 			idx = strings.Index(string(raw), "\n    "+knob+":")
@@ -122,7 +122,7 @@ func TestDefaultsAreConservative(t *testing.T) {
 	g := c.Global
 	if g.AutoFollowSignedUpdates || g.FollowUnchangedLock || g.MaxConcurrent != 1 || len(g.AllowedGitHosts) != 1 ||
 		g.AllowedGitHosts[0] != "github.com" || g.TokensPerDay == 0 || g.TokensPerWeek == 0 || g.MaxTokensPerTask == 0 ||
-		g.NewProjectMaxTokensPerTask == 0 || len(g.Sandbox.PassEnv) != 0 || len(g.Sandbox.ExtraAllowHosts) != 0 {
+		g.NewProjectMaxTokensPerTask == 0 || len(g.Sandbox.PassEnv) != 0 || g.Sandbox.AllowGitHost || len(g.Sandbox.ExtraAllowHosts) != 0 {
 		t.Fatalf("defaults are not conservative: %+v", g)
 	}
 }

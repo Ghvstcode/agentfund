@@ -98,6 +98,35 @@ func TestIntegrationCLIEndToEnd(t *testing.T) {
 		t.Fatalf("second work --once: exit %d (%s)", code, errOut)
 	}
 
+	// The maintainer merges the branch; the server follows to the new head and the dependent task opens.
+	h.Repo.Git("merge", "-q", "--no-ff", res.Branch, "-m", "Merge "+res.Branch)
+	merged := h.Repo.Git("rev-parse", "HEAD")
+	h.Server.Lock()
+	h.Server.Commit = merged
+	h.Server.Tasks[1].Claimable = true
+	h.Server.Unlock()
+	claimsBefore := len(h.Server.Outcomes())
+	code, _, errOut := run(t, "", "work", h.Server.Slug, "--once", "--json")
+	if code != ExitNothing || !strings.Contains(errOut, "project moved to "+merged[:12]) || !strings.Contains(errOut, "agentfund approve "+ref) {
+		t.Fatalf("work on an unapproved newer commit: exit %d\n%s", code, errOut)
+	}
+	if len(h.Server.Outcomes()) != claimsBefore {
+		t.Fatal("a task was claimed at a commit the donor never approved")
+	}
+	mustRun(t, "", "approve", ref, "--yes")
+	code, stdout, stderr = run(t, "", "work", h.Server.Slug, "--once", "--json")
+	if code != ExitOK {
+		t.Fatalf("work after re-approval: exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	var res2 pipeline.Result
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &res2); err != nil || res2.Outcome != "completed" || res2.Task != "0002-truncate" ||
+		res2.ReportAccepted == nil || !*res2.ReportAccepted {
+		t.Fatalf("second task: %+v (%v)", res2, err)
+	}
+	if got := h.Repo.Git("diff", "--name-status", merged, res2.HeadSHA); got != "M\tsrc/textutil.py\nA\ttests/test_truncate.py" {
+		t.Fatalf("second task's pushed diff:\n%s", got)
+	}
+
 	// The agent credential is nowhere on disk under the worker's directories, and never reached the server.
 	for _, dir := range []string{cfgDir, dataDir} {
 		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
@@ -121,5 +150,42 @@ func TestIntegrationCLIEndToEnd(t *testing.T) {
 	creds, _ := os.ReadFile(config.CredentialsPath())
 	if !strings.Contains(string(creds), h.Server.APIKey) {
 		t.Error("server API key should be in credentials.yaml")
+	}
+}
+
+// A report the server refuses must not look like success.
+func TestIntegrationRefusedReportIsNotSuccess(t *testing.T) {
+	isolate(t)
+	allowFileRepos(t)
+	h := apitest.NewHello(t, nil)
+	proxy := "agentfund/egress-proxy:dev"
+	if v := os.Getenv("AGENTFUND_TEST_EGRESS_PROXY_IMAGE"); v != "" {
+		proxy = v
+	}
+	t.Setenv(EnvSandboxImage, e2eImage(t, "happy"))
+	t.Setenv(EnvProxyImage, proxy)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", cliSecret)
+	t.Setenv(config.EnvAPIKey, h.Server.APIKey)
+	mustRun(t, "", "approve", h.Server.URL+"/"+h.Server.Slug, "--yes")
+	h.Server.Lock()
+	h.Server.ReportProblem = "validation"
+	h.Server.Unlock()
+
+	code, stdout, stderr := run(t, "", "work", h.Server.Slug, "--once", "--json")
+	if code != ExitNotDone || !strings.Contains(stderr, "did not accept the report") {
+		t.Fatalf("work --once with a refused report: exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	var res pipeline.Result
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &res); err != nil {
+		t.Fatalf("--json output: %q (%v)", stdout, err)
+	}
+	if res.ReportAccepted == nil || *res.ReportAccepted || !strings.Contains(res.ReportError, "validation") || res.Outcome != "completed" || res.TokensIn != 8100 {
+		t.Fatalf("result: %+v", res)
+	}
+	if !strings.Contains(stdout, `"report_accepted":false`) || !strings.Contains(stdout, `"report_error":"`) {
+		t.Fatalf("--json line lacks report_accepted/report_error: %s", stdout)
+	}
+	if status := mustRun(t, "", "status"); !strings.Contains(status, "REPORT NOT ACCEPTED") {
+		t.Fatalf("status does not show the refusal:\n%s", status)
 	}
 }

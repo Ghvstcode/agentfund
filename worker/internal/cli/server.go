@@ -21,6 +21,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/minisign"
 	"github.com/agentfund/agentfund/worker/internal/policy"
 	"github.com/agentfund/agentfund/worker/internal/spec"
+	"github.com/agentfund/agentfund/worker/internal/store"
 	"github.com/agentfund/agentfund/worker/internal/verify"
 )
 
@@ -149,7 +150,7 @@ func (e *env) page(text string, usePager bool) {
 }
 
 func approveCmd(e *env) *cobra.Command {
-	var yes, noPager bool
+	var yes, noPager, followFlag, noFollowFlag bool
 	var pubkeyFlag, commitFlag string
 	cmd := &cobra.Command{
 		Use:   "approve <server-url>/<project>",
@@ -162,7 +163,14 @@ after you confirm — pin {pubkey, commit, lock hash} in config.yaml.
 Compare the fingerprint with the one on the server's Audit tab: the repository
 (agentfund.yaml) and the server are two separate channels for the same key.
 If they disagree, approve refuses unless you pass the key you trust with
---pubkey. Running approve again re-approves a newer commit.`,
+--pubkey. Running approve again re-approves a newer commit.
+
+Every merged pull request moves the project to a newer commit. approve asks
+whether to keep working when that commit's signed task list is byte-identical
+to the one you reviewed (stored per project as follow_unchanged_lock): the
+prompts cannot change, but the repository's code may have, and it runs only
+inside the sandbox. Non-interactively: --follow-unchanged-lock or --no-follow;
+--yes alone leaves the setting as it is (off by default).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, err := config.ParseRef(args[0])
@@ -265,16 +273,19 @@ If they disagree, approve refuses unless you pass the key you trust with
 			var b strings.Builder
 			var total int64
 			deps := map[string][]string{}
+			sizes := map[string]int64{}
 			for _, en := range lr.Lock.Manifests {
 				_, m, err := lr.ReadManifest(ctx, en.ID)
 				if err != nil {
 					return fmt.Errorf("manifest %s is invalid: %w", en.Path, err)
 				}
 				deps[m.ID] = m.DependsOn
+				sizes[m.ID] = m.MaxTokens
 				total += m.MaxTokens
 				renderManifest(&b, m, en.SHA256)
 			}
 			fmt.Fprintf(&b, "%d task(s), up to %d tokens in total if every task runs to its cap.\n", len(lr.Lock.Manifests), total)
+			b.WriteString(capsSummary(cfg, cfg.Projects[ref.Key()], proj, sizes))
 			e.page(b.String(), !yes && !noPager)
 
 			if existing, ok := cfg.Projects[ref.Key()]; ok {
@@ -303,10 +314,41 @@ If they disagree, approve refuses unless you pass the key you trust with
 				p = &config.Project{}
 				cfg.Projects[ref.Key()] = p
 			}
+			// Following: with both follow policies off, every merged PR needs a new approval.
+			switch {
+			case followFlag:
+				v := true
+				p.FollowUnchangedLock = &v
+			case noFollowFlag:
+				v := false
+				p.FollowUnchangedLock = &v
+			case !yes:
+				fmt.Fprintf(e.out, "\nProjects move: every merged pull request creates a newer commit than the one you just approved.\n"+
+					"Keep working when the project moves to a newer commit whose signed task list is byte-identical to what you just reviewed? [y/N]: ")
+				line, _ := e.stdin().ReadString('\n')
+				a := strings.ToLower(strings.TrimSpace(line))
+				v := a == "y" || a == "yes"
+				p.FollowUnchangedLock = &v
+			}
+			follows := cfg.Global.FollowUnchangedLock
+			if p.FollowUnchangedLock != nil {
+				follows = *p.FollowUnchangedLock
+			}
+			if follows {
+				fmt.Fprintf(e.out, "follow_unchanged_lock: ON for this project — the prompts, scopes and verify commands you reviewed cannot change without a new approval; "+
+					"the repository's code may have changed, and it runs only inside the sandbox.\n")
+			} else {
+				fmt.Fprintf(e.out, "follow_unchanged_lock: off for this project — after the project moves to a newer commit you will need to run `%s approve %s` again "+
+					"(or re-run with --follow-unchanged-lock).\n", app.BinaryName, ref.Key())
+			}
 			p.Server, p.Slug, p.Pubkey = ref.Server, ref.Slug, pin
 			p.ApprovedCommit, p.ApprovedLockSHA256, p.ApprovedAt = commit, lr.LockSHA256, time.Now().UTC().Truncate(time.Second)
 			if err := cfg.Save(); err != nil {
 				return err
+			}
+			// The donor just re-reviewed the project: tasks that failed here earlier may be tried again.
+			if n, err := store.Open(config.StorePath()).ClearRetries(ref.Key()); err == nil && n > 0 {
+				fmt.Fprintf(e.out, "cleared the retry cooldown (retry_failed_after) of %d earlier failed run(s)\n", n)
 			}
 			fmt.Fprintf(e.out, "approved %s at %s; written to %s\nNext: %s dry-run %s   then   %s work %s\n",
 				ref.Key(), commit[:12], config.Path(), app.BinaryName, ref.Slug, app.BinaryName, ref.Slug)
@@ -316,6 +358,9 @@ If they disagree, approve refuses unless you pass the key you trust with
 	cmd.Flags().BoolVar(&yes, "yes", false, "approve without asking (non-interactive); manifests are printed, not paged")
 	cmd.Flags().BoolVar(&noPager, "no-pager", false, "print manifests instead of opening $PAGER")
 	cmd.Flags().StringVar(&pubkeyFlag, "pubkey", "", "pin this maintainer key (minisign encoding) instead of the one the server publishes")
+	cmd.Flags().BoolVar(&followFlag, "follow-unchanged-lock", false, "keep working on newer commits whose signed task list (MANIFEST.lock) is byte-identical to the one approved now")
+	cmd.Flags().BoolVar(&noFollowFlag, "no-follow", false, "require a new approval whenever the project moves to a newer commit (the default)")
+	cmd.MarkFlagsMutuallyExclusive("follow-unchanged-lock", "no-follow")
 	cmd.Flags().StringVar(&commitFlag, "commit", "", "approve this commit instead of the server's pinned commit")
 	return cmd
 }

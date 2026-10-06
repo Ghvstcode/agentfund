@@ -89,8 +89,13 @@ Nothing from the project runs during `approve`. Step by step, it:
 5. Prints `FINGERPRINT TO PIN:  SHA256:...`.
 6. Shows every manifest in full through `$PAGER` (default `less -R`): prompt, `scope.write`,
    `scope.read`, `verify`, `max_tokens`, `timeout_minutes`, and the total if every task ran to
-   its cap.
+   its cap, followed by the server's trust tier and caps next to yours and which one binds.
 7. Asks `Pin this key and commit? [yes/no]`.
+8. Asks `Keep working when the project moves to a newer commit whose signed task list is
+   byte-identical to what you just reviewed? [y/N]` and stores the answer for this project as
+   `follow_unchanged_lock` (see [when the project's commit moves](#when-the-projects-commit-moves)).
+   Non-interactively: `--follow-unchanged-lock` or `--no-follow`; `--yes` alone leaves the
+   setting as it is (off by default).
 
 **What to compare.** Open the project's **Audit** tab on the instance and compare the *Key
 fingerprint* there with `FINGERPRINT TO PIN`. They must be identical. If the maintainer
@@ -140,9 +145,9 @@ agentfund work gridrs --budget 20m --schedule "02:00-06:00"    # loop inside a w
 | `--budget 20m` | Token budget for this invocation, on top of the caps in the config. A task's full `max_tokens` is charged before it starts and settled to actual use afterwards. |
 | `--schedule "22:00-06:00,12:00-13:00"` | Local-time windows in which new tasks may start, for this invocation. Replaces the configured schedule. A running task is not interrupted when a window closes. |
 | `--max-concurrent N` | Tasks at once (1 to 16). |
-| `--once` | At most one task. Exit status: `0` completed, `3` nothing could be started, `4` claimed but not completed, `1` error. |
+| `--once` | At most one task. Exit status: `0` completed and the report was accepted, `3` nothing could be started (nothing claimable, policy, or the project moved past your approval), `4` claimed but not completed or the server did not accept the report, `1` error. |
 | `--task 0302-csv` | Only this manifest id. |
-| `--json` | One JSON object per finished attempt on stdout (`task`, `claim`, `outcome`, `reason`, `tokens_in`, `tokens_out`, `branch`, `pr_url`, `head_sha`, `log_file`, `log_digest`). |
+| `--json` | One JSON object per finished attempt on stdout (`task`, `claim`, `outcome`, `reason`, `tokens_in`, `tokens_out`, `branch`, `pr_url`, `head_sha`, `log_file`, `log_digest`, `report_accepted`, and `report_error` when the server refused the report or stayed unreachable after a few retries). |
 | `--poll 30s` | Idle delay between looks at the queue. |
 | `--sandbox-image`, `--egress-proxy-image` | Image overrides for this invocation. |
 
@@ -194,7 +199,7 @@ Token amounts accept `750k`, `5M`, `200m` or plain integers; `0` means no cap.
 | `tokens_per_day` | `10m` | Your spend per local calendar day, across all projects. |
 | `tokens_per_week` | `40m` | Same, Monday 00:00 to Monday 00:00 local time. |
 | `max_tokens_per_task` | `5m` | Refuses any manifest whose `max_tokens` is higher. One runaway task cannot eat the day. |
-| `new_project_max_tokens_per_task` | `2m` | Stricter ceiling while the server reports the project's trust tier as `new` (no merge history). The worker takes the minimum of this, your task ceiling and the server's published cap. |
+| `new_project_max_tokens_per_task` | `5m` | Ceiling while the server reports the project's trust tier as `new` (no merge history). The worker takes the minimum of this, your task ceiling and the server's published cap. |
 | `schedule` | `[]` (any time) | When new tasks may start, e.g. `["02:00-06:00"]`. Windows may wrap midnight. |
 | `max_concurrent` | `1` | How many sandboxes run at once. |
 | `allowed_git_hosts` | `["github.com"]` | Hosts the worker may clone from and publish to. A claim for a repository elsewhere is released. |
@@ -225,21 +230,23 @@ ceiling can only tighten the global one.
 
 Your approval covers one commit and its ancestors. Projects move: by default an instance
 advances its pin to the head of the base branch whenever that head carries a valid signature,
-which includes every time a task's pull request merges. A claim for a commit your approval
-does not cover is refused:
+which includes every time a task's pull request merges. Before claiming, the worker fetches
+the repository and checks that the task's commit is covered by your approval. When it is not,
+nothing is claimed; `work`, `dry-run` and `status` say:
 
 ```
-verification failed at step 4 (approval): commit <new> is not the approved commit <old> nor
-one of its ancestors, and no follow policy accepts it; review and run `approve` again
+project moved to <sha>; run `agentfund approve <server-url>/<slug>` to review and approve it
 ```
 
-Nothing runs and no tokens are spent, but the refusal is reported as `verification_failed`
-and the task is then skipped for `retry_failed_after`. You have three choices:
+Nothing runs, no tokens are spent, nothing is reported, and `work --once` exits `3`.
+Re-approving also clears the `retry_failed_after` cooldown of that project's earlier failed
+runs. (The same check runs again against the commit the claim actually names; a claim that
+slips past it is reported `verification_failed`.) You have three choices:
 
 | Choice | What you are trusting |
 | --- | --- |
 | Re-run `agentfund approve` after each move (default) | Nothing new. You re-read the task set every time. On an active project this means after every merge. |
-| `follow_unchanged_lock: true` | That code changes between commits are fine as long as `tasks/MANIFEST.lock` is **byte-identical** to the one you approved: same prompts, same scopes, same verify commands. A new or edited manifest still needs your approval. This is the practical setting for a project you want to keep backing. |
+| `follow_unchanged_lock: true` (what `approve` asks about; stored per project) | That code changes between commits are fine as long as `tasks/MANIFEST.lock` is **byte-identical** to the one you approved: same prompts, same scopes, same verify commands. A new or edited manifest still needs your approval. This is the practical setting for a project you want to keep backing. |
 | `auto_follow_signed_updates: true` | The maintainer's key, completely. Any task set validly signed by your pinned key runs **without you reading it**. |
 
 Both are off by default because each trades review for convenience, and that trade is yours
@@ -348,8 +355,8 @@ agentfund logs clm_8f3a --report | jq -r .log_digest
 Equal digests prove that the log on your disk is the one you committed to when you reported:
 if you later publish it, anyone can check you did not edit it afterwards. It proves nothing
 to anyone who has not seen the file, and it is not evidence that the run was honest. That is
-what CI is for. The pull request body also carries a digest "at push"; that one is taken
-earlier and differs from the final `log_digest`.
+what CI is for. The pull request body does not carry a digest; it points to the run's report
+on the instance (`<server-url>/v1/tasks/<slug>:<task-id>`), where `log_digest` is published.
 
 ## 9. What the ledger columns mean for you
 
@@ -400,7 +407,8 @@ Messages are quoted from the worker. `<...>` varies.
 | `the key in the repository's agentfund.yaml and the key the server publishes DIFFER ...` | The two key channels disagree. One is wrong or compromised. | Do not approve. Ask the maintainer out of band; then `--pubkey`. |
 | `REFUSED — verification failed at step 2 (signature): lock signature does not verify against pinned key SHA256:...` | The lock at the claimed commit is not signed by the key you pinned (or a key it rotated to). | Stop and find out why. Do not re-approve a different key without confirmation from the maintainer. |
 | `... at step 3 (content): manifest <path> hashes to <x> but the lock says <y>` (or `claim names content hash ...`) | Repository and lock disagree, or the server named a hash the signed lock does not contain. | Nothing ran. Tell the maintainer or the operator. |
-| `... at step 4 (approval): commit <c> is not the approved commit ...` | The project moved past your approval. | Re-approve, or see [follow policies](#when-the-projects-commit-moves). |
+| `idle: project moved to <sha>; run agentfund approve <ref> to review and approve it` (also in `dry-run` and `status`; `work --once` exits `3`) | The project moved past your approval. Nothing was claimed. | Re-approve, or see [follow policies](#when-the-projects-commit-moves). |
+| `... at step 4 (approval): commit <c> is not the approved commit ...` | The pin moved between the pre-claim check and the claim. Reported `verification_failed`. | Re-approve (this also clears the retry cooldown). |
 | `policy refuses — reserving <n> tokens would exceed tokens_per_day (<used> of <cap>)` | Your cap. Also `tokens_per_week`, `max_tokens_per_task`, `the new-project ceiling`, `this run's --budget`. The claim is released. | Wait, or raise the cap deliberately. |
 | `idle: <task> skipped: outside the configured schedule; next window opens in <d>` | Your schedule. | Wait. |
 | `idle: <task> skipped: this task ended "<status>" here <d> ago; not retrying ...` | `retry_failed_after`. | Wait, or lower it. |

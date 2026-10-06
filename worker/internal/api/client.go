@@ -222,6 +222,12 @@ func (c *Client) Tasks(ctx context.Context, slug string, claimableOnly bool) ([]
 	return all, nil
 }
 
+// Task fetches one task by its "<slug>:<manifest id>" reference.
+func (c *Client) Task(ctx context.Context, taskID string) (*Task, error) {
+	var t Task
+	return &t, c.do(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID), nil, nil, &t)
+}
+
 // Claim atomically claims a task ("<slug>:<manifest id>").
 func (c *Client) Claim(ctx context.Context, taskID string) (*Claim, error) {
 	var cl Claim

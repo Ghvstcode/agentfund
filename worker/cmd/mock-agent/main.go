@@ -7,7 +7,8 @@
 // The behaviour is selected by MOCK_AGENT_SCENARIO, which the *test image*
 // sets — there is no switch for it anywhere in the worker.
 //
-//	happy       write an in-scope implementation + test that makes verify pass
+//	happy       write an in-scope implementation + test that makes verify pass (slugify, or
+//	            truncate when the prompt is hello-project's second task)
 //	scope       like happy, plus a file outside scope.write
 //	verifyfail  write an in-scope implementation whose test fails
 //	budget      burn tokens slowly, without end, until killed
@@ -117,6 +118,37 @@ if __name__ == "__main__":
     unittest.main()
 `
 
+const truncateImpl = `
+
+def truncate(text: str, width: int) -> str:
+    if width < 1:
+        raise ValueError("width must be >= 1")
+    if len(text) <= width:
+        return text
+    return text[: width - 1] + "\u2026"
+`
+
+const truncateTest = `import unittest
+
+from src.textutil import truncate
+
+
+class TruncateTest(unittest.TestCase):
+    def test_short(self):
+        self.assertEqual(truncate("abc", 5), "abc")
+
+    def test_long(self):
+        self.assertEqual(truncate("Hello, World", 5), "Hell\u2026")
+
+    def test_invalid(self):
+        with self.assertRaises(ValueError):
+            truncate("abc", 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
+`
+
 const badImpl = `def slugify(text: str) -> str:
     return text
 `
@@ -199,7 +231,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if scenario == "happy" && strings.Contains(prompt, "truncate(text: str, width: int)") {
+		scenario = "happy-truncate"
+	}
 	switch scenario {
+	case "happy-truncate":
+		// Second hello-project task: extend the existing module, add its own test file.
+		call(usage{In: 1300, CacheRead: 900, Out: 60}, leak)
+		existing, _ := os.ReadFile("src/textutil.py")
+		if err := write("src/textutil.py", string(existing)+truncateImpl); err != nil {
+			fail(err)
+		}
+		if err := write("tests/test_truncate.py", truncateTest); err != nil {
+			fail(err)
+		}
+		call(usage{In: 1400, CacheRead: 2200, Out: 40}, "added truncate")
+		result(false, "success", "Implemented truncate with tests.", nil)
 	case "happy", "scope", "leak":
 		call(usage{In: 1000, CacheCreate: 200, CacheRead: 300, Out: 50}, leak)
 		impl := goodImpl

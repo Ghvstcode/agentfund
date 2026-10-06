@@ -241,6 +241,12 @@ func TestApproveDryRunStatus(t *testing.T) {
 			t.Errorf("approve output lacks %q", want)
 		}
 	}
+	for _, want := range []string{`server trust tier:     "established"`, "per-task ceiling:      5m — your max_tokens_per_task binds",
+		"per-day for project:   10m — your tokens_per_day (all projects) binds", "server max_tokens_per_task none", "can only tighten"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("approve output lacks %q\n%s", want, out[strings.Index(out, "Trust and caps"):])
+		}
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +255,34 @@ func TestApproveDryRunStatus(t *testing.T) {
 	if p == nil || p.Pubkey != h.Key.Public().String() || p.ApprovedCommit != h.Commit || p.ApprovedLockSHA256 != h.Server.LockSHA256 || p.ApprovedAt.IsZero() {
 		t.Fatalf("approval record: %+v", p)
 	}
+	if p.FollowUnchangedLock == nil || *p.FollowUnchangedLock {
+		t.Fatalf("no answer to the follow question must mean off: %+v", p.FollowUnchangedLock)
+	}
+	if !strings.Contains(out, "byte-identical to what you just reviewed? [y/N]") || !strings.Contains(out, "follow_unchanged_lock: off for this project") {
+		t.Fatalf("approve did not ask about following:\n%s", out)
+	}
+	// Answering yes turns it on for this project only; flags do the same non-interactively.
+	out = mustRun(t, "yes\ny\n", "approve", ref)
+	if cfg, _ := config.Load(); cfg.Projects[ref].FollowUnchangedLock == nil || !*cfg.Projects[ref].FollowUnchangedLock || cfg.Global.FollowUnchangedLock ||
+		!strings.Contains(out, "follow_unchanged_lock: ON for this project") || !strings.Contains(out, "runs only inside the sandbox") {
+		t.Fatalf("follow answer yes not stored per project:\n%s", out)
+	}
+	mustRun(t, "", "approve", ref, "--yes") // --yes alone leaves the stored answer alone
+	if cfg, _ := config.Load(); !*cfg.Projects[ref].FollowUnchangedLock {
+		t.Fatal("--yes alone changed the follow setting")
+	}
+	mustRun(t, "", "approve", ref, "--yes", "--no-follow")
+	if cfg, _ := config.Load(); *cfg.Projects[ref].FollowUnchangedLock {
+		t.Fatal("--no-follow did not turn following off")
+	}
+	mustRun(t, "", "approve", ref, "--yes", "--follow-unchanged-lock")
+	if cfg, _ := config.Load(); !*cfg.Projects[ref].FollowUnchangedLock {
+		t.Fatal("--follow-unchanged-lock did not turn following on")
+	}
+	if code, _, _ := run(t, "", "approve", ref, "--yes", "--follow-unchanged-lock", "--no-follow"); code == 0 {
+		t.Fatal("contradictory follow flags accepted")
+	}
+	mustRun(t, "", "approve", ref, "--yes", "--no-follow")
 	rawCfg, _ := os.ReadFile(config.Path())
 	if !strings.Contains(string(rawCfg), "# ") || !strings.Contains(string(rawCfg), "auto_follow_signed_updates: false") {
 		t.Fatalf("config should be commented and conservative:\n%s", rawCfg)
@@ -298,18 +332,51 @@ func TestApproveDryRunStatus(t *testing.T) {
 		}
 	}
 
-	// Re-approval of a newer commit.
+	// The project moves on: work, dry-run and status all say to re-approve, and nothing is claimed.
 	h.Repo.Write("src/later.py", []byte("# later\n"))
 	newer := h.Repo.Commit("code moved")
 	h.Server.Lock()
 	h.Server.Commit = newer
 	h.Server.Unlock()
+	moved := "project moved to " + newer[:12] + "; run `agentfund approve " + ref + "` to review and approve it"
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-not-a-real-token-000000")
+	t.Setenv(EnvSandboxImage, "busybox") // any reference: Prepare only checks presence, and this test must never start a sandbox
+	if code, _, errOut := run(t, "", "work", h.Server.Slug, "--once"); !(code == ExitNothing && strings.Contains(errOut, moved)) && !strings.Contains(errOut, "not present locally") && !strings.Contains(errOut, "docker is not available") {
+		t.Fatalf("work after the project moved: exit %d\n%s", code, errOut)
+	}
+	if n := len(h.Server.Outcomes()); n != 0 {
+		t.Fatalf("%d claim(s) for an unapproved commit", n)
+	}
+	if out := mustRun(t, "", "dry-run", h.Server.Slug, "-n", "1"); !strings.Contains(out, "SKIPPED: "+moved) {
+		t.Fatalf("dry-run after the project moved:\n%s", out)
+	}
+	if out := mustRun(t, "", "status"); !strings.Contains(out, "! "+moved) {
+		t.Fatalf("status after the project moved:\n%s", out)
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv(EnvSandboxImage, "")
+
+	// Re-approval of the newer commit; the project is now reported as new with tight server caps.
+	taskCap, dayCap := int64(500_000), int64(3_000_000)
+	h.Server.Lock()
+	h.Server.TrustTier, h.Server.TrustTaskCap, h.Server.TrustDayCap = "new", &taskCap, &dayCap
+	h.Server.Unlock()
 	out = mustRun(t, "", "approve", ref, "--yes")
+	for _, want := range []string{`server trust tier:     "new"`, "treated as a NEW project", "per-task ceiling:      500k — server max_tokens_per_task binds",
+		"your new_project_max_tokens_per_task 5m", "per-day for project:   3m — server max_tokens_per_day binds",
+		"Will NOT run under the per-task ceiling: 0001-slugify (max_tokens 1m), 0002-truncate (max_tokens 1m), 0003-cli (max_tokens 1m)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("approve output lacks %q\n%s", want, out[strings.Index(out, "Trust and caps"):])
+		}
+	}
 	if !strings.Contains(out, "Re-approval: previously approved commit "+h.Commit) {
 		t.Fatalf("re-approve output:\n%s", out)
 	}
 	if cfg, _ := config.Load(); cfg.Projects[ref].ApprovedCommit != newer {
 		t.Fatal("re-approval did not move the pin")
+	}
+	if out := mustRun(t, "", "status"); strings.Contains(out, "project moved") {
+		t.Fatalf("status still asks for approval after re-approving:\n%s", out)
 	}
 }
 

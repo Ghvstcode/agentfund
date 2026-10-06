@@ -83,8 +83,10 @@ run time: CLAUDE_CODE_OAUTH_TOKEN (from ` + "`claude setup-token`" + `) and/or
 ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. They are passed
 to the sandboxed agent process and are never stored or sent anywhere else.
 
-Exit status with --once: 0 a task completed; ` + fmt.Sprint(ExitNothing) + ` nothing could be started;
-` + fmt.Sprint(ExitNotDone) + ` a task was claimed but did not complete (see the report/log).`,
+Exit status with --once: 0 a task completed and its report was accepted;
+` + fmt.Sprint(ExitNothing) + ` nothing could be started (nothing claimable, policy, or the project moved past
+your approval); ` + fmt.Sprint(ExitNotDone) + ` a task was claimed but did not complete, or the server did not
+accept its report (see the --json line, the report sidecar and the log).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := newWorker(e, args[0], true)
@@ -135,6 +137,9 @@ Exit status with --once: 0 a task completed; ` + fmt.Sprint(ExitNothing) + ` not
 				} else if r.Outcome != pipeline.OutcomeSkipped {
 					fmt.Fprintf(e.out, "%s: %s (%d in / %d out tokens)%s%s\n", r.Task, r.Outcome, r.TokensIn, r.TokensOut,
 						map[bool]string{true: " — " + r.Reason, false: ""}[r.Reason != ""], map[bool]string{true: " → " + r.PRURL, false: ""}[r.PRURL != ""])
+					if r.ReportAccepted != nil && !*r.ReportAccepted {
+						fmt.Fprintf(e.out, "%s: THE SERVER DID NOT ACCEPT THE REPORT: %s\n", r.Task, r.ReportError)
+					}
 				}
 			}}
 			err = w.Work(ctx, opts)
@@ -150,8 +155,11 @@ Exit status with --once: 0 a task completed; ` + fmt.Sprint(ExitNothing) + ` not
 			}
 			if once {
 				for _, r := range results {
-					if r.Outcome == api.StatusCompleted {
+					if r.Outcome == api.StatusCompleted && r.ReportAccepted != nil && *r.ReportAccepted {
 						return nil
+					}
+					if r.ReportAccepted != nil && !*r.ReportAccepted {
+						return exitWith(ExitNotDone, "the server did not accept the report for %s: %s", r.Task, r.ReportError)
 					}
 				}
 				if ctx.Err() != nil {

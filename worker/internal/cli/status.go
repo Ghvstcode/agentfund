@@ -21,6 +21,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/lockfile"
 	"github.com/agentfund/agentfund/worker/internal/logs"
+	"github.com/agentfund/agentfund/worker/internal/pipeline"
 	"github.com/agentfund/agentfund/worker/internal/store"
 )
 
@@ -87,8 +88,15 @@ func statusCmd(e *env) *cobra.Command {
 			}
 
 			if jsonOut {
+				needs := map[string]string{}
+				for _, k := range keys {
+					if why := needsApproval(cmd.Context(), cfg, cfg.Projects[k]); why != "" {
+						needs[k] = why
+					}
+				}
 				out := map[string]any{
-					"tokens_today": global.Day, "tokens_this_week": global.Week, "tokens_per_day": int64(cfg.Global.TokensPerDay),
+					"needs_approval": needs,
+					"tokens_today":   global.Day, "tokens_this_week": global.Week, "tokens_per_day": int64(cfg.Global.TokensPerDay),
 					"tokens_per_week": int64(cfg.Global.TokensPerWeek), "active": active, "backoff_until": st.Backoff.Until, "runs": st.Runs, "servers": remotes,
 				}
 				enc := json.NewEncoder(e.out)
@@ -109,6 +117,9 @@ func statusCmd(e *env) *cobra.Command {
 					line += fmt.Sprintf(" (project cap/day %s)", *p.TokensPerDay)
 				}
 				fmt.Fprintln(e.out, line)
+				if why := needsApproval(cmd.Context(), cfg, p); why != "" {
+					fmt.Fprintf(e.out, "    ! %s\n", why)
+				}
 			}
 
 			tw := tabwriter.NewWriter(e.out, 0, 4, 2, ' ', 0)
@@ -141,7 +152,7 @@ func statusCmd(e *env) *cobra.Command {
 				fmt.Fprintln(tw, "  WHEN\tTASK\tSTATUS\tTOKENS\tCLAIM\tDETAIL")
 				for _, r := range done {
 					detail := r.PRURL
-					if detail == "" {
+					if detail == "" || strings.HasPrefix(r.Message, "REPORT NOT ACCEPTED") {
 						detail = r.Message
 					}
 					if len(detail) > 70 {
@@ -173,6 +184,24 @@ func statusCmd(e *env) *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable output")
 	cmd.Flags().IntVar(&recent, "recent", 10, "how many finished runs to list")
 	return cmd
+}
+
+// needsApproval asks the server where the project is pinned and says so when
+// that commit is not covered by the donor's approval. It uses the local repo
+// cache only (no fetch); any error yields "".
+func needsApproval(ctx context.Context, cfg *config.Config, p *config.Project) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	proj, err := api.New(p.Server, "").Project(ctx, p.Slug)
+	if err != nil {
+		return ""
+	}
+	ref := config.Ref{Server: p.Server, Slug: p.Slug}
+	ok, why, err := pipeline.ApprovalCovers(ctx, cfg, p, ref, config.ReposDir(), proj.RepoURL, proj.PinnedCommit, false)
+	if err != nil || ok {
+		return ""
+	}
+	return why
 }
 
 func logsCmd(e *env) *cobra.Command {

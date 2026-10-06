@@ -107,7 +107,7 @@ it ends.
 ## Network
 
 - The CLI honours `HTTPS_PROXY`/`HTTP_PROXY` (and lowercase forms; first set wins in the order `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY`); no SOCKS. The sandbox sets all four to `http://egress-proxy:3128`.
-- Required host for model requests: `api.anthropic.com`. That is the whole default allowlist besides the project's git host.
+- Required host for model requests: `api.anthropic.com`. That is the whole default egress allowlist (`sandbox.allow_git_host` and `sandbox.extra_allow_hosts` add to it).
 - The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". Whether a long-lived `setup-token` token ever needs it at run time was **not tested** (it would need a real token and real usage). If a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` are set so the CLI does not try telemetry/update hosts that the proxy would refuse anyway.
 

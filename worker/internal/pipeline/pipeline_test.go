@@ -126,11 +126,11 @@ func TestVerificationFailureReportsAndExecutesNothing(t *testing.T) {
 			f.srv.Tasks[0].ContentHash = strings.Repeat("0", 64)
 			f.srv.Unlock()
 		},
-		"claim names a commit newer than the approval": func(f *fixture) {
+		"claim names a commit the approval does not cover (listing showed the approved one)": func(f *fixture) {
 			f.repo.Write("src/new.py", []byte("# moved on\n"))
 			newer := f.repo.Commit("code moved")
 			f.srv.Lock()
-			f.srv.Commit = newer
+			f.srv.ClaimCommit = newer
 			f.srv.Unlock()
 		},
 		"lock tampered after signing": func(f *fixture) {
@@ -176,6 +176,185 @@ func TestVerificationFailureReportsAndExecutesNothing(t *testing.T) {
 				t.Fatalf("store: %+v", st.Runs)
 			}
 		})
+	}
+}
+
+// When the project's pin moved past the approval, nothing is claimed: the
+// worker says what to do, and re-approval (which also clears the retry
+// cooldown) makes the task runnable again.
+func TestProjectMovedPastApprovalIsNotClaimed(t *testing.T) {
+	f := newFixture(t, nil)
+	f.repo.Write("src/new.py", []byte("# moved on\n"))
+	newer := f.repo.Commit("code moved")
+	f.srv.Lock()
+	f.srv.Commit = newer
+	f.srv.Unlock()
+
+	_, err := f.once()
+	want := "project moved to " + newer[:12] + "; run `agentfund approve " + f.w.Ref.Key() + "` to review and approve it"
+	if !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want ErrNothingToDo mentioning %q, got %v", want, err)
+	}
+	if n := len(f.srv.Calls("/claim")); n != 0 {
+		t.Fatalf("%d claim request(s) for a commit the donor never approved", n)
+	}
+	st, _ := f.w.Store.Snapshot()
+	if len(st.Runs) != 0 {
+		t.Fatalf("nothing should be recorded locally: %+v", st.Runs)
+	}
+	pv, err := f.w.DryRun(context.Background(), 1)
+	if err != nil || len(pv) != 1 || pv[0].WouldRun || pv[0].Why != want {
+		t.Fatalf("dry-run: %+v %v", pv, err)
+	}
+	ok, why, err := ApprovalCovers(context.Background(), f.w.Cfg, f.w.Project, f.w.Ref, f.w.ReposDir, f.srv.RepoURL, newer, false)
+	if err != nil || ok || why != want {
+		t.Fatalf("ApprovalCovers: %v %q %v", ok, why, err)
+	}
+	// An ancestor of the approved commit is covered without any policy.
+	if ok, _, err := ApprovalCovers(context.Background(), f.w.Cfg, f.w.Project, f.w.Ref, f.w.ReposDir, f.srv.RepoURL, f.commit, false); err != nil || !ok {
+		t.Fatalf("approved commit: %v %v", ok, err)
+	}
+	// With follow_unchanged_lock the code-only commit is covered (the lock bytes are identical).
+	f.w.Cfg.Global.FollowUnchangedLock = true
+	if ok, _, err := ApprovalCovers(context.Background(), f.w.Cfg, f.w.Project, f.w.Ref, f.w.ReposDir, f.srv.RepoURL, newer, true); err != nil || !ok {
+		t.Fatalf("follow_unchanged_lock: %v %v", ok, err)
+	}
+	f.w.Cfg.Global.FollowUnchangedLock = false
+	// A changed, re-signed task set is covered only by auto_follow_signed_updates.
+	f.repo.Write("tasks/0003-cli.yaml", append(f.repo.Read("tasks/0003-cli.yaml"), []byte("# edited\n")...))
+	f.repo.Sign(f.key)
+	resigned := f.repo.Commit("new task text")
+	f.w.Cfg.Global.FollowUnchangedLock = true
+	if ok, _, _ := ApprovalCovers(context.Background(), f.w.Cfg, f.w.Project, f.w.Ref, f.w.ReposDir, f.srv.RepoURL, resigned, true); ok {
+		t.Fatal("follow_unchanged_lock must not cover a changed lock")
+	}
+	f.w.Cfg.Global.AutoFollowSignedUpdates = true
+	if ok, _, _ := ApprovalCovers(context.Background(), f.w.Cfg, f.w.Project, f.w.Ref, f.w.ReposDir, f.srv.RepoURL, resigned, true); !ok {
+		t.Fatal("auto_follow_signed_updates should cover it")
+	}
+}
+
+func TestRetryCooldownIsClearedByReapproval(t *testing.T) {
+	f := newFixture(t, nil)
+	f.srv.Lock()
+	f.srv.Tasks[0].ContentHash = strings.Repeat("0", 64) // a genuine hash failure: claimed, reported verification_failed
+	f.srv.Unlock()
+	if res, err := f.once(); err != nil || len(res) != 1 || res[0].Outcome != api.StatusVerificationFailed {
+		t.Fatalf("first pass: %+v %v", res, err)
+	}
+	if _, err := f.once(); !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), "retry_failed_after") {
+		t.Fatalf("cooldown: %v", err)
+	}
+	if n, err := f.w.Store.ClearRetries(f.w.Ref.Key()); err != nil || n != 1 {
+		t.Fatalf("ClearRetries: %d %v", n, err)
+	}
+	if n, _ := f.w.Store.ClearRetries(f.w.Ref.Key()); n != 0 {
+		t.Fatalf("second ClearRetries cleared %d", n)
+	}
+	if res, err := f.once(); err != nil || len(res) != 1 {
+		t.Fatalf("after clearing the cooldown the task should be claimed again: %+v %v", res, err)
+	}
+	if n := len(f.srv.Outcomes()); n != 2 {
+		t.Fatalf("%d claims, want 2", n)
+	}
+}
+
+func TestReportDeliveryRetriesAndRefusal(t *testing.T) {
+	setup := func(t *testing.T) *fixture {
+		f := newFixture(t, nil)
+		f.w.Project.Pubkey = testutil.Key(t).Public().String() // ends in a verification_failed report, no sandbox needed
+		f.w.ReportRetryDelay = time.Millisecond
+		return f
+	}
+	t.Run("transient failures are retried", func(t *testing.T) {
+		f := setup(t)
+		f.srv.Lock()
+		f.srv.ReportFailures = 3
+		f.srv.Unlock()
+		res, err := f.once()
+		if err != nil || len(res) != 1 || res[0].ReportAccepted == nil || !*res[0].ReportAccepted || res[0].ReportError != "" {
+			t.Fatalf("results: %+v %v", res, err)
+		}
+		if n := len(f.srv.Calls("/report")); n != 4 {
+			t.Fatalf("%d report attempts, want 4", n)
+		}
+		if o := f.onlyOutcome(); o.Status != "reported" {
+			t.Fatalf("outcome: %+v", o)
+		}
+	})
+	t.Run("gives up after a few attempts", func(t *testing.T) {
+		f := setup(t)
+		f.srv.Lock()
+		f.srv.ReportFailures = 100
+		f.srv.Unlock()
+		res, err := f.once()
+		if err != nil || len(res) != 1 || res[0].ReportAccepted == nil || *res[0].ReportAccepted || !strings.Contains(res[0].ReportError, "internal") {
+			t.Fatalf("results: %+v %v", res, err)
+		}
+		if n := len(f.srv.Calls("/report")); n != 5 {
+			t.Fatalf("%d report attempts, want 5", n)
+		}
+	})
+	t.Run("a definite refusal is not retried and is surfaced", func(t *testing.T) {
+		f := setup(t)
+		f.srv.Lock()
+		f.srv.ReportProblem = "validation"
+		f.srv.Unlock()
+		res, err := f.once()
+		if err != nil || len(res) != 1 || res[0].ReportAccepted == nil || *res[0].ReportAccepted || !strings.Contains(res[0].ReportError, "validation") {
+			t.Fatalf("results: %+v %v", res, err)
+		}
+		if n := len(f.srv.Calls("/report")); n != 1 {
+			t.Fatalf("%d report attempts, want 1", n)
+		}
+		side, _ := os.ReadFile(strings.TrimSuffix(res[0].LogFile, ".log") + ".report.json")
+		st, _ := f.w.Store.Snapshot()
+		if !strings.Contains(string(side), "report_error") || !strings.Contains(st.Runs[0].Message, "REPORT NOT ACCEPTED") {
+			t.Fatalf("refusal not recorded: sidecar %s store %+v", side, st.Runs[0])
+		}
+	})
+	t.Run("releases are retried too", func(t *testing.T) {
+		f := newFixture(t, nil)
+		f.w.ReportRetryDelay = time.Millisecond
+		f.srv.Lock()
+		f.srv.Tasks[0].MaxTokens = 1000 // passes the pre-check; the signed manifest then exceeds the ceiling
+		f.srv.ReportFailures = 2
+		f.srv.Unlock()
+		f.w.Cfg.Global.MaxTokensPerTask = 500_000
+		res, err := f.once()
+		if err != nil || len(res) != 1 || res[0].Outcome != OutcomeReleased || res[0].ReportAccepted == nil || !*res[0].ReportAccepted {
+			t.Fatalf("results: %+v %v", res, err)
+		}
+		if o := f.onlyOutcome(); o.Status != "released" {
+			t.Fatalf("outcome: %+v", o)
+		}
+	})
+}
+
+func TestServerRetryAfterIsHonoured(t *testing.T) {
+	f := newFixture(t, nil)
+	f.w.Project.Pubkey = testutil.Key(t).Public().String() // the eventual claim ends quickly, without a sandbox
+	f.srv.Lock()
+	f.srv.TasksRateLimited, f.srv.RetryAfterSeconds = 1, 2
+	f.srv.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		_ = f.w.Work(ctx, LoopOptions{Poll: 10 * time.Millisecond, OnResult: func(Result) { cancel() }})
+	}()
+	<-done
+	listings := f.srv.Calls("/v1/projects/hello-project/tasks")
+	if len(listings) != 2 {
+		t.Fatalf("%d task listings; after a 429 with Retry-After: 2 the worker must wait, not poll every 10ms", len(listings))
+	}
+	if el := time.Since(start); el < 2*time.Second {
+		t.Fatalf("worker came back after %s, before the server's Retry-After of 2s", el)
+	}
+	if len(f.srv.Outcomes()) != 1 {
+		t.Fatalf("after the wait the worker should carry on: %+v", f.srv.Outcomes())
 	}
 }
 
@@ -350,6 +529,27 @@ func TestClaimRefusalsAreSkipped(t *testing.T) {
 	}
 }
 
+func TestTaskOptionFetchesOneTask(t *testing.T) {
+	f := newFixture(t, nil)
+	ctx := context.Background()
+	err := f.w.Work(ctx, LoopOptions{Once: true, TaskID: "0002-truncate"})
+	if !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), "0002-truncate") || !strings.Contains(err.Error(), "not claimable") {
+		t.Fatalf("blocked task: %v", err)
+	}
+	if n := len(f.srv.Calls("/v1/tasks/hello-project:0002-truncate")); n != 1 {
+		t.Fatalf("expected one getTask call, saw %d", n)
+	}
+	if len(f.srv.Calls("/tasks?")) != 0 && len(f.srv.Calls("/v1/projects/hello-project/tasks")) != 0 {
+		t.Fatal("--task should not list the whole queue")
+	}
+	if err := f.w.Work(ctx, LoopOptions{Once: true, TaskID: "0009-nope"}); !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), "not-found") {
+		t.Fatalf("unknown task: %v", err)
+	}
+	if len(f.srv.Outcomes()) != 0 {
+		t.Fatal("nothing should have been claimed")
+	}
+}
+
 func TestDryRunClaimsNothing(t *testing.T) {
 	f := newFixture(t, nil)
 	f.w.Cfg.Global.TokensPerDay = 1_500_000 // room for one 1M task
@@ -382,8 +582,12 @@ func TestDryRunClaimsNothing(t *testing.T) {
 func TestEgressAllowlistIsMinimal(t *testing.T) {
 	f := newFixture(t, nil)
 	got := strings.Join(f.w.egressAllowlist("https://github.com/example/hello"), ",")
-	if got != "api.anthropic.com,github.com" {
-		t.Fatalf("default allowlist: %s", got)
+	if got != "api.anthropic.com" {
+		t.Fatalf("default allowlist must be the model API only: %s", got)
+	}
+	f.w.Cfg.Global.Sandbox.AllowGitHost = true
+	if got := strings.Join(f.w.egressAllowlist("https://github.com/example/hello"), ","); got != "api.anthropic.com,github.com" {
+		t.Fatalf("allow_git_host allowlist: %s", got)
 	}
 	if got := strings.Join(f.w.egressAllowlist("file:///tmp/x"), ","); got != "api.anthropic.com" {
 		t.Fatalf("file repo allowlist: %s", got)
