@@ -23,10 +23,15 @@ func TestParseTokens(t *testing.T) {
 		}
 	}
 	for _, v := range []Tokens{0, 999, 1000, 1500, 750_000, 5_000_000, 1_500_000, 200_000_000, 2_000_000_000, 1_234_567} {
-		back, err := ParseTokens(v.String())
-		if err != nil || back != v {
-			t.Errorf("round trip %d -> %q -> %d (%v)", v, v.String(), back, err)
+		for _, form := range []string{v.String(), v.yamlForm()} {
+			back, err := ParseTokens(form)
+			if err != nil || back != v {
+				t.Errorf("round trip %d -> %q -> %d (%v)", v, form, back, err)
+			}
 		}
+	}
+	if Tokens(10_000_000).String() != "10M" || Tokens(8250).String() != "8,250" || Tokens(8250).yamlForm() != "8250" || Tokens(750_000).yamlForm() != "750k" {
+		t.Error("display and config forms")
 	}
 }
 

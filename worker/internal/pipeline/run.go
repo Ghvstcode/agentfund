@@ -23,6 +23,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/sandbox"
 	"github.com/agentfund/agentfund/worker/internal/scope"
 	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 	"github.com/agentfund/agentfund/worker/internal/verify"
 )
 
@@ -365,7 +366,7 @@ func (r *run) interrupted(ctx context.Context) (Result, bool) {
 	case stopShutdown:
 		return r.release(ctx, "worker is shutting down"), true
 	case stopBudget:
-		return r.finish(ctx, api.StatusBudgetExceeded, fmt.Sprintf("killed at max_tokens (%d)", r.maxTokens), nil, nil), true
+		return r.finish(ctx, api.StatusBudgetExceeded, fmt.Sprintf("killed at max_tokens (%s)", tokfmt.Format(r.maxTokens)), nil, nil), true
 	case stopTimeout:
 		return r.finish(ctx, api.StatusTimeout, fmt.Sprintf("killed at timeout_minutes (%d)", r.timeoutMinutes), nil, nil), true
 	}
@@ -414,8 +415,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 			return r.release(parent, "verification could not run: "+verr.Error()), nil
 		}
 		lg.Event("verification", map[string]any{"ok": false, "error": verr.Error()})
-		w.say("%s: REFUSED — %v", r.taskID, verr)
-		return r.finish(parent, api.StatusVerificationFailed, verr.Error(), nil, nil), nil
+		return r.finish(parent, api.StatusVerificationFailed, "REFUSED — "+verr.Error(), nil, nil), nil
 	}
 	m := vres.Manifest
 	r.maxTokens, r.timeoutMinutes = m.MaxTokens, m.TimeoutMinutes
@@ -436,7 +436,6 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		var refused *store.ErrRefused
 		if errors.As(rerr, &refused) {
 			lg.Event("policy", map[string]any{"allow": false, "code": string(refused.Decision.Code), "reason": refused.Decision.Reason})
-			w.say("%s: policy refuses — %s", r.taskID, refused.Decision.Reason)
 			return r.release(parent, "donor policy: "+refused.Decision.Reason), nil
 		}
 		return r.release(parent, "cannot record the reservation: "+rerr.Error()), nil
@@ -493,7 +492,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	defer timer.Stop()
 
 	r.setPhase(api.PhaseAgent)
-	w.say("%s: running %s in the sandbox (max %d tokens, %d min)", r.taskID, w.Runner.Name(), m.MaxTokens, m.TimeoutMinutes)
+	w.say("%s: running %s in the sandbox (max %s tokens, %d min)", r.taskID, w.Runner.Name(), tokfmt.Format(m.MaxTokens), m.TimeoutMinutes)
 	out, runErr := w.Runner.Run(ctx, runner.RunSpec{
 		Prompt: m.Prompt, Model: w.Cfg.Global.Runner.Model, Creds: w.creds,
 		Exec: func(ctx context.Context, cmd, pass, env []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
@@ -537,7 +536,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		}
 		next := policy.NextBackoff(prev, w.now(), out.ResetAt, policy.Jitter())
 		_ = w.Store.SetBackoff(next)
-		w.say("%s: rate limited (%s); releasing the claim and backing off until %s", r.taskID, out.Message, next.Until.Format("15:04:05"))
+		w.say("%s: backing off until %s after a rate limit", r.taskID, next.Until.Format("15:04:05"))
 		return r.release(parent, "rate limited by the model provider: "+out.Message), nil
 	case runErr != nil:
 		return r.finish(parent, api.StatusFailed, "sandbox error while running the agent: "+runErr.Error(), nil, nil), nil
@@ -565,7 +564,6 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		return r.finish(parent, api.StatusFailed, "sandbox error while running verify: "+vErr.Error(), nil, nil), nil
 	}
 	if code != 0 {
-		w.say("%s: verify exited %d", r.taskID, code)
 		return r.finish(parent, api.StatusFailed, fmt.Sprintf("verify command exited with code %d", code), &code, nil), nil
 	}
 
@@ -586,8 +584,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	if derr != nil {
 		if scope.IsViolation(derr) {
 			lg.Event("scope", map[string]any{"ok": false, "violation": derr.Error()})
-			w.say("%s: DISCARDED — %v", r.taskID, derr)
-			return r.finish(parent, api.StatusVerificationFailed, derr.Error(), &code, nil), nil
+			return r.finish(parent, api.StatusVerificationFailed, "DISCARDED — "+derr.Error(), &code, nil), nil
 		}
 		return r.finish(parent, api.StatusFailed, "scope check could not run: "+derr.Error(), &code, nil), nil
 	}
@@ -599,8 +596,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		for _, secret := range w.creds.Secrets {
 			if secret != "" && (bytes.Contains(c.Content, []byte(secret)) || strings.Contains(c.Path, secret)) {
 				lg.Event("scope", map[string]any{"ok": false, "violation": "credential found in " + c.Path})
-				w.say("%s: DISCARDED — the change to %s contains your agent credential", r.taskID, c.Path)
-				return r.finish(parent, api.StatusVerificationFailed, "the change set contains the donor's agent credential ("+c.Path+"); run discarded", &code, nil), nil
+				return r.finish(parent, api.StatusVerificationFailed, "DISCARDED — the change set contains the donor's agent credential ("+c.Path+")", &code, nil), nil
 			}
 		}
 	}
@@ -647,7 +643,6 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		return r.finish(parent, api.StatusFailed, "could not publish the branch: "+perr.Error(), &code, nil), nil
 	}
 	lg.Event("published", map[string]any{"branch": pub.Branch, "pr_url": pub.PRURL, "head_sha": pub.HeadSHA})
-	w.say("%s: completed — %s", r.taskID, pub.PRURL)
 	return r.finish(parent, api.StatusCompleted, "", &code, &pub), nil
 }
 

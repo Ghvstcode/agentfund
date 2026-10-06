@@ -382,6 +382,19 @@ func TestFollowPoliciesAllowNewerCommit(t *testing.T) {
 	}
 }
 
+// missingImageEngine answers `version` and reports every image as absent.
+type missingImageEngine struct{}
+
+func (missingImageEngine) Output(_ context.Context, args ...string) (string, error) {
+	if args[0] == "version" {
+		return "0.0-test", nil
+	}
+	return "", errors.New("No such image")
+}
+func (missingImageEngine) Stream(context.Context, io.Reader, io.Writer, io.Writer, []string, ...string) (int, error) {
+	return 1, errors.New("unexpected")
+}
+
 // permissiveEngine lets Prepare pass and fails sandbox creation without failing the test.
 type permissiveEngine struct{ sawNetworkCreate bool }
 
@@ -415,8 +428,9 @@ func TestPolicyRefusalAfterVerificationReleasesTheClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res) != 1 || res[0].Outcome != OutcomeReleased || !strings.Contains(res[0].Reason, "max_tokens_per_task") {
-		t.Fatalf("results: %+v", res)
+	if len(res) != 1 || res[0].Outcome != OutcomeReleased || !strings.Contains(res[0].Reason, "global.max_tokens_per_task (500k)") ||
+		!strings.Contains(res[0].Reason, "change it in ") || !strings.Contains(res[0].Reason, "config.yaml") {
+		t.Fatalf("a policy refusal must name the setting and where to change it: %+v", res)
 	}
 	o := f.onlyOutcome()
 	if o.Status != "released" || o.Report != nil || !strings.Contains(o.Release["reason"].(string), "donor policy") {
@@ -479,6 +493,17 @@ func TestPrepareFailsBeforeClaiming(t *testing.T) {
 		}
 		if len(f.srv.Calls("/claim")) != 0 {
 			t.Fatal("claimed without credentials")
+		}
+	})
+	t.Run("missing image names the exact command", func(t *testing.T) {
+		f := newFixture(t, nil)
+		f.w.Engine = &missingImageEngine{}
+		_, err := f.once()
+		if err == nil || !strings.Contains(err.Error(), "make -C worker images") || !strings.Contains(err.Error(), "docker pull "+f.w.Cfg.Global.Sandbox.Image) {
+			t.Fatalf("err = %v", err)
+		}
+		if len(f.srv.Calls("/claim")) != 0 {
+			t.Fatal("claimed without images")
 		}
 	})
 	t.Run("server lacks protocol v1", func(t *testing.T) {

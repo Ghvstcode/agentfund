@@ -39,9 +39,8 @@ Keep <http://localhost:8787/hello> open while step 4 runs. This is the end of a 
 ```console
 $ agentfund work hello --once
 22:21:20  working on http://localhost:8787/hello (file:///…/.demo/hello-project), up to 1 task(s) at a time
-22:21:21  0001-slugify: running claude-code in the sandbox (max 1000000 tokens, 20 min)
-22:21:22  0001-slugify: completed — file:///…/.demo/hello-project#agentfund/0001-slugify-9u9q8anf
-0001-slugify: completed (8100 in / 150 out tokens) → file:///…/.demo/hello-project#agentfund/0001-slugify-9u9q8anf
+22:21:21  0001-slugify: running claude-code in the sandbox (max 1M tokens, 20 min)
+0001-slugify: completed (8,100 in / 150 out tokens) — branch agentfund/0001-slugify-9u9q8anf pushed to file:///…/.demo/hello-project
   reported, not yet delivered
     pledged 3,000,000 · reported 8,250 · delivered 0 · merged 0
   CI passed on agentfund/0001-slugify-9u9q8anf

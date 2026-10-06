@@ -73,7 +73,7 @@ func (e *env) readSecret(prompt string) (string, error) {
 }
 
 func (e *env) confirm(question string) (bool, error) {
-	fmt.Fprintf(e.out, "%s [yes/no]: ", question)
+	fmt.Fprintf(e.out, "%s [y/N]: ", question)
 	line, err := e.stdin().ReadString('\n')
 	if err != nil && line == "" {
 		return false, errors.New("no answer on stdin (use --yes to approve non-interactively)")
@@ -81,6 +81,27 @@ func (e *env) confirm(question string) (bool, error) {
 	a := strings.ToLower(strings.TrimSpace(line))
 	return a == "yes" || a == "y", nil
 }
+
+const welcome = app.AppName + ` — back open-source projects with coding-agent work.
+
+Projects publish signed tasks; you review them once, and this tool runs them
+in a locked-down sandbox on your machine, under your own coding-agent
+credentials and within the caps you set. Results arrive as pull requests.
+
+To back a project:
+  ` + app.BinaryName + ` login <server-url>              store the server's API key
+  ` + app.BinaryName + ` approve <server-url>/<project>  read every task, pin the maintainer's key
+  ` + app.BinaryName + ` dry-run <project>               see what would run, and why not
+  ` + app.BinaryName + ` work <project>                  run tasks (Ctrl-C releases them)
+  also: status · logs · daemon install · daemon uninstall
+
+To offer your project's tasks (maintainers):
+  ` + app.BinaryName + ` keygen                          create a signing key
+  ` + app.BinaryName + ` validate tasks/                 check and lint the manifests
+  ` + app.BinaryName + ` sign tasks/                     write the signed task lock
+
+` + app.BinaryName + ` <command> --help explains each one; ` + app.BinaryName + ` --help lists everything.
+`
 
 // Main runs the CLI and returns the process exit code.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -95,6 +116,8 @@ Donors:       login → approve → dry-run → work   (status, logs, daemon ins
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       fmt.Sprintf("%s (commit %s, built %s)", app.Version, app.Commit, app.Date),
+		Args:          cobra.NoArgs,
+		Run:           func(*cobra.Command, []string) { fmt.Fprint(stdout, welcome) },
 	}
 	root.SetArgs(args)
 	root.SetIn(stdin)

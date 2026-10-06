@@ -25,6 +25,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/scope"
 	"github.com/agentfund/agentfund/worker/internal/spec"
 	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 	"github.com/agentfund/agentfund/worker/internal/verify"
 )
 
@@ -163,10 +164,26 @@ func (w *Worker) decide(maxTokens int64, repoURL string, trust policy.Trust, g, 
 		BackoffUntil: backoff.Until, Trust: trust, MaxTokens: maxTokens, RepoURL: repoURL,
 	})
 	if d.Allow && w.SessionBudget > 0 && w.sessionUsed.Load()+maxTokens > w.SessionBudget {
-		return policy.Decision{Code: "session-budget", Reason: fmt.Sprintf("reserving %d tokens would exceed this run's --budget (%d used of %d)",
-			maxTokens, w.sessionUsed.Load(), w.SessionBudget)}
+		return policy.Decision{Code: "session-budget", Reason: fmt.Sprintf("reserving %s tokens would exceed this run's --budget (%s used of %s)",
+			tokfmt.Format(maxTokens), tokfmt.Exact(w.sessionUsed.Load()), tokfmt.Format(w.SessionBudget))}
+	}
+	if !d.Allow {
+		d.Reason += whereToChange(d.Code, w.Ref.Key())
 	}
 	return d
+}
+
+// whereToChange says where the setting behind a refusal lives.
+func whereToChange(code policy.Code, project string) string {
+	switch code {
+	case policy.ServerDailyCap:
+		return " — set by the server while the project is new, not a local setting"
+	case policy.ProjectDailyCap, policy.ProjectWeekCap:
+		return fmt.Sprintf(" — change it under projects[%q] in %s", project, config.Path())
+	case policy.TaskTooLarge, policy.NewProjectCap, policy.DailyCap, policy.WeeklyCap, policy.OutsideSchedule, policy.Concurrency, policy.GitHost:
+		return fmt.Sprintf(" — change it in %s (per-project overrides live under projects[%q])", config.Path(), project)
+	}
+	return ""
 }
 
 // Precheck evaluates the policy for a listed task without claiming it. The
@@ -229,38 +246,53 @@ func NeedsApprovalMessage(commit, ref string) string {
 	return fmt.Sprintf("project moved to %s; run `%s approve %s` to review and approve it", commit, app.BinaryName, ref)
 }
 
+// ErrCommitNotFetched means the commit is not in the local repository cache,
+// so nothing can be said about it without fetching.
+var ErrCommitNotFetched = errors.New("commit is not in the local repository cache")
+
 // ApprovalCovers reports whether the donor's approval (and follow policies)
 // covers commit, fetching the repository when asked. ok is true when it does;
 // otherwise why explains. Infrastructure errors are returned as err.
 func ApprovalCovers(ctx context.Context, cfg *config.Config, p *config.Project, ref config.Ref, reposDir, repoURL, commit string, fetch bool) (ok bool, why string, err error) {
+	_, ok, why, err = ApprovalBasis(ctx, cfg, p, ref, reposDir, repoURL, commit, fetch)
+	if errors.Is(err, ErrCommitNotFetched) {
+		// Not fetched, so certainly not the approved commit; callers that want certainty fetch.
+		return false, NeedsApprovalMessage(commit, ref.Key()), nil
+	}
+	return ok, why, err
+}
+
+// ApprovalBasis is ApprovalCovers that also says on what basis the commit is
+// covered, and returns ErrCommitNotFetched instead of guessing when fetch is
+// false and the commit is not available locally.
+func ApprovalBasis(ctx context.Context, cfg *config.Config, p *config.Project, ref config.Ref, reposDir, repoURL, commit string, fetch bool) (basis verify.Basis, ok bool, why string, err error) {
 	if commit == p.ApprovedCommit {
-		return true, "", nil
+		return verify.BasisApproved, true, "", nil
 	}
 	_, _, vpol, err := EffectiveLimits(cfg, p)
 	if err != nil {
-		return false, "", err
+		return "", false, "", err
 	}
 	if _, allowed := policy.HostAllowed(cfg.Global.AllowedGitHosts, repoURL); !allowed {
-		return true, "", nil // refused by policy elsewhere, with its own message
+		return "", true, "", nil // refused by policy elsewhere, with its own message
 	}
 	repoDir := gitx.CachePath(reposDir, repoURL)
 	if fetch {
 		if err := gitx.Fetch(ctx, repoDir, repoURL, commit, p.ApprovedCommit); err != nil {
-			return false, "", err
+			return "", false, "", err
 		}
+	} else if !gitx.CommitExists(ctx, repoDir, commit) || !gitx.CommitExists(ctx, repoDir, p.ApprovedCommit) {
+		return "", false, "", ErrCommitNotFetched
 	}
-	_, verr := verify.Approved(ctx, repoDir, commit, verify.Approval{Pubkey: p.Pubkey, ApprovedCommit: p.ApprovedCommit, ApprovedLockSHA256: p.ApprovedLockSHA256}, vpol)
+	basis, verr := verify.Approved(ctx, repoDir, commit, verify.Approval{Pubkey: p.Pubkey, ApprovedCommit: p.ApprovedCommit, ApprovedLockSHA256: p.ApprovedLockSHA256}, vpol)
 	switch {
 	case verr == nil:
-		return true, "", nil
+		return basis, true, "", nil
 	case verify.IsApprovalError(verr):
-		return false, NeedsApprovalMessage(commit, ref.Key()), nil
-	case !fetch:
-		// Not fetched yet, so the commit is unknown locally: it is certainly not the approved one.
-		return false, NeedsApprovalMessage(commit, ref.Key()), nil
+		return "", false, NeedsApprovalMessage(commit, ref.Key()), nil
 	}
 	// Anything else (e.g. the commit does not exist) is for the full chain to report against a claim.
-	return true, "", nil
+	return "", true, "", nil
 }
 
 // approvalCheck is ApprovalCovers with a per-commit cache.
@@ -316,7 +348,9 @@ func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
 	}
 	for _, img := range []string{w.Cfg.Global.Sandbox.Image, w.Cfg.Global.Sandbox.EgressProxyImage} {
 		if !sandbox.ImagePresent(ctx, w.Engine, img) {
-			return nil, fmt.Errorf("container image %s is not present locally; pull or build it first (see worker/README.md)", img)
+			return nil, fmt.Errorf("container image %s is not present locally. From a checkout of the repository, build both images with `make -C worker images`; "+
+				"once images are published, `%s pull %s`. To use another image set sandbox.image / sandbox.egress_proxy_image in %s",
+				img, w.Cfg.Global.Sandbox.Docker, img, config.Path())
 		}
 	}
 	if removed, _ := sandbox.CleanOrphans(ctx, w.Engine, store.PIDAlive); len(removed) > 0 {

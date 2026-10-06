@@ -19,6 +19,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/runner"
 	"github.com/agentfund/agentfund/worker/internal/sandbox"
 	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 )
 
 // Environment overrides for images (handy for local builds and end-to-end tests).
@@ -83,10 +84,15 @@ run time: CLAUDE_CODE_OAUTH_TOKEN (from ` + "`claude setup-token`" + `) and/or
 ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. They are passed
 to the sandboxed agent process and are never stored or sent anywhere else.
 
-Exit status with --once: 0 a task completed and its report was accepted;
-` + fmt.Sprint(ExitNothing) + ` nothing could be started (nothing claimable, policy, or the project moved past
-your approval); ` + fmt.Sprint(ExitNotDone) + ` a task was claimed but did not complete, or the server did not
-accept its report (see the --json line, the report sidecar and the log).`,
+Exit status:
+  0    stopped normally; with --once: a task completed and its report was accepted
+  1    error (configuration, credentials, server, Docker, images)
+  2    usage error (unknown command or flag, bad flag value)
+  3    --once: nothing could be started (nothing claimable, your policy refuses,
+       or the project moved past your approval)
+  4    --once: a task was claimed but did not complete, or the server did not
+       accept its report (see the --json line, the report sidecar and the log)
+  130  --once: interrupted (Ctrl-C) before a task completed`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := newWorker(e, args[0], true)
@@ -135,8 +141,7 @@ accept its report (see the --json line, the report sidecar and the log).`,
 					b, _ := json.Marshal(r)
 					fmt.Fprintln(e.out, string(b))
 				} else if r.Outcome != pipeline.OutcomeSkipped {
-					fmt.Fprintf(e.out, "%s: %s (%d in / %d out tokens)%s%s\n", r.Task, r.Outcome, r.TokensIn, r.TokensOut,
-						map[bool]string{true: " — " + r.Reason, false: ""}[r.Reason != ""], map[bool]string{true: " → " + r.PRURL, false: ""}[r.PRURL != ""])
+					fmt.Fprintln(e.out, resultLine(r))
 					if r.ReportAccepted != nil && !*r.ReportAccepted {
 						fmt.Fprintf(e.out, "%s: THE SERVER DID NOT ACCEPT THE REPORT: %s\n", r.Task, r.ReportError)
 					}
@@ -171,7 +176,7 @@ accept its report (see the --json line, the report sidecar and the log).`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&budget, "budget", "", "token budget for this invocation, e.g. 200m, 5M, 750k (in addition to the caps in config.yaml)")
+	f.StringVar(&budget, "budget", "", "a further limit for this invocation, e.g. 200m, 5M, 750k; config caps still apply")
 	f.StringVar(&schedule, "schedule", "", `local-time windows for this invocation, e.g. "02:00-06:00" or "22:00-06:00,12:00-13:00"; "" = any time`)
 	f.IntVar(&maxConcurrent, "max-concurrent", 1, "tasks to run at once (overrides config for this invocation)")
 	f.BoolVar(&once, "once", false, "run at most one task, then exit")
@@ -181,6 +186,24 @@ accept its report (see the --json line, the report sidecar and the log).`,
 	f.StringVar(&sandboxImage, "sandbox-image", "", "sandbox image for this invocation (also $"+EnvSandboxImage+")")
 	f.StringVar(&proxyImage, "egress-proxy-image", "", "egress proxy image for this invocation (also $"+EnvProxyImage+")")
 	return cmd
+}
+
+// resultLine is the one human-readable line printed for a finished attempt.
+func resultLine(r pipeline.Result) string {
+	line := fmt.Sprintf("%s: %s (%s in / %s out tokens)", r.Task, r.Outcome, tokfmt.Exact(r.TokensIn), tokfmt.Exact(r.TokensOut))
+	if r.Reason != "" {
+		line += " — " + r.Reason
+	}
+	switch {
+	case r.PRURL == "":
+	case strings.HasPrefix(r.PRURL, "file://"):
+		// The local publisher has no pull requests: the branch is pushed straight to the repository.
+		repo, _, _ := strings.Cut(r.PRURL, "#")
+		line += fmt.Sprintf(" — branch %s pushed to %s", r.Branch, repo)
+	default:
+		line += " → " + r.PRURL
+	}
+	return line
 }
 
 func dryRunCmd(e *env) *cobra.Command {

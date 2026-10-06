@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 )
 
 // Code names the reason for a refusal.
@@ -210,20 +212,42 @@ func deref(p *int64) int64 {
 	return *p
 }
 
+// Sources of a cap, as named in refusal messages.
+const (
+	SrcGlobalTask  = "global.max_tokens_per_task"
+	SrcProjectTask = "this project's max_tokens_per_task"
+	SrcNewProject  = "global.new_project_max_tokens_per_task"
+	SrcServerTask  = "the cap the server publishes for this project (trust.max_tokens_per_task)"
+)
+
 // TaskCeiling returns the effective per-task ceiling (0 = none) and whether
 // the new-project ceiling is what binds.
 func TaskCeiling(in Input) (ceiling int64, newProject bool) {
-	base := in.Global.MaxTokensPerTask
-	if in.Project.MaxTokensPerTask != nil {
-		// A per-project ceiling replaces the global one only downward when both
-		// are set; an explicit 0 override does not remove the global ceiling.
-		base = minPos(base, *in.Project.MaxTokensPerTask)
+	c, src := TaskCeilingSource(in)
+	return c, src == SrcNewProject || (in.Trust.Tier != TierEstablished && src == SrcServerTask) || (in.Trust.Tier != TierEstablished && c == 0)
+}
+
+// TaskCeilingSource returns the effective per-task ceiling and which setting
+// it comes from. A per-project ceiling can only tighten the global one (an
+// explicit 0 override does not remove it); the new-project ceiling applies
+// unless the server reports the project as established; a server-published
+// cap only ever tightens.
+func TaskCeilingSource(in Input) (ceiling int64, source string) {
+	type cand struct {
+		v   int64
+		src string
 	}
-	if in.Trust.Tier == TierEstablished {
-		return minPos(base, serverCap(in.Trust.MaxTokensPerTask)), false
+	cands := []cand{{in.Global.MaxTokensPerTask, SrcGlobalTask}, {deref(in.Project.MaxTokensPerTask), SrcProjectTask}}
+	if in.Trust.Tier != TierEstablished {
+		cands = append(cands, cand{in.Global.NewProjectMaxTokensPerTask, SrcNewProject})
 	}
-	withNew := minPos(base, in.Global.NewProjectMaxTokensPerTask, serverCap(in.Trust.MaxTokensPerTask))
-	return withNew, withNew != base || base == 0
+	cands = append(cands, cand{serverCap(in.Trust.MaxTokensPerTask), SrcServerTask})
+	for _, c := range cands {
+		if c.v > 0 && (ceiling == 0 || c.v < ceiling) {
+			ceiling, source = c.v, c.src
+		}
+	}
+	return ceiling, source
 }
 
 // serverCap sanitises a server-published cap: only positive values tighten.
@@ -287,23 +311,24 @@ func Evaluate(in Input) Decision {
 	}
 	if !InSchedule(sched, in.Now) {
 		wait := NextOpen(sched, in.Now)
-		return refuse(OutsideSchedule, wait, "outside the configured schedule; next window opens in %s", wait.Round(time.Minute))
+		return refuse(OutsideSchedule, wait, "outside the schedule (global.schedule, or this project's schedule, or --schedule); next window opens in %s", wait.Round(time.Minute))
 	}
 	maxc := in.Global.MaxConcurrent
 	if maxc < 1 {
 		maxc = 1
 	}
 	if in.Active >= maxc {
-		return refuse(Concurrency, 0, "%d task(s) already running (max_concurrent %d)", in.Active, maxc)
+		return refuse(Concurrency, 0, "%d task(s) already running (global.max_concurrent %d)", in.Active, maxc)
 	}
 	if h, ok := HostAllowed(in.Global.AllowedGitHosts, in.RepoURL); !ok {
-		return refuse(GitHost, 0, "git host %q of %q is not in allowed_git_hosts", h, in.RepoURL)
+		return refuse(GitHost, 0, "git host %q of %q is not in global.allowed_git_hosts", h, in.RepoURL)
 	}
-	if ceiling, isNew := TaskCeiling(in); ceiling > 0 && in.MaxTokens > ceiling {
-		if isNew {
-			return refuse(NewProjectCap, 0, "task max_tokens %d exceeds the new-project ceiling %d", in.MaxTokens, ceiling)
+	if ceiling, src := TaskCeilingSource(in); ceiling > 0 && in.MaxTokens > ceiling {
+		code := TaskTooLarge
+		if _, isNew := TaskCeiling(in); isNew {
+			code = NewProjectCap
 		}
-		return refuse(TaskTooLarge, 0, "task max_tokens %d exceeds max_tokens_per_task %d", in.MaxTokens, ceiling)
+		return refuse(code, 0, "task max_tokens %s exceeds %s (%s)", tokfmt.Format(in.MaxTokens), src, tokfmt.Format(ceiling))
 	}
 	type capCheck struct {
 		code  Code
@@ -315,11 +340,11 @@ func Evaluate(in Input) Decision {
 	tomorrow := DayStart(in.Now).AddDate(0, 0, 1)
 	nextWeek := WeekStart(in.Now).AddDate(0, 0, 7)
 	checks := []capCheck{
-		{DailyCap, "tokens_per_day", in.Global.TokensPerDay, in.GlobalUsage.Day, tomorrow},
-		{WeeklyCap, "tokens_per_week", in.Global.TokensPerWeek, in.GlobalUsage.Week, nextWeek},
-		{ProjectDailyCap, "project tokens_per_day", deref(in.Project.TokensPerDay), in.ProjectUsage.Day, tomorrow},
-		{ProjectWeekCap, "project tokens_per_week", deref(in.Project.TokensPerWeek), in.ProjectUsage.Week, nextWeek},
-		{ServerDailyCap, "server-published max_tokens_per_day", serverCap(in.Trust.MaxTokensPerDay), in.ProjectUsage.Day, tomorrow},
+		{DailyCap, "global.tokens_per_day", in.Global.TokensPerDay, in.GlobalUsage.Day, tomorrow},
+		{WeeklyCap, "global.tokens_per_week", in.Global.TokensPerWeek, in.GlobalUsage.Week, nextWeek},
+		{ProjectDailyCap, "this project's tokens_per_day", deref(in.Project.TokensPerDay), in.ProjectUsage.Day, tomorrow},
+		{ProjectWeekCap, "this project's tokens_per_week", deref(in.Project.TokensPerWeek), in.ProjectUsage.Week, nextWeek},
+		{ServerDailyCap, "the daily cap the server publishes for this project (trust.max_tokens_per_day)", serverCap(in.Trust.MaxTokensPerDay), in.ProjectUsage.Day, tomorrow},
 	}
 	for _, c := range checks {
 		if c.limit <= 0 {
@@ -327,7 +352,7 @@ func Evaluate(in Input) Decision {
 		}
 		if c.used+in.MaxTokens > c.limit {
 			return refuse(c.code, c.reset.Sub(in.Now),
-				"reserving %d tokens would exceed %s (%d used of %d)", in.MaxTokens, c.name, c.used, c.limit)
+				"reserving %s tokens would exceed %s (%s used of %s)", tokfmt.Format(in.MaxTokens), c.name, tokfmt.Exact(c.used), tokfmt.Format(c.limit))
 		}
 	}
 	return Decision{Allow: true}

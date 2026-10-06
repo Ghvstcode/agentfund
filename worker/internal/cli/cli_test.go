@@ -14,6 +14,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/lockfile"
 	"github.com/agentfund/agentfund/worker/internal/minisign"
+	"github.com/agentfund/agentfund/worker/internal/pipeline"
 	"github.com/agentfund/agentfund/worker/internal/testenv"
 	"github.com/agentfund/agentfund/worker/internal/testutil"
 	"github.com/agentfund/agentfund/worker/internal/verify"
@@ -296,20 +297,35 @@ func TestApproveDryRunStatus(t *testing.T) {
 		t.Fatal("a declined approval was stored")
 	}
 
-	out := mustRun(t, "yes\n", "approve", ref)
+	out := mustRun(t, "y\n", "approve", ref)
+	// The two key lines (and their fingerprints) start in the same column.
+	col := func(prefix string) int {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, "  "+prefix) {
+				return strings.Index(l, "RW")
+			}
+		}
+		return -1
+	}
+	if a, b := col("server publishes:"), col("repo agentfund.yaml:"); a < 0 || a != b {
+		t.Fatalf("key lines are not aligned (columns %d and %d):\n%s", a, b, out)
+	}
+	if strings.Contains(out, "[yes/no]") || strings.Count(out, "[y/N]") != 2 {
+		t.Fatalf("both prompts should use [y/N]:\n%s", out)
+	}
 	fp := h.Key.Public().Fingerprint()
 	for _, want := range []string{
 		"FINGERPRINT TO PIN:  " + fp, "Audit tab", "repo key == server key: MATCH", "signature OK", "3 manifest(s)",
 		"TASK 0001-slugify", "TASK 0002-truncate", "TASK 0003-cli", "Implement `slugify(text: str) -> str` in src/textutil.py.",
-		"- src/textutil.py", "python3 -m unittest discover -s tests -p \"test_slugify.py\"", "max_tokens:      1000000", "timeout_minutes: 20",
+		"- src/textutil.py", "python3 -m unittest discover -s tests -p \"test_slugify.py\"", "max_tokens:      1M", "timeout_minutes: 20",
 		"depends_on:      0001-slugify, 0002-truncate", "scope.read: (unset", "approved " + ref,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("approve output lacks %q", want)
 		}
 	}
-	for _, want := range []string{`server trust tier:     "established"`, "per-task ceiling:      5m — your max_tokens_per_task binds",
-		"per-day for project:   10m — your tokens_per_day (all projects) binds", "server max_tokens_per_task none", "can only tighten"} {
+	for _, want := range []string{`server trust tier:     "established"`, "per-task ceiling:      5M — your max_tokens_per_task binds",
+		"per-day for project:   10M — your tokens_per_day (all projects) binds", "server max_tokens_per_task none", "can only tighten"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("approve output lacks %q\n%s", want, out[strings.Index(out, "Trust and caps"):])
 		}
@@ -338,15 +354,18 @@ func TestApproveDryRunStatus(t *testing.T) {
 	if cfg, _ := config.Load(); !*cfg.Projects[ref].FollowUnchangedLock {
 		t.Fatal("--yes alone changed the follow setting")
 	}
-	mustRun(t, "", "approve", ref, "--yes", "--no-follow")
+	mustRun(t, "", "approve", ref, "--yes", "--no-follow-unchanged-lock")
 	if cfg, _ := config.Load(); *cfg.Projects[ref].FollowUnchangedLock {
-		t.Fatal("--no-follow did not turn following off")
+		t.Fatal("--no-follow-unchanged-lock did not turn following off")
+	}
+	if help := mustRun(t, "", "approve", "--help"); strings.Contains(help, "--no-follow ") || !strings.Contains(help, "--no-follow-unchanged-lock") {
+		t.Fatalf("approve --help should list only the new flag name:\n%s", help)
 	}
 	mustRun(t, "", "approve", ref, "--yes", "--follow-unchanged-lock")
 	if cfg, _ := config.Load(); !*cfg.Projects[ref].FollowUnchangedLock {
 		t.Fatal("--follow-unchanged-lock did not turn following on")
 	}
-	if code, _, _ := run(t, "", "approve", ref, "--yes", "--follow-unchanged-lock", "--no-follow"); code == 0 {
+	if code, _, _ := run(t, "", "approve", ref, "--yes", "--follow-unchanged-lock", "--no-follow-unchanged-lock"); code == 0 {
 		t.Fatal("contradictory follow flags accepted")
 	}
 	mustRun(t, "", "approve", ref, "--yes", "--no-follow")
@@ -371,7 +390,7 @@ func TestApproveDryRunStatus(t *testing.T) {
 
 	// status with nothing run yet (no API key: the server column reports that instead of failing).
 	out = mustRun(t, "", "status")
-	for _, want := range []string{"Tokens today:", "0 of 10m", "Running (0)", "Recent (0)", ref, "no API key"} {
+	for _, want := range []string{"Tokens today:", "0 of 10M", "Running (0)", "Recent (0)", ref, "no API key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output lacks %q\n%s", want, out)
 		}
@@ -425,6 +444,15 @@ func TestApproveDryRunStatus(t *testing.T) {
 	if out := mustRun(t, "", "status"); !strings.Contains(out, "! "+moved) {
 		t.Fatalf("status after the project moved:\n%s", out)
 	}
+	// With a follow policy that covers the new commit, status says so instead of asking for re-approval.
+	mustRun(t, "", "approve", ref, "--yes", "--commit", h.Commit, "--follow-unchanged-lock")
+	if out := mustRun(t, "", "status"); strings.Contains(out, "run `agentfund approve") || !strings.Contains(out, "covered by follow_unchanged_lock") {
+		t.Fatalf("status with follow_unchanged_lock covering the new commit:\n%s", out)
+	}
+	if out := mustRun(t, "", "dry-run", h.Server.Slug, "-n", "1"); !strings.Contains(out, "WOULD RUN") {
+		t.Fatalf("dry-run with follow_unchanged_lock:\n%s", out)
+	}
+	mustRun(t, "", "approve", ref, "--yes", "--commit", h.Commit, "--no-follow-unchanged-lock")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	// Re-approval of the newer commit; the project is now reported as new with tight server caps.
@@ -434,8 +462,8 @@ func TestApproveDryRunStatus(t *testing.T) {
 	h.Server.Unlock()
 	out = mustRun(t, "", "approve", ref, "--yes")
 	for _, want := range []string{`server trust tier:     "new"`, "treated as a NEW project", "per-task ceiling:      500k — server max_tokens_per_task binds",
-		"your new_project_max_tokens_per_task 5m", "per-day for project:   3m — server max_tokens_per_day binds",
-		"Will NOT run under the per-task ceiling: 0001-slugify (max_tokens 1m), 0002-truncate (max_tokens 1m), 0003-cli (max_tokens 1m)"} {
+		"your new_project_max_tokens_per_task 5M", "per-day for project:   3M — server max_tokens_per_day binds",
+		"Will NOT run under the per-task ceiling: 0001-slugify (max_tokens 1M), 0002-truncate (max_tokens 1M), 0003-cli (max_tokens 1M)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("approve output lacks %q\n%s", want, out[strings.Index(out, "Trust and caps"):])
 		}
@@ -543,9 +571,20 @@ func TestDaemonInstall(t *testing.T) {
 			t.Errorf("service definition must not embed credentials (%q):\n%s", secret, raw)
 		}
 	}
+	if out := mustRun(t, "", "daemon", "uninstall"); !strings.Contains(out, "removed "+path) {
+		t.Fatalf("daemon uninstall:\n%s", out)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("daemon uninstall left the service definition behind")
+	}
+	// The old spelling still works but is no longer advertised.
+	mustRun(t, "", "daemon", "install")
 	mustRun(t, "", "daemon", "install", "--uninstall")
 	if _, err := os.Stat(path); err == nil {
-		t.Fatal("--uninstall left the service definition behind")
+		t.Fatal("daemon install --uninstall (hidden alias) left the service definition behind")
+	}
+	if help := mustRun(t, "", "daemon", "install", "--help"); strings.Contains(help, "--uninstall") {
+		t.Fatalf("daemon install --help still advertises --uninstall:\n%s", help)
 	}
 }
 
@@ -557,6 +596,18 @@ func TestUsageErrors(t *testing.T) {
 			t.Errorf("%v: exit %d, stderr %q", args, code, errOut)
 		}
 	}
+	welcome := mustRun(t, "")
+	for _, want := range []string{"agentfund login <server-url>", "agentfund approve <server-url>/<project>", "agentfund dry-run <project>", "agentfund work <project>", "agentfund keygen", "agentfund sign tasks/", "--help"} {
+		if !strings.Contains(welcome, want) {
+			t.Errorf("no-argument screen lacks %q:\n%s", want, welcome)
+		}
+	}
+	workHelp := mustRun(t, "", "work", "--help")
+	for _, want := range []string{"\n  0 ", "\n  1 ", "\n  2 ", "\n  3 ", "\n  4 ", "\n  130 ", "a further limit for this invocation", "config caps still apply"} {
+		if !strings.Contains(workHelp, want) {
+			t.Errorf("work --help lacks %q", want)
+		}
+	}
 	if out := mustRun(t, "", "version"); !strings.HasPrefix(out, "agentfund ") {
 		t.Fatalf("version: %q", out)
 	}
@@ -564,5 +615,21 @@ func TestUsageErrors(t *testing.T) {
 		if out := mustRun(t, "", sub, "--help"); !strings.Contains(out, "Usage:") {
 			t.Errorf("%s --help: %q", sub, out)
 		}
+	}
+}
+
+func TestResultLine(t *testing.T) {
+	local := resultLine(pipeline.Result{Task: "0001-slugify", Outcome: "completed", TokensIn: 8100, TokensOut: 150,
+		Branch: "agentfund/0001-slugify-00000000", PRURL: "file:///tmp/repo#agentfund/0001-slugify-00000000"})
+	if local != "0001-slugify: completed (8,100 in / 150 out tokens) — branch agentfund/0001-slugify-00000000 pushed to file:///tmp/repo" {
+		t.Errorf("local publisher line: %q", local)
+	}
+	gh := resultLine(pipeline.Result{Task: "0001-slugify", Outcome: "completed", TokensIn: 1_000_000, TokensOut: 2500, Branch: "b", PRURL: "https://github.com/a/b/pull/7"})
+	if gh != "0001-slugify: completed (1,000,000 in / 2,500 out tokens) → https://github.com/a/b/pull/7" {
+		t.Errorf("github line: %q", gh)
+	}
+	failed := resultLine(pipeline.Result{Task: "0002-x", Outcome: "failed", Reason: "verify command exited with code 1"})
+	if failed != "0002-x: failed (0 in / 0 out tokens) — verify command exited with code 1" {
+		t.Errorf("failure line: %q", failed)
 	}
 }

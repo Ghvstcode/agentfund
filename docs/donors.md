@@ -103,7 +103,7 @@ Nothing from the project runs during `approve`. It:
    shell command that will run in the sandbox. Look for anything not plainly about building
    the project: sending data somewhere, printing environment variables, writing outside what
    the title suggests.
-7. Asks `Pin this key and commit? [yes/no]`.
+7. Asks `Pin this key and commit? [y/N]`.
 8. Asks `Keep working when the project moves to a newer commit whose signed task list is
    byte-identical to what you just reviewed? [y/N]` and stores the answer for this project as
    `follow_unchanged_lock` (see [When the project's commit moves](#when-the-projects-commit-moves)).
@@ -111,7 +111,7 @@ Nothing from the project runs during `approve`. It:
 | Flag | Effect |
 | --- | --- |
 | `--yes` | Skip both questions. Manifests are printed, not paged. `follow_unchanged_lock` stays as it is (off by default). |
-| `--follow-unchanged-lock` / `--no-follow` | Answer question 8 on the command line. Mutually exclusive. |
+| `--follow-unchanged-lock` / `--no-follow-unchanged-lock` | Answer question 8 on the command line. Mutually exclusive. |
 | `--no-pager` | Print manifests instead of paging. |
 | `--commit <sha>` | Approve this commit instead of the server's pin. |
 | `--pubkey <key>` | Pin this key instead of the one the server publishes. |
@@ -153,9 +153,8 @@ A real run against the mock agent:
 ```
 $ agentfund work hello --once
 22:08:30  working on http://localhost:8787/hello (file:///…/hello-project), up to 1 task(s) at a time
-22:08:31  0001-slugify: running claude-code in the sandbox (max 1000000 tokens, 20 min)
-22:08:32  0001-slugify: completed — file:///…/hello-project#agentfund/0001-slugify-17y1xtqp
-0001-slugify: completed (8100 in / 150 out tokens) → file:///…/hello-project#agentfund/0001-slugify-17y1xtqp
+22:08:31  0001-slugify: running claude-code in the sandbox (max 1M tokens, 20 min)
+0001-slugify: completed (8,100 in / 150 out tokens) — branch agentfund/0001-slugify-17y1xtqp pushed to file:///…/hello-project
 ```
 
 | Flag | Effect |
@@ -200,7 +199,7 @@ claims as each server sees them.
 ```sh
 agentfund daemon install --project gridrs          # writes the unit, starts nothing
 agentfund daemon install --project gridrs --now    # also enables and starts it
-agentfund daemon install --project gridrs --uninstall --now
+agentfund daemon uninstall --project gridrs --now
 ```
 
 Writes a service definition that runs `agentfund work <project>` and prints how to enable it.
@@ -415,16 +414,16 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | `no credentials for the coding agent: set CLAUDE_CODE_OAUTH_TOKEN ...` | Neither variable is set and there is no `claude_token_command`. | Export one in the shell (or env file) that runs `work`. |
 | `the model provider rejected your credentials or account (<why>); fix them and start the worker again` | Expired or revoked token, billing or organisation problem. The worker has stopped. | Fix the credential. If an OAuth token is valid but still rejected, try adding `platform.claude.com` to `sandbox.extra_allow_hosts` (untested; see `CLAUDE_CODE_NOTES.md`). |
 | `docker is not available: ...` | The daemon is not running or `docker` is not on `PATH`. | Start Docker; under launchd check the unit's `PATH`. |
-| `container image <ref> is not present locally; pull or build it first` | Sandbox or proxy image missing. | `make -C worker images`. |
+| `container image <ref> is not present locally. From a checkout of the repository, build both images with make -C worker images; ...` | Sandbox or proxy image missing. | `make -C worker images`. |
 | `no API key for <server>: run agentfund login ...` | Not logged in to that instance. | `agentfund login <server>`. |
 | `project <ref> is not approved; run agentfund approve ...` | No approval record. | Approve it. |
 | `git host "<h>" ... is not in allowed_git_hosts` | The repository is not on a host you allowed. | Add it only if you trust it. Only github.com can be published to. |
 | `the key in the repository's agentfund.yaml and the key the server publishes DIFFER ...` | The two key channels disagree. One is wrong or compromised. | Do not approve. Ask the maintainer out of band; then `--pubkey`. |
-| `REFUSED — verification failed at step 2 (signature): lock signature does not verify against pinned key SHA256:...` | The lock at the claimed commit is not signed by the key you pinned (or a key it rotated to). | Stop and find out why. Do not re-approve a different key without confirmation from the maintainer. |
+| outcome `verification_failed`: `REFUSED — verification failed at step 2 (signature): lock signature does not verify against pinned key SHA256:...` | The lock at the claimed commit is not signed by the key you pinned (or a key it rotated to). | Stop and find out why. Do not re-approve a different key without confirmation from the maintainer. |
 | `... at step 3 (content): manifest <path> hashes to <x> but the lock says <y>` (or `claim names content hash ...`) | Repository and lock disagree, or the server named a hash the signed lock does not contain. | Nothing ran. Tell the maintainer or the operator. |
 | `idle: project moved to <sha>; run agentfund approve <ref> to review and approve it` (also in `dry-run` and `status`; `work --once` exits `3`) | The project moved past your approval. Nothing was claimed. | Re-approve, or see [follow policies](#when-the-projects-commit-moves). |
 | `... at step 4 (approval): commit <c> is not the approved commit ...` | The pin moved between the pre-claim check and the claim. Reported `verification_failed`. | Re-approve (this also clears the retry cooldown). |
-| `policy refuses — reserving <n> tokens would exceed tokens_per_day (<used> used of <cap>)` | Your cap. Also `tokens_per_week`, `max_tokens_per_task`, `the new-project ceiling`, `this run's --budget`. The claim is released. | Wait, or raise the cap deliberately. |
+| outcome `released`: `donor policy: reserving <n> tokens would exceed global.tokens_per_day (<used> used of <cap>) — change it in <config path> ...` | Your cap. The message names the setting: `global.tokens_per_week`, `global.max_tokens_per_task`, `global.new_project_max_tokens_per_task`, `this project's ...` overrides, the cap the server publishes, or `this run's --budget`. The claim is released. | Wait, or raise the cap deliberately. |
 | `idle: <task> skipped: outside the configured schedule; next window opens in <d>` | Your schedule. | Wait. |
 | `idle: <task> skipped: this task ended "<status>" here <d> ago; not retrying ...` | `retry_failed_after`. | Wait, or lower it. |
 | `<task>: claim refused: task-not-open` | Another donor claimed it first. Normal. | Nothing. |
@@ -435,16 +434,16 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | outcome `failed`: `verify command exited with code <n>` | The agent did not get the work to pass. | Read the `verify` event in the log. |
 | outcome `failed`: `the agent changed nothing inside scope.write` | The agent finished without an in-scope change. | — |
 | `DISCARDED — scope violation: "<path>": file outside scope.write was modified` (or `created`, `deleted`, `never-writable path ...`, `symlinks may not be created or changed`) | The agent stepped outside its lane. The run is thrown away and reported `verification_failed`. | Nothing; this is the check working. |
-| `DISCARDED — the change to <path> contains your agent credential` | Your token ended up in a changed file. | Revoke that credential, then read the prompt in the log. |
+| `DISCARDED — the change set contains the donor's agent credential (<path>)` | Your token ended up in a changed file. | Revoke that credential, then read the prompt in the log. |
 | outcome `failed`: `could not publish the branch: gh is not logged in to github.com ...` | `gh` has no session. Tokens were spent; the work is lost. | `gh auth login`, and check `gh auth status` before long sessions. |
 | `the server did not accept the report (...); it is kept in <file>.report.json` | Network or server error after the run. | The report is on disk; the claim will expire server-side. |
-| `rate limited (<msg>); releasing the claim and backing off until <time>` | Provider rate limit. | Wait; see [section 10](#10-rate-limits-and-backoff). |
+| outcome `released`: `rate limited by the model provider: <msg>`, then `backing off until <time> after a rate limit` | Provider rate limit. | Wait; see [section 10](#10-rate-limits-and-backoff). |
 | `removed <n> orphaned sandbox resource(s) from an earlier run` | Cleanup after a crash or power loss. | Nothing. |
 
 ## 12. Uninstalling
 
 ```sh
-agentfund daemon install --project gridrs --uninstall --now   # once per installed service
+agentfund daemon uninstall --project gridrs --now   # once per installed service
 rm "$(command -v agentfund)"
 rm -rf ~/.config/agentfund          # config, approvals, server keys (and any signing keys!)
 rm -rf ~/.local/share/agentfund     # repo cache, logs, accounting

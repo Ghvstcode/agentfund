@@ -22,6 +22,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/policy"
 	"github.com/agentfund/agentfund/worker/internal/spec"
 	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 	"github.com/agentfund/agentfund/worker/internal/verify"
 )
 
@@ -107,7 +108,7 @@ func renderManifest(w io.Writer, m *spec.Manifest, sha string) {
 	fmt.Fprintf(w, "──────────────────────────────────────────────────────────────────────────────\n")
 	fmt.Fprintf(w, "TASK %s — %s\n", m.ID, m.Title)
 	fmt.Fprintf(w, "  manifest sha256: %s\n", sha)
-	fmt.Fprintf(w, "  max_tokens:      %d\n", m.MaxTokens)
+	fmt.Fprintf(w, "  max_tokens:      %s\n", tokfmt.Format(m.MaxTokens))
 	fmt.Fprintf(w, "  timeout_minutes: %d\n", m.TimeoutMinutes)
 	fmt.Fprintf(w, "  base_branch:     %s\n", m.BaseBranch)
 	if len(m.DependsOn) > 0 {
@@ -169,7 +170,8 @@ Every merged pull request moves the project to a newer commit. approve asks
 whether to keep working when that commit's signed task list is byte-identical
 to the one you reviewed (stored per project as follow_unchanged_lock): the
 prompts cannot change, but the repository's code may have, and it runs only
-inside the sandbox. Non-interactively: --follow-unchanged-lock or --no-follow;
+inside the sandbox. Non-interactively: --follow-unchanged-lock or
+--no-follow-unchanged-lock;
 --yes alone leaves the setting as it is (off by default).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -239,14 +241,23 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or --no-follow;
 				}
 				return f
 			}
-			fmt.Fprintf(e.out, "\nMaintainer key\n  server publishes:      %s\n                         %s\n", serverKey, fp(serverKey))
+			labels := []string{"server publishes:", "repo " + app.DescriptorFile + ":", "--pubkey (you):"}
+			width := 0
+			for _, l := range labels {
+				width = max(width, len(l))
+			}
+			keyLine := func(label, key, fingerprint string) {
+				fmt.Fprintf(e.out, "  %-*s %s\n  %-*s %s\n", width, label, key, width, "", fingerprint)
+			}
+			fmt.Fprintf(e.out, "\nMaintainer key\n")
+			keyLine(labels[0], serverKey, fp(serverKey))
 			if repoKey != "" {
-				fmt.Fprintf(e.out, "  repo %s: %s\n                         %s\n", app.DescriptorFile, repoKey, fp(repoKey))
+				keyLine(labels[1], repoKey, fp(repoKey))
 			} else {
-				fmt.Fprintf(e.out, "  repo %s: (missing or unreadable)\n", app.DescriptorFile)
+				fmt.Fprintf(e.out, "  %-*s (missing or unreadable)\n", width, labels[1])
 			}
 			if pubkeyFlag != "" {
-				fmt.Fprintf(e.out, "  --pubkey (you):        %s\n                         %s\n", pin, pinKey.Fingerprint())
+				keyLine(labels[2], pin, pinKey.Fingerprint())
 			}
 			if verr != nil {
 				return fmt.Errorf("the task lock at %s does not verify against %s: %w", commit[:12], pinKey.Fingerprint(), verr)
@@ -284,7 +295,7 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or --no-follow;
 				total += m.MaxTokens
 				renderManifest(&b, m, en.SHA256)
 			}
-			fmt.Fprintf(&b, "%d task(s), up to %d tokens in total if every task runs to its cap.\n", len(lr.Lock.Manifests), total)
+			fmt.Fprintf(&b, "%d task(s), up to %s tokens in total if every task runs to its cap.\n", len(lr.Lock.Manifests), tokfmt.Format(total))
 			b.WriteString(capsSummary(cfg, cfg.Projects[ref.Key()], proj, sizes))
 			e.page(b.String(), !yes && !noPager)
 
@@ -359,7 +370,10 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or --no-follow;
 	cmd.Flags().BoolVar(&noPager, "no-pager", false, "print manifests instead of opening $PAGER")
 	cmd.Flags().StringVar(&pubkeyFlag, "pubkey", "", "pin this maintainer key (minisign encoding) instead of the one the server publishes")
 	cmd.Flags().BoolVar(&followFlag, "follow-unchanged-lock", false, "keep working on newer commits whose signed task list (MANIFEST.lock) is byte-identical to the one approved now")
-	cmd.Flags().BoolVar(&noFollowFlag, "no-follow", false, "require a new approval whenever the project moves to a newer commit (the default)")
+	cmd.Flags().BoolVar(&noFollowFlag, "no-follow-unchanged-lock", false, "require a new approval whenever the project moves to a newer commit (the default)")
+	cmd.Flags().BoolVar(&noFollowFlag, "no-follow", false, "alias of --no-follow-unchanged-lock")
+	_ = cmd.Flags().MarkHidden("no-follow")
+	cmd.MarkFlagsMutuallyExclusive("follow-unchanged-lock", "no-follow-unchanged-lock")
 	cmd.MarkFlagsMutuallyExclusive("follow-unchanged-lock", "no-follow")
 	cmd.Flags().StringVar(&commitFlag, "commit", "", "approve this commit instead of the server's pinned commit")
 	return cmd

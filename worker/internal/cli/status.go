@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,15 +24,17 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/logs"
 	"github.com/agentfund/agentfund/worker/internal/pipeline"
 	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/agentfund/agentfund/worker/internal/verify"
 )
 
 func hashOf(b []byte) string { return lockfile.SHA256Hex(b) }
 
 func capText(used int64, limit config.Tokens) string {
 	if limit == 0 {
-		return fmt.Sprintf("%s (no cap)", config.Tokens(used))
+		return fmt.Sprintf("%s (no cap)", tokfmt.Exact(used))
 	}
-	return fmt.Sprintf("%s of %s (%d%%)", config.Tokens(used), limit, used*100/int64(limit))
+	return fmt.Sprintf("%s of %s (%d%%)", tokfmt.Exact(used), limit, used*100/int64(limit))
 }
 
 func statusCmd(e *env) *cobra.Command {
@@ -90,8 +93,8 @@ func statusCmd(e *env) *cobra.Command {
 			if jsonOut {
 				needs := map[string]string{}
 				for _, k := range keys {
-					if why := needsApproval(cmd.Context(), cfg, cfg.Projects[k]); why != "" {
-						needs[k] = why
+					if note, must := approvalNote(cmd.Context(), cfg, cfg.Projects[k]); must {
+						needs[k] = note
 					}
 				}
 				out := map[string]any{
@@ -112,13 +115,13 @@ func statusCmd(e *env) *cobra.Command {
 			for _, k := range keys {
 				p := cfg.Projects[k]
 				_, pu, _ := store.UsageOf(st, now, k)
-				line := fmt.Sprintf("  %s: today %s, week %s; approved %s", k, config.Tokens(pu.Day), config.Tokens(pu.Week), short12(p.ApprovedCommit))
+				line := fmt.Sprintf("  %s: today %s, week %s; approved %s", k, tokfmt.Exact(pu.Day), tokfmt.Exact(pu.Week), short12(p.ApprovedCommit))
 				if p.TokensPerDay != nil {
 					line += fmt.Sprintf(" (project cap/day %s)", *p.TokensPerDay)
 				}
 				fmt.Fprintln(e.out, line)
-				if why := needsApproval(cmd.Context(), cfg, p); why != "" {
-					fmt.Fprintf(e.out, "    ! %s\n", why)
+				if note, needs := approvalNote(cmd.Context(), cfg, p); note != "" {
+					fmt.Fprintf(e.out, "    %s %s\n", map[bool]string{true: "!", false: "·"}[needs], note)
 				}
 			}
 
@@ -139,7 +142,7 @@ func statusCmd(e *env) *cobra.Command {
 					if !r.Lease.IsZero() {
 						lease = r.Lease.Local().Format("15:04:05")
 					}
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%d\t%s\t%s\n", r.Task, r.Claim, r.Phase, r.TokensIn+r.TokensOut, r.Reserved, r.Started.Local().Format("15:04:05"), lease)
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Task, r.Claim, r.Phase, tokfmt.Exact(r.TokensIn+r.TokensOut), tokfmt.Format(r.Reserved), r.Started.Local().Format("15:04:05"), lease)
 				}
 				tw.Flush()
 			}
@@ -152,13 +155,17 @@ func statusCmd(e *env) *cobra.Command {
 				fmt.Fprintln(tw, "  WHEN\tTASK\tSTATUS\tTOKENS\tCLAIM\tDETAIL")
 				for _, r := range done {
 					detail := r.PRURL
+					if strings.HasPrefix(detail, "file://") {
+						repo, _, _ := strings.Cut(detail, "#")
+						detail = "branch " + r.Branch + " pushed to " + repo
+					}
 					if detail == "" || strings.HasPrefix(r.Message, "REPORT NOT ACCEPTED") {
 						detail = r.Message
 					}
 					if len(detail) > 70 {
 						detail = detail[:70] + "…"
 					}
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%d\t%s\t%s\n", r.Started.Local().Format("Jan 02 15:04"), r.Task, r.Status, r.TokensIn+r.TokensOut, r.Claim, detail)
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", r.Started.Local().Format("Jan 02 15:04"), r.Task, r.Status, tokfmt.Exact(r.TokensIn+r.TokensOut), r.Claim, detail)
 				}
 				tw.Flush()
 			}
@@ -186,22 +193,39 @@ func statusCmd(e *env) *cobra.Command {
 	return cmd
 }
 
-// needsApproval asks the server where the project is pinned and says so when
-// that commit is not covered by the donor's approval. It uses the local repo
-// cache only (no fetch); any error yields "".
-func needsApproval(ctx context.Context, cfg *config.Config, p *config.Project) string {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+// approvalNote asks the server where the project is pinned and describes how
+// that commit relates to the donor's approval: "" when it is the approved
+// commit (or nothing can be said), a "covered by …" note when a follow
+// policy or ancestry covers it, the re-approve message when it does not, and
+// a hedge when the repository could not be fetched. needs is true only when
+// re-approval is definitely required.
+func approvalNote(ctx context.Context, cfg *config.Config, p *config.Project) (note string, needs bool) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	proj, err := api.New(p.Server, "").Project(ctx, p.Slug)
-	if err != nil {
-		return ""
+	if err != nil || proj.PinnedCommit == p.ApprovedCommit {
+		return "", false
 	}
 	ref := config.Ref{Server: p.Server, Slug: p.Slug}
-	ok, why, err := pipeline.ApprovalCovers(ctx, cfg, p, ref, config.ReposDir(), proj.RepoURL, proj.PinnedCommit, false)
-	if err != nil || ok {
-		return ""
+	basis, ok, why, err := pipeline.ApprovalBasis(ctx, cfg, p, ref, config.ReposDir(), proj.RepoURL, proj.PinnedCommit, false)
+	if errors.Is(err, pipeline.ErrCommitNotFetched) {
+		basis, ok, why, err = pipeline.ApprovalBasis(ctx, cfg, p, ref, config.ReposDir(), proj.RepoURL, proj.PinnedCommit, true)
 	}
-	return why
+	switch {
+	case err != nil:
+		return fmt.Sprintf("project is now at %s, which may need re-approval; `%s dry-run %s` checks", short12(proj.PinnedCommit), app.BinaryName, p.Slug), false
+	case !ok:
+		return why, true
+	}
+	switch basis {
+	case verify.BasisUnchangedLock:
+		return fmt.Sprintf("project is now at %s — covered by follow_unchanged_lock (the task list is byte-identical to the one you approved)", short12(proj.PinnedCommit)), false
+	case verify.BasisAutoFollow:
+		return fmt.Sprintf("project is now at %s — covered by auto_follow_signed_updates", short12(proj.PinnedCommit)), false
+	case verify.BasisAncestor:
+		return fmt.Sprintf("project is at %s, an ancestor of the commit you approved", short12(proj.PinnedCommit)), false
+	}
+	return "", false
 }
 
 func logsCmd(e *env) *cobra.Command {
@@ -266,7 +290,7 @@ func daemonCmd(e *env) *cobra.Command {
 		Short: "Write a systemd user unit (Linux) or launchd agent (macOS) that runs `work`",
 		Long: `Write a service definition that runs "` + app.BinaryName + ` work <project>" in the
 background, and print how to enable it. Nothing is started unless --now is
-given. --uninstall removes the definition (and stops the service).
+given. Remove it again with "` + app.BinaryName + ` daemon uninstall".
 
 The service needs your coding-agent credentials at run time. This tool never
 stores them: on Linux the unit reads an optional environment file you create
@@ -376,9 +400,25 @@ call that reads the token from your keychain).`,
 		},
 	}
 	install.Flags().StringVar(&project, "project", "", "project to work on (<server-url>/<slug> or unique slug)")
-	install.Flags().BoolVar(&uninstall, "uninstall", false, "remove the service definition")
-	install.Flags().BoolVar(&now, "now", false, "also enable and start (or, with --uninstall, stop) the service")
-	root.AddCommand(install)
+	install.Flags().BoolVar(&uninstall, "uninstall", false, "remove the service definition (same as `daemon uninstall`)")
+	_ = install.Flags().MarkHidden("uninstall")
+	install.Flags().BoolVar(&now, "now", false, "also enable and start the service")
+	remove := &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the service definition written by `daemon install`",
+		Long: `Remove the systemd user unit (Linux) or launchd agent (macOS) that
+"` + app.BinaryName + ` daemon install" wrote for a project. With --now the service is
+also stopped and disabled first; without it, stop it yourself or it keeps
+running until the next logout/reboot.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			uninstall = true
+			return install.RunE(cmd, args)
+		},
+	}
+	remove.Flags().StringVar(&project, "project", "", "project whose service to remove (<server-url>/<slug> or unique slug)")
+	remove.Flags().BoolVar(&now, "now", false, "also stop and disable the running service")
+	root.AddCommand(install, remove)
 	return root
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 )
 
 // Tokens is a token quantity that reads "200m", "5M", "750k", "1.5m" or a plain integer.
@@ -44,21 +46,17 @@ func ParseTokens(s string) (Tokens, error) {
 	return Tokens(math.Round(f * mult)), nil
 }
 
-// String renders the amount compactly.
-func (t Tokens) String() string {
-	n := int64(t)
-	switch {
-	case n >= 1e9 && n%1e8 == 0:
-		return trimFloat(float64(n)/1e9) + "g"
-	case n >= 1e6 && n%1e5 == 0:
-		return trimFloat(float64(n)/1e6) + "m"
-	case n >= 1e3 && n%1e2 == 0:
-		return trimFloat(float64(n)/1e3) + "k"
-	}
-	return strconv.FormatInt(n, 10)
-}
+// String renders the amount for people (see tokfmt.Format): 10M, 750k, 8,250.
+func (t Tokens) String() string { return tokfmt.Format(int64(t)) }
 
-func trimFloat(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+// yamlForm is what is written to config.yaml: the compact form for round
+// amounts, plain digits otherwise.
+func (t Tokens) yamlForm() string {
+	if c := tokfmt.Compact(int64(t)); c != "" {
+		return c
+	}
+	return strconv.FormatInt(int64(t), 10)
+}
 
 // UnmarshalYAML accepts integers and suffixed strings.
 func (t *Tokens) UnmarshalYAML(n *yaml.Node) error {
@@ -71,4 +69,4 @@ func (t *Tokens) UnmarshalYAML(n *yaml.Node) error {
 }
 
 // MarshalYAML writes the compact form.
-func (t Tokens) MarshalYAML() (any, error) { return t.String(), nil }
+func (t Tokens) MarshalYAML() (any, error) { return t.yamlForm(), nil }

@@ -9,6 +9,7 @@ import (
 	"github.com/agentfund/agentfund/worker/internal/config"
 	"github.com/agentfund/agentfund/worker/internal/pipeline"
 	"github.com/agentfund/agentfund/worker/internal/policy"
+	"github.com/agentfund/agentfund/worker/internal/tokfmt"
 )
 
 type capSource struct {
@@ -32,7 +33,7 @@ func capLine(label string, sources []capSource) string {
 	for _, s := range sources {
 		v := "none"
 		if s.value > 0 {
-			v = config.Tokens(s.value).String()
+			v = tokfmt.Format(s.value)
 		}
 		parts = append(parts, s.name+" "+v)
 	}
@@ -40,7 +41,7 @@ func capLine(label string, sources []capSource) string {
 	if val == 0 {
 		return fmt.Sprintf("  %-22s no cap (%s)\n", label, strings.Join(parts, "; "))
 	}
-	return fmt.Sprintf("  %-22s %s — %s binds (%s)\n", label, config.Tokens(val), who, strings.Join(parts, "; "))
+	return fmt.Sprintf("  %-22s %s — %s binds (%s)\n", label, tokfmt.Format(val), who, strings.Join(parts, "; "))
 }
 
 // capsSummary shows the server-published trust tier and caps next to the
@@ -82,7 +83,7 @@ func capsSummary(cfg *config.Config, p *config.Project, proj *api.Project, sizes
 	var over []string
 	for id, n := range sizes {
 		if ceiling > 0 && n > ceiling {
-			over = append(over, fmt.Sprintf("%s (max_tokens %s)", id, config.Tokens(n)))
+			over = append(over, fmt.Sprintf("%s (max_tokens %s)", id, tokfmt.Format(n)))
 		}
 	}
 	sort.Strings(over)

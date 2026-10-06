@@ -73,18 +73,20 @@ agentfund status
 | Command | What it does |
 | --- | --- |
 | `login <server-url> [--key-stdin]` | Reads the server API key, checks it with `GET /v1/me`, stores it in `credentials.yaml`. |
-| `approve <server-url>/<project> [--yes] [--no-pager] [--pubkey KEY] [--commit SHA] [--follow-unchanged-lock \| --no-follow]` | Negotiates the protocol, clones the repo, verifies the lock at the server's pinned commit, prints the **key fingerprint** (compare it with the server's Audit tab) and whether the key in the repo's `agentfund.yaml` equals the key the server publishes, shows every manifest in full through `$PAGER`, then the server's trust tier and caps next to yours and which one binds, asks, then pins `{pubkey, approved_commit, approved_lock_sha256}`. Refuses when the two key channels disagree (and no valid rotation chain connects them) unless you pass the key you trust with `--pubkey`. Run again to approve a newer commit; re-approving also clears the `retry_failed_after` cooldown of that project's earlier failed runs. It also asks whether to keep working when the project moves to a newer commit whose signed task list is byte-identical (stored per project as `follow_unchanged_lock`; `--follow-unchanged-lock` / `--no-follow` non-interactively, `--yes` alone leaves it off): the prompts cannot change, the repository's code may have, and it runs only inside the sandbox. |
+| `approve <server-url>/<project> [--yes] [--no-pager] [--pubkey KEY] [--commit SHA] [--follow-unchanged-lock \| --no-follow-unchanged-lock]` | Negotiates the protocol, clones the repo, verifies the lock at the server's pinned commit, prints the **key fingerprint** (compare it with the server's Audit tab) and whether the key in the repo's `agentfund.yaml` equals the key the server publishes, shows every manifest in full through `$PAGER`, then the server's trust tier and caps next to yours and which one binds, asks, then pins `{pubkey, approved_commit, approved_lock_sha256}`. Refuses when the two key channels disagree (and no valid rotation chain connects them) unless you pass the key you trust with `--pubkey`. Run again to approve a newer commit; re-approving also clears the `retry_failed_after` cooldown of that project's earlier failed runs. It also asks whether to keep working when the project moves to a newer commit whose signed task list is byte-identical (stored per project as `follow_unchanged_lock`; `--follow-unchanged-lock` / `--no-follow-unchanged-lock` non-interactively, `--yes` alone leaves it off): the prompts cannot change, the repository's code may have, and it runs only inside the sandbox. |
 | `dry-run <project> [-n 5]` | Fetches and verifies like `work`, evaluates your policy, prints the next N open tasks with full signed prompts and the reason for every skip. No claims, no execution. |
 | `work <project> [--budget 200m] [--schedule "02:00-06:00"] [--max-concurrent 1] [--once] [--task ID] [--json] [--poll 30s] [--sandbox-image REF] [--egress-proxy-image REF]` | The loop described below. SIGINT/SIGTERM stops the sandbox and releases active claims. |
 | `status [--json] [--recent 10]` | Running and recent runs, tokens today/this week against the caps, rate-limit backoff, and active claims according to each server (`GET /v1/me/claims`). |
 | `logs [claim] [--path] [--report]` | Lists run logs, or prints one. `--report` shows the sidecar with the digest and the report that was sent. |
-| `daemon install [--project P] [--uninstall] [--now]` | Writes a systemd user unit (Linux) or launchd agent (macOS) running `work`; prints how to enable it. Starts nothing without `--now`. Never embeds credentials. |
+| `daemon install [--project P] [--now]` | Writes a systemd user unit (Linux) or launchd agent (macOS) running `work`; prints how to enable it. Starts nothing without `--now`. Never embeds credentials. |
+| `daemon uninstall [--project P] [--now]` | Removes that service definition; `--now` also stops and disables the service. |
 
 `<project>` is `<server-url>/<slug>`, or just the slug when it is unique among your approvals.
 
-`work --once` exit status: `0` a task completed and its report was accepted · `3` nothing could be
-started (nothing claimable, policy, or the project moved past your approval) · `4` a task was
-claimed but did not complete, or the server did not accept its report · `1` error. With `--json` each finished attempt is one JSON object on
+`work` exit status: `0` stopped normally (with `--once`: a task completed and its report was
+accepted) · `1` error · `2` usage error · `3` `--once`: nothing could be started (nothing claimable,
+policy, or the project moved past your approval) · `4` `--once`: a task was claimed but did not
+complete, or the server did not accept its report · `130` `--once`: interrupted. With `--json` each finished attempt is one JSON object on
 stdout (`task`, `claim`, `outcome`, `reason`, `tokens_in`, `tokens_out`, `branch`, `pr_url`,
 `head_sha`, `log_file`, `log_digest`, `report_accepted`, and `report_error` when the server refused
 or could not be reached — transient failures are retried a few times with backoff first).
@@ -144,7 +146,9 @@ projects:
     # auto_follow_signed_updates, follow_unchanged_lock, api_key_env
 ```
 
-Token amounts accept `200m`, `5M`, `750k`, `1.5m` or plain integers; `0` means "no cap". A task's
+Token amounts accept `200m`, `5M`, `750k`, `1.5m` or plain integers (case does not matter); `0`
+means "no cap". Output uses one format everywhere: round amounts as `10M` / `750k`, exact counts
+with thousands separators (`8,250`). A task's
 full `max_tokens` is reserved before it starts and settled to the real usage afterwards, so caps
 cannot be overshot; the accounting is persisted (`state.json`) and survives restarts. Per-project
 caps apply in addition to the global ones and a per-project task ceiling can only tighten the

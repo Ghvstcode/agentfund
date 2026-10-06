@@ -77,7 +77,7 @@ func TestIntegrationCLIEndToEnd(t *testing.T) {
 	}
 
 	status := mustRun(t, "", "status")
-	for _, want := range []string{"8250 of 10m", "completed", "0001-slugify", res.Claim, "none"} {
+	for _, want := range []string{"8,250 of 10M", "completed", "0001-slugify", res.Claim, "none"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status lacks %q:\n%s", want, status)
 		}
