@@ -179,6 +179,7 @@ function seedProject(world, [slug, description, language, tags, goal, progress],
     pubkey_fingerprint: `SHA256:${hex(rnd, 64)}`,
     pinned_commit: hex(rnd, 40),
     lock_sha256: hex(rnd, 64),
+    webhook_secret: `whsec_${hex(rnd, 40)}`,
     token_goal: goal,
     created_at: iso(created),
     last_indexed_at: iso(now - between(rnd, 1, 50) * 60_000),
@@ -410,9 +411,10 @@ function projectView(world, project) {
   const mergedTasks = world.tasks.filter((t) => inProject(t) && t.state === 'merged').length;
   const established = mergedTasks >= world.config.established_after_merged_tasks;
   const lastEvent = world.events.find(inProject);
+  const { webhook_secret: _secret, ...publicFields } = project;
   return {
     id: `${BASE_URL}/${project.slug}`,
-    ...project,
+    ...publicFields,
     maintainer: userRef(project.maintainer),
     lock_url: `${project.repo_url}/blob/${project.pinned_commit}/tasks/MANIFEST.lock`,
     commit_url: `${project.repo_url}/commit/${project.pinned_commit}`,
@@ -759,6 +761,7 @@ function manageProject(world, slug, req) {
 }
 
 function previewOf(repoUrl, rnd) {
+  if (repoUrl.endsWith('/missing')) return { ok: false, errors: ['repository not found or not public'] };
   if (!/^https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+$/.test(repoUrl)) {
     throw new Problem(422, 'validation', 'Invalid repository URL', undefined, [
       { path: 'repo_url', message: 'Expected an https URL like https://github.com/owner/repo' },
@@ -893,6 +896,7 @@ route('POST', '/v1/projects', ({ world, req, body }) => {
     pubkey_fingerprint: preview.pubkey_fingerprint,
     pinned_commit: preview.commit,
     lock_sha256: preview.lock_sha256,
+    webhook_secret: `whsec_${hex(world.rnd, 40)}`,
     token_goal: body.token_goal ?? preview.agentfund.token_goal,
     created_at: iso(now),
     last_indexed_at: iso(now),
@@ -945,6 +949,23 @@ route('POST', '/v1/projects/:slug/repin', ({ world, params, req, body }) => {
   });
   broadcast(world, project.slug, record);
   return projectView(world, project);
+});
+
+const webhookView = (project) => ({
+  url: `${BASE_URL}/v1/webhooks/ci`,
+  secret: project.webhook_secret,
+  provider: project.ci_provider,
+  content_type: 'application/json',
+  events: project.ci_provider === 'github' ? ['workflow_run', 'check_suite', 'pull_request', 'push'] : [],
+  ci_poll: true,
+});
+
+route('GET', '/v1/projects/:slug/webhook', ({ world, params, req }) => webhookView(manageProject(world, params.slug, req).project));
+
+route('POST', '/v1/projects/:slug/webhook/rotate', ({ world, params, req }) => {
+  const { project } = manageProject(world, params.slug, req);
+  project.webhook_secret = `whsec_${hex(world.rnd, 40)}`;
+  return webhookView(project);
 });
 
 route('GET', '/v1/projects/:slug/tasks', ({ world, params, query, req }) => {

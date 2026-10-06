@@ -1267,6 +1267,63 @@
   gap: var(--space-2);
 }
 
+/* ───────── Disclosure ───────── */
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A plus that loses its upright when open: drawn with two hairlines. */
+.disclosure__marker {
+  position: relative;
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+.disclosure__marker::before,
+.disclosure__marker::after {
+  content: '';
+  position: absolute;
+  inset: calc(50% - 0.5px) 0 auto;
+  height: 1px;
+  background: currentcolor;
+}
+
+.disclosure__marker::after {
+  transform: rotate(90deg);
+}
+
+.disclosure[aria-expanded='true'] .disclosure__marker::after {
+  display: none;
+}
+
+.webhook {
+  border-top: var(--border);
+  padding-top: var(--space-3);
+  min-width: 0;
+}
+
+.webhook__title {
+  font-size: var(--text-base);
+  letter-spacing: 0;
+}
+
+.webhook__body:not([hidden]) {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-3);
+  max-width: 48rem;
+  font-size: var(--text-sm);
+}
+
 /* ───────── Tabs ───────── */
 
 .tabs {

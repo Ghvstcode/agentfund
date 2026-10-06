@@ -25,3 +25,4 @@ export type ClaimSummary = Schemas['ClaimSummary'];
 export type InstanceConfig = Schemas['InstanceConfig'];
 export type InstanceConfigUpdate = Schemas['InstanceConfigUpdate'];
 export type Problem = Schemas['Problem'];
+export type ProjectWebhook = Schemas['ProjectWebhook'];

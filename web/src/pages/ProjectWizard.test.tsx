@@ -138,6 +138,43 @@ describe('ProjectWizard', () => {
     expect(screen.getByLabelText('Repository URL')).toHaveValue(REPO);
   });
 
+  it('shows the server\'s reason as-is when the repository cannot be read', async () => {
+    mockApi({
+      'GET /v1/meta': () => META,
+      'POST /v1/projects/preview': () => ({ ok: false, errors: ['repository not found or not public'] }),
+    });
+    const user = userEvent.setup();
+    renderApp(<ProjectWizard />);
+    await checkRepository(user);
+    expect(await screen.findByText('repository not found or not public')).toBeInTheDocument();
+    expect(screen.getByText(/Check the URL and that the repository is public/)).toBeInTheDocument();
+    expect(screen.queryByText('Signature')).not.toBeInTheDocument();
+    expect(screen.queryByText(/agentfund sign/)).not.toBeInTheDocument();
+  });
+
+  it('ends on the CI webhook settings for the new project', async () => {
+    mockApi({
+      'GET /v1/meta': () => META,
+      'POST /v1/projects/preview': () => PREVIEW,
+      'POST /v1/projects': () => reply(201, created('active')),
+      'GET /v1/projects/grid/webhook': () => ({
+        url: 'https://fund.example/v1/webhooks/ci',
+        secret: 'whsec_new',
+        provider: 'github',
+        content_type: 'application/json',
+        events: ['workflow_run'],
+        ci_poll: false,
+      }),
+    });
+    const user = userEvent.setup();
+    renderApp(<ProjectWizard />);
+    await checkRepository(user);
+    await user.click(await screen.findByRole('button', { name: 'Create project' }));
+    expect(await screen.findByRole('heading', { name: 'Connect CI' })).toBeInTheDocument();
+    expect(await screen.findByText('https://fund.example/v1/webhooks/ci')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reveal' })).toBeInTheDocument();
+  });
+
   it('reports a failed preview next to the URL field', async () => {
     mockApi({
       'GET /v1/meta': () => META,

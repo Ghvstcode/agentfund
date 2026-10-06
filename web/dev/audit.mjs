@@ -37,6 +37,7 @@ const AXE_PAGES = [
   ['donor', '/u/ada'],
   ['leaderboard', '/donors'],
   ['maintain', '/maintain'],
+  ['maintain-webhook', '/maintain', (page) => page.getByRole('button', { name: 'CI webhook' }).first().click()],
   ['wizard', '/maintain/new'],
   ['settings', '/settings'],
   ['admin-users', '/admin'],

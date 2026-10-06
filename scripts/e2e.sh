@@ -9,7 +9,10 @@
 # report → CI result → delivered → merge → merged, the dependent task unlocking, and the SSE
 # counter moving while the worker runs.
 #
-# Needs: docker, node 22 + pnpm, go, git, curl, openssl.   Usage: sh scripts/e2e.sh [--keep]
+# Needs: docker, node 22 + pnpm, go, git, curl, openssl.
+# Usage: sh scripts/e2e.sh [--keep | --serve]
+#   --keep   keep the work directory afterwards
+#   --serve  after passing, leave the instance running so you can browse it (Ctrl-C to stop)
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -233,3 +236,8 @@ curl -fsS "$BASE/hello" | grep -qi 'og:title' || fail "project page has no injec
 ok "API reads, sitemap, feed, OG image, SPA with injected meta, audit events"
 
 printf '\n\033[1;32mE2E PASSED\033[0m  claim → verify → sandbox → PR branch → CI → delivered → merged, counter moved, tampering refused.\n'
+
+if [ "$KEEP" = "--serve" ]; then
+  printf '\nInstance left running: %s/hello  (dev login: maintainer or donor). Ctrl-C to stop.\n' "$BASE"
+  wait "$SERVER_PID"
+fi

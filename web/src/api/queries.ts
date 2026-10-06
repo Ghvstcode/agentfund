@@ -46,6 +46,8 @@ export const queryKeys = {
   project: (slug: string) => ['project', slug] as const,
   tasks: (slug: string) => ['project', slug, 'tasks'] as const,
   task: (slug: string, manifestId: string) => ['project', slug, 'task', manifestId] as const,
+  // Outside the `project` prefix on purpose: live events must not refetch a secret.
+  webhook: (slug: string) => ['webhook', slug] as const,
   ledger: (slug: string) => ['project', slug, 'ledger'] as const,
   projectEvents: (slug: string) => ['project', slug, 'events'] as const,
   events: ['events'] as const,

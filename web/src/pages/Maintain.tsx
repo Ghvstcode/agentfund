@@ -13,6 +13,7 @@ import { Num } from '../components/Num';
 import { SignInRequired } from '../components/SignIn';
 import { describeError, EmptyState, ErrorState, Loading, Notice, SkeletonRows } from '../components/States';
 import { Time } from '../components/Time';
+import { WebhookPanel } from '../components/WebhookPanel';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSession } from '../hooks/useSession';
 import { formatExact, parseTokenAmount } from '../lib/format';
@@ -156,6 +157,8 @@ function ManageProject({ project }: { project: Project }) {
           onChange={(event) => patch.mutate({ follow_branch: event.target.checked })}
         />
       </div>
+
+      {project.status !== 'removed' && <WebhookPanel slug={slug} />}
 
       {(patch.isError || repin.isError) && (
         <Notice tone="strong" role="alert" title="That change was not saved">

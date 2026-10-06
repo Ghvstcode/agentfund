@@ -13,6 +13,7 @@ import { SignInRequired } from '../components/SignIn';
 import { describeError, Notice } from '../components/States';
 import { TableScroll } from '../components/TableScroll';
 import { CLI_NAME } from '../config';
+import { WebhookPanel } from '../components/WebhookPanel';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSession } from '../hooks/useSession';
 import { formatExact, parseTokenAmount } from '../lib/format';
@@ -55,9 +56,14 @@ function Review({ preview }: { preview: ProjectPreview }) {
               <li>Verification failed without a specific reason.</li>
             )}
           </ul>
-          <p>
-            Fix these in the repository, run <code>{CLI_NAME} sign</code>, push, and check again.
-          </p>
+          {/* No signature verdict means the repository was never read: nothing to re-sign. */}
+          {preview.signature_valid === undefined ? (
+            <p>Check the URL and that the repository is public, then try again.</p>
+          ) : (
+            <p>
+              Fix these in the repository, run <code>{CLI_NAME} sign</code>, push, and check again.
+            </p>
+          )}
         </Notice>
       )}
 
@@ -193,6 +199,11 @@ function Done({ project }: { project: Project }) {
           <CommandLine command={`${CLI_NAME} approve ${meta.data.base_url}/${project.slug}`} label="approve the project" />
         </section>
       )}
+      <section className="wizard__block" aria-labelledby="wizard-ci">
+        <h3 id="wizard-ci">Connect CI</h3>
+        <p className="muted">Delivery is only counted when CI confirms it. This is the last step.</p>
+        <WebhookPanel slug={project.slug} defaultOpen />
+      </section>
       <div className="button-row">
         <ButtonLink to={`/${project.slug}`} variant="primary">
           Open the project page

@@ -33,6 +33,7 @@ const PAGES = [
   ['donor', '/u/ada'],
   ['leaderboard', '/donors'],
   ['maintain', '/maintain', { auth: true }],
+  ['maintain-webhook', '/maintain', { auth: true, act: (page) => page.getByRole('button', { name: 'CI webhook' }).first().click() }],
   ['maintain-signed-out', '/maintain'],
   ['wizard-repository', '/maintain/new', { auth: true }],
   ['wizard-review', '/maintain/new', { auth: true, act: (page) => reviewRepository(page, 'https://github.com/example/hello-project') }],
