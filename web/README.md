@@ -89,20 +89,34 @@ comes from `GET /v1/meta`.
 
 ## Restyle it
 
-The whole theme is one file: [`src/styles/tokens.css`](src/styles/tokens.css). Every colour,
-font, size, space, radius and duration in the interface is a CSS variable defined there, and
-nothing else in the stylesheets hard-codes one. Open `/styleguide` in the running app to see each
-token and every component in every state while you edit.
+The interface is built on [shadcn/ui](https://ui.shadcn.com): Tailwind CSS v4 and Radix
+primitives, with the components vendored into `src/components/ui/` (add more with
+`pnpm dlx shadcn@latest add <name>`; `components.json` holds the setup).
 
-- **Colours** are written once as `light-dark(<light>, <dark>)`. Dark mode is the same palette
-  inverted; it follows the system setting, and the header toggle overrides it per device.
-- **One accent.** `--color-accent` is used only for live values and progress. Pick a colour that
-  keeps 4.5:1 contrast against `--color-bg` in both schemes, since it is used for text.
-- **Fonts.** Change `--font-sans` and `--font-mono`, and swap the `@font-face` rules in
-  `src/styles/fonts.css` (fonts are self-hosted; the app makes no third-party requests). Every
-  number, hash, commit and key uses the mono face with tabular figures.
-- **Shape.** `--radius`, `--border` and the `--space-*` scale control the rest. There are no
-  shadows or gradients to restyle.
+The whole theme is the block of CSS variables at the top of
+[`src/index.css`](src/index.css): `:root` is the light palette, `.dark` the dark one. They are
+shadcn's standard tokens (`--background`, `--card`, `--muted-foreground`, `--border`,
+`--primary`, `--radius`, ...) plus four of our own:
+
+| Variable | Meaning |
+| --- | --- |
+| `--live`, `--live-foreground` | The one accent. Used only for live values and progress. |
+| `--shadow-card`, `--shadow-raised` | Elevation of cards and of overlays |
+| `--highlight` | The inner top edge on raised surfaces |
+
+Change a value there and every page follows; nothing else hard-codes a colour, radius or font.
+Open `/styleguide` in the running app to see each token and every component in every state
+while you edit. Any theme from the shadcn theme generator can be pasted over the two blocks.
+
+- **Dark mode** follows the system setting; the header toggle overrides it per device.
+- **Accent.** Keep 4.5:1 contrast for `--live` against `--background` and `--card` in both
+  palettes, and against its own 8% tint: it is used for small text.
+- **Fonts.** Geist and Geist Mono, self-hosted (the app makes no third-party requests). Change
+  `--font-sans` / `--font-mono` in the `@theme` block and the `@font-face` rules in
+  `src/styles/fonts.css`. Every number, hash, commit and key uses the mono face with tabular
+  figures through the `.num` class.
+- **Avatars** are generated from the handle (`src/components/HandleAvatar.tsx`); no image is
+  ever fetched.
 
 After a restyle, run `pnpm --filter web build && pnpm --filter web audit` to confirm contrast and
 the other accessibility checks still pass.
@@ -111,11 +125,12 @@ the other accessibility checks still pass.
 
 ```
 src/
-  api/         generated types, typed client, query hooks
-  lib/         formatting, odometer maths, live stream, session, theme (no React)
-  hooks/       React bindings for the above
-  components/  small shared pieces: TokenCounter, FundingBar, Dialog, …
-  pages/       one file per route; project/ holds the project page and its tabs
-  styles/      tokens.css (the theme), fonts.css, base.css, components.css, pages.css
-dev/           mock API, screenshot and audit scripts
+  index.css         the theme (CSS variables), Tailwind setup, the few hand-written classes
+  api/              generated types, typed client, query hooks
+  lib/              formatting, odometer maths, live stream, series, session, theme (no React)
+  hooks/            React bindings for the above
+  components/ui/    shadcn/ui components, vendored
+  components/       ours: TokenCounter, FundingBar, Sparkline, Dialog, CommandPalette, …
+  pages/            one file per route; project/ holds the project page and its tabs
+dev/                mock API, screenshot and audit scripts
 ```

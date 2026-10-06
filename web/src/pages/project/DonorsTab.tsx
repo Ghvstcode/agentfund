@@ -1,6 +1,7 @@
-import { useLedger } from '../../api/queries';
-import { DonorTable } from '../../components/DonorTable';
-import { EmptyState, ErrorState, Loading, SkeletonRows } from '../../components/States';
+import { Users } from 'lucide-react';
+import { useLedger } from '@/api/queries';
+import { DonorTable } from '@/components/DonorTable';
+import { EmptyState, ErrorState, Loading, SkeletonRows } from '@/components/States';
 import { useProjectContext } from './ProjectPage';
 
 export default function DonorsTab() {
@@ -10,7 +11,7 @@ export default function DonorsTab() {
   const donors = ledger.data?.pages[0]?.donors ?? [];
 
   return (
-    <section className="tab-panel" aria-labelledby="donors-title">
+    <section aria-labelledby="donors-title" className="grid min-w-0 gap-3">
       <h2 id="donors-title" className="sr-only">
         Donors
       </h2>
@@ -21,7 +22,7 @@ export default function DonorsTab() {
       ) : ledger.isError ? (
         <ErrorState title="Couldn't load donors" error={ledger.error} onRetry={() => void ledger.refetch()} />
       ) : donors.length === 0 ? (
-        <EmptyState title="No donors yet">
+        <EmptyState icon={Users} title="No donors yet">
           <p>
             Nobody has pledged to or worked on {project.name} so far. Use “Back with tokens” above to be the first name
             on this board.
@@ -29,7 +30,7 @@ export default function DonorsTab() {
         </EmptyState>
       ) : (
         <>
-          <p className="muted tab-panel__note">Ranked by delivered tokens: runs whose pull request passed CI.</p>
+          <p className="text-sm text-muted-foreground">Ranked by delivered tokens: runs whose pull request passed CI.</p>
           <DonorTable donors={donors} label={`Donors to ${project.name}`} />
         </>
       )}

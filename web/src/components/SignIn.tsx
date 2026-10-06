@@ -1,9 +1,10 @@
 import { useMutation } from '@tanstack/react-query';
+import { Lock } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { api, unwrap } from '../api/client';
-import { useMeta } from '../api/queries';
-import { apiUrl } from '../config';
-import { session } from '../lib/session';
+import { api, unwrap } from '@/api/client';
+import { useMeta } from '@/api/queries';
+import { apiUrl } from '@/config';
+import { session } from '@/lib/session';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { TextField } from './Field';
@@ -44,7 +45,7 @@ export function SignInPanel({ onSignedIn }: { onSignedIn?: () => void }) {
     },
   });
 
-  if (meta.isPending) return <Skeleton height="2.5rem" />;
+  if (meta.isPending) return <Skeleton className="h-10" />;
   if (meta.isError) {
     return (
       <Notice tone="strong" role="alert" title="Sign-in is unavailable">
@@ -60,22 +61,22 @@ export function SignInPanel({ onSignedIn }: { onSignedIn?: () => void }) {
   };
 
   return (
-    <div className="sign-in">
+    <div className="grid gap-5">
       {github && (
-        <div className="sign-in__option">
-          <Button variant="primary" onClick={startGithubLogin}>
+        <div className="grid gap-2.5">
+          <Button variant="primary" size="lg" className="w-full" onClick={startGithubLogin}>
             Continue with GitHub
           </Button>
-          <p className="muted">
+          <p className="text-xs text-pretty text-muted-foreground">
             Read-only access to your public profile. {meta.data.name} never receives a token that can write to your
             repositories.
           </p>
         </div>
       )}
       {dev && (
-        <form className="sign-in__option sign-in__dev" onSubmit={submit}>
-          <p className="eyebrow">Dev login · development instances only</p>
-          <div className="inline-form">
+        <form className="grid gap-3 rounded-lg border border-dashed p-4" onSubmit={submit}>
+          <p className="label">Dev login · development instances only</p>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start">
             <TextField
               label="Handle"
               value={handle}
@@ -89,13 +90,14 @@ export function SignInPanel({ onSignedIn }: { onSignedIn?: () => void }) {
               error={devLogin.isError ? describeError(devLogin.error) : null}
               hint="Signs you in as any handle without GitHub. Never enable this in production."
             />
-            <Button type="submit" busy={devLogin.isPending} busyLabel="Signing in…">
+            {/* mt-5 is the label's height plus its gap: the button lines up with the input, not the label. */}
+            <Button type="submit" className="h-9 sm:mt-5" busy={devLogin.isPending} busyLabel="Signing in…">
               Dev login
             </Button>
           </div>
         </form>
       )}
-      {!github && !dev && <p className="muted">This instance has no sign-in method configured.</p>}
+      {!github && !dev && <p className="text-sm text-muted-foreground">This instance has no sign-in method configured.</p>}
     </div>
   );
 }
@@ -103,7 +105,9 @@ export function SignInPanel({ onSignedIn }: { onSignedIn?: () => void }) {
 export function SignInDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Sign in" onClose={onClose} subtitle="Sign in to pledge, mint worker keys, or register a project.">
-      <SignInPanel onSignedIn={onClose} />
+      <div className="p-5">
+        <SignInPanel onSignedIn={onClose} />
+      </div>
     </Dialog>
   );
 }
@@ -111,12 +115,17 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
 /** Shown in place of a page that needs a session. */
 export function SignInRequired({ title, reason }: { title: string; reason: string }) {
   return (
-    <section className="page page--narrow">
-      <header className="page__header">
-        <h1>{title}</h1>
-        <p className="lede">{reason}</p>
-      </header>
-      <SignInPanel />
+    <section className="container-page py-16 sm:py-24">
+      <div className="rise mx-auto grid max-w-md gap-6">
+        <span className="flex size-10 items-center justify-center rounded-lg border bg-card shadow-card">
+          <Lock className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+        </span>
+        <header className="grid gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <p className="text-sm text-pretty text-muted-foreground">{reason}</p>
+        </header>
+        <SignInPanel />
+      </div>
     </section>
   );
 }

@@ -121,3 +121,8 @@ export function humanize(value: string): string {
   const words = value.replace(/_/g, ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** Break a long hex string into groups for reading aloud and comparing by eye. */
+export function groupHex(hex: string, size = 4): string[] {
+  return hex.match(new RegExp(`.{1,${size}}`, 'g')) ?? [];
+}

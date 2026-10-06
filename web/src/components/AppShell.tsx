@@ -1,70 +1,92 @@
-import { useQueryClient } from '@tanstack/react-query';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Search, Zap } from 'lucide-react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
-import { api } from '../api/client';
-import { useMe, useMeta } from '../api/queries';
-import { APP_NAME, apiUrl } from '../config';
-import { instanceLinks } from '../lib/commands';
-import { session } from '../lib/session';
+import { useMe, useMeta } from '@/api/queries';
+import { APP_NAME, apiUrl } from '@/config';
+import { instanceLinks } from '@/lib/commands';
+import { cn } from '@/lib/utils';
+import { Button } from './Button';
 import { ErrorBoundary } from './ErrorBoundary';
-import { SignInDialog } from './SignIn';
+import { UserPill } from './UserPill';
 import { Loading, SkeletonRows } from './States';
 import { ThemeToggle } from './ThemeToggle';
 
-function Header() {
+// Overlays are fetched when first needed, keeping Radix out of the first paint.
+const CommandPalette = lazy(() => import('./CommandPalette'));
+const UserMenu = lazy(() => import('./UserMenu'));
+const SignInDialog = lazy(() => import('./SignIn').then((module) => ({ default: module.SignInDialog })));
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+function NavItem({ to, end, children }: { to: string; end?: boolean; children: string }) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className="flex h-8 items-center rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground"
+    >
+      {children}
+    </NavLink>
+  );
+}
+
+function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const meta = useMeta();
   const me = useMe();
-  const queryClient = useQueryClient();
   const [signingIn, setSigningIn] = useState(false);
 
-  const signOut = async () => {
-    await api.POST('/v1/auth/logout').catch(() => undefined);
-    session.clear();
-    queryClient.removeQueries({ queryKey: ['me'] });
-    queryClient.removeQueries({ queryKey: ['admin'] });
-  };
-
   return (
-    <header className="site-header">
-      <div className="site-header__inner">
-        <Link to="/" className="wordmark">
-          {meta.data?.name ?? APP_NAME}
+    <header className="sticky top-0 z-40 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
+      <div className="container-page flex h-14 items-center gap-2">
+        <Link to="/" className="mr-2 flex items-center gap-2 rounded-md text-[0.9375rem] font-semibold tracking-tight">
+          <span className="flex size-6 items-center justify-center rounded-md bg-foreground text-background shadow-card">
+            <Zap className="size-3.5 fill-current" strokeWidth={0} aria-hidden="true" />
+          </span>
+          <span className="max-w-40 truncate sm:max-w-none">{meta.data?.name ?? APP_NAME}</span>
         </Link>
-        <nav className="site-nav" aria-label="Main">
-          <NavLink to="/" end className="site-nav__link">
+        <nav aria-label="Main" className="hidden items-center gap-0.5 md:flex">
+          <NavItem to="/" end>
             Discover
-          </NavLink>
-          <NavLink to="/donors" className="site-nav__link">
-            Donors
-          </NavLink>
-          <NavLink to="/maintain" className="site-nav__link">
-            Maintain
-          </NavLink>
-          {me.data?.role === 'admin' && (
-            <NavLink to="/admin" className="site-nav__link">
-              Admin
-            </NavLink>
-          )}
+          </NavItem>
+          <NavItem to="/donors">Donors</NavItem>
+          <NavItem to="/maintain">Maintain</NavItem>
         </nav>
-        <div className="site-header__actions">
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            aria-label="Search projects, donors and pages"
+            aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
+            className="flex h-8 items-center gap-2 rounded-lg border bg-card px-2.5 text-sm text-muted-foreground shadow-card transition-colors hover:text-foreground sm:w-56"
+          >
+            <Search className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            <span className="hidden flex-1 text-left sm:inline">Search…</span>
+            <kbd className="hidden rounded border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium sm:inline">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
           <ThemeToggle />
           {me.data ? (
-            <>
-              <NavLink to="/settings" className="site-nav__link">
-                {me.data.handle}
-              </NavLink>
-              <button type="button" className="link-button" onClick={() => void signOut()}>
-                Sign out
-              </button>
-            </>
+            <Suspense fallback={<UserPill handle={me.data.handle} disabled />}>
+              <UserMenu handle={me.data.handle} admin={me.data.role === 'admin'} />
+            </Suspense>
           ) : (
-            <button type="button" className="link-button" onClick={() => setSigningIn(true)}>
+            <Button variant="primary" onClick={() => setSigningIn(true)}>
               Sign in
-            </button>
+            </Button>
           )}
         </div>
       </div>
-      {signingIn && <SignInDialog onClose={() => setSigningIn(false)} />}
+      <nav aria-label="Main, compact" className="container-page flex gap-0.5 overflow-x-auto border-t py-1.5 [scrollbar-width:none] md:hidden">
+        <NavItem to="/" end>
+          Discover
+        </NavItem>
+        <NavItem to="/donors">Donors</NavItem>
+        <NavItem to="/maintain">Maintain</NavItem>
+      </nav>
+      {signingIn && (
+        <Suspense fallback={null}>
+          <SignInDialog onClose={() => setSigningIn(false)} />
+        </Suspense>
+      )}
     </header>
   );
 }
@@ -72,50 +94,50 @@ function Header() {
 function Footer() {
   const meta = useMeta();
   const links = instanceLinks(meta.data);
+  const items = [
+    { href: apiUrl('/v1/meta'), label: 'API' },
+    { href: apiUrl('/feed.atom'), label: 'Feed' },
+    { href: links.sourceUrl, label: 'Source' },
+    ...(links.docsUrl ? [{ href: links.docsUrl, label: 'Docs' }] : []),
+  ];
   return (
-    <footer className="site-footer">
-      <div className="site-footer__inner">
-        <p className="site-footer__trust">
-          Trust the artifacts, not the operator. Every task is signed by its maintainer, every token is metered from a
-          real run, and every state change is in a public log.
-        </p>
-        <div className="site-footer__meta">
-          <span>
+    <footer className="mt-24 border-t">
+      <div className="container-page grid gap-6 py-10 text-sm text-muted-foreground md:grid-cols-[1fr_auto] md:items-end">
+        <div className="grid gap-2">
+          <p className="font-medium text-foreground">Trust the artifacts, not the operator.</p>
+          <p className="max-w-xl text-pretty">
+            Every task is signed by its maintainer, every token is metered from a real run, and every state change is
+            in a public log.
+          </p>
+        </div>
+        <div className="grid gap-3 md:justify-items-end">
+          <nav aria-label="Footer">
+            <ul className="flex flex-wrap gap-x-5 gap-y-1">
+              {items.map((item) => (
+                <li key={item.label}>
+                  <a href={item.href} rel="noreferrer" className="inline-block py-1 transition-colors hover:text-foreground">
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+              <li>
+                <Link to="/styleguide" className="inline-block py-1 transition-colors hover:text-foreground">
+                  Styleguide
+                </Link>
+              </li>
+            </ul>
+          </nav>
+          <p className="text-xs">
             {meta.data?.name ?? APP_NAME}
             {meta.data && (
               <>
                 {' · '}
                 {/* Name the software only when the instance goes by another name. */}
                 {meta.data.app !== meta.data.name && `${meta.data.app} `}
-                <span className="mono">{meta.data.version}</span>
+                <span className="num">{meta.data.version}</span>
               </>
             )}
-          </span>
-          <nav aria-label="Footer">
-            <ul className="site-footer__links">
-              <li>
-                <a href={apiUrl('/v1/meta')}>API</a>
-              </li>
-              <li>
-                <a href={apiUrl('/feed.atom')}>Feed</a>
-              </li>
-              <li>
-                <a href={links.sourceUrl} rel="noreferrer">
-                  Source
-                </a>
-              </li>
-              {links.docsUrl && (
-                <li>
-                  <a href={links.docsUrl} rel="noreferrer">
-                    Docs
-                  </a>
-                </li>
-              )}
-              <li>
-                <Link to="/styleguide">Styleguide</Link>
-              </li>
-            </ul>
-          </nav>
+          </p>
         </div>
       </div>
     </footer>
@@ -140,20 +162,49 @@ function useRouteFocus() {
   return main;
 }
 
+/** ⌘K / Ctrl+K anywhere; "/" too, unless the page has its own search field to focus. */
+function usePaletteShortcut(open: () => void) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const typing = event.target instanceof HTMLElement && event.target.matches('input, textarea, select, [contenteditable]');
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        open();
+      } else if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const field = document.querySelector<HTMLInputElement>('[data-slash-focus]');
+        event.preventDefault();
+        if (field) field.focus();
+        else open();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+}
+
 export function AppShell() {
   const main = useRouteFocus();
   const { pathname } = useLocation();
+  const [palette, setPalette] = useState(false);
+  const openPalette = useRef(() => setPalette(true)).current;
+  usePaletteShortcut(openPalette);
+
   return (
     <>
-      <a href="#main" className="skip-link">
+      <a
+        href="#main"
+        className={cn(
+          'fixed top-3 left-3 z-50 -translate-y-20 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background transition-transform focus:translate-y-0',
+        )}
+      >
         Skip to content
       </a>
-      <Header />
-      <main id="main" ref={main} tabIndex={-1} className="site-main">
+      <Header onOpenPalette={openPalette} />
+      <main id="main" ref={main} tabIndex={-1} className="min-h-[calc(100dvh-3.5rem)] outline-none">
         <ErrorBoundary resetKey={pathname}>
           <Suspense
             fallback={
-              <div className="page">
+              <div className="container-page py-10">
                 <Loading label="page">
                   <SkeletonRows rows={6} />
                 </Loading>
@@ -165,6 +216,11 @@ export function AppShell() {
         </ErrorBoundary>
       </main>
       <Footer />
+      {palette && (
+        <Suspense fallback={null}>
+          <CommandPalette onClose={() => setPalette(false)} />
+        </Suspense>
+      )}
     </>
   );
 }

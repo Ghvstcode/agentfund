@@ -84,40 +84,39 @@ describe('BackDialog', () => {
 
   it('explains what the worker will and will not do, and shows the fingerprint to compare', async () => {
     const { dialog } = await openDialog();
-    expect(within(dialog).getByText(/checks the signed task manifests against the key you approved/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/network-restricted sandbox under your own Claude Code login/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/only count once CI passes/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/never touches files outside the task's declared scope/)).toBeInTheDocument();
+    const will = within(within(dialog).getByRole('heading', { name: 'It will' }).parentElement as HTMLElement);
+    expect(will.getByText(/Checks the signed task manifests against the key you approved/)).toBeInTheDocument();
+    expect(will.getByText(/network-restricted sandbox under your own Claude Code login/)).toBeInTheDocument();
+    expect(will.getByText(/only count once CI passes/)).toBeInTheDocument();
+    const never = within(within(dialog).getByRole('heading', { name: 'It never' }).parentElement as HTMLElement);
+    expect(never.getByText("Touches files outside the task's declared scope.")).toBeInTheDocument();
+    expect(never.getByText('Sends your credentials anywhere.')).toBeInTheDocument();
+    expect(never.getByText("Runs anything you haven't approved.")).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /Copy key fingerprint/ })).toHaveAttribute(
       'title',
       expect.stringContaining(PROJECT.pubkey_fingerprint),
     );
   });
 
-  it('moves focus into the dialog and makes the page behind it inert', async () => {
+  it('moves focus into the dialog and hides the page behind it from assistive tech', async () => {
     const { dialog } = await openDialog();
-    expect(dialog).toHaveFocus();
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(document.getElementById('root')).toHaveAttribute('inert');
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    // The page behind is out of the accessibility tree: its button can no longer be found by role.
+    expect(screen.queryByRole('button', { name: 'Back with tokens' })).not.toBeInTheDocument();
   });
 
   it('traps Tab inside the dialog in both directions', async () => {
     const { user, dialog } = await openDialog();
     await within(dialog).findByText('agentfund login https://fund.example');
-    const focusable = [...dialog.querySelectorAll<HTMLElement>('a[href], button, input, [tabindex="0"]')];
-    const first = focusable[0] as HTMLElement;
-    const last = focusable.at(-1) as HTMLElement;
-    expect(first).toHaveAccessibleName('Close');
+    const stops = dialog.querySelectorAll('a[href], button, input, [tabindex="0"]').length;
+    expect(stops).toBeGreaterThan(5);
 
-    await user.tab();
-    expect(first).toHaveFocus();
-    await user.tab({ shift: true });
-    expect(last).toHaveFocus();
-    await user.tab();
-    expect(first).toHaveFocus();
-
-    for (let i = 0; i < focusable.length * 2; i += 1) {
+    for (let i = 0; i < stops + 3; i += 1) {
       await user.tab();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    }
+    for (let i = 0; i < stops + 3; i += 1) {
+      await user.tab({ shift: true });
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
     }
   });
@@ -125,15 +124,14 @@ describe('BackDialog', () => {
   it('closes on Escape and returns focus to the button that opened it', async () => {
     const { user } = await openDialog();
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back with tokens' })).toHaveFocus();
-    expect(document.getElementById('root')).not.toHaveAttribute('inert');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back with tokens' })).toHaveFocus());
   });
 
   it('closes from the Close button', async () => {
     const { user, dialog } = await openDialog();
     await user.click(within(dialog).getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('asks signed-out visitors to sign in before pledging', async () => {

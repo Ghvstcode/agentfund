@@ -1,17 +1,21 @@
-import { ApiError } from '../../api/client';
-import { useTask } from '../../api/queries';
-import type { Report, Task } from '../../api/types';
-import { Badge } from '../../components/Badge';
-import { Dialog } from '../../components/Dialog';
-import { Hash } from '../../components/Hash';
-import { Num } from '../../components/Num';
-import { EmptyState, ErrorState, Loading, Notice, SkeletonRows } from '../../components/States';
-import { Time } from '../../components/Time';
-import { TokenCounter } from '../../components/TokenCounter';
-import { UserLink } from '../../components/UserLink';
-import { formatDuration, formatExact, formatUsd } from '../../lib/format';
-import { pullRequestLabel } from '../../lib/prs';
-import { STATE_LABELS } from './taskStates';
+import { FileSearch } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ApiError } from '@/api/client';
+import { useTask } from '@/api/queries';
+import type { Report, Task } from '@/api/types';
+import { CopyButton } from '@/components/CopyButton';
+import { Dialog, DialogSection } from '@/components/Dialog';
+import { Hash } from '@/components/Hash';
+import { Num } from '@/components/Num';
+import { EmptyState, ErrorState, Loading, SkeletonRows } from '@/components/States';
+import { Time } from '@/components/Time';
+import { TokenCounter } from '@/components/TokenCounter';
+import { Badge } from '@/components/ui/badge';
+import { UserLink } from '@/components/UserLink';
+import { formatDuration, formatExact, formatUsd } from '@/lib/format';
+import { pullRequestLabel } from '@/lib/prs';
+import { cn } from '@/lib/utils';
+import { taskStatus } from './taskStates';
 
 const REPORT_STATUS: Record<Report['status'], string> = {
   completed: 'Completed',
@@ -30,108 +34,127 @@ const DELIVERY: Record<Report['delivery'], string> = {
   closed: 'PR closed without merging',
 };
 
-function ReportDetails({ report }: { report: Report }) {
+/** A two-column list of facts: muted label, value. */
+function Facts({ rows }: { rows: [label: string, value: ReactNode][] }) {
   return (
-    <dl className="definitions">
-      <dt>Outcome</dt>
-      <dd>
-        {REPORT_STATUS[report.status]} · {DELIVERY[report.delivery]}
-        {report.flagged_late && ' · reported late, not counted'}
-      </dd>
-      <dt>Donor</dt>
-      <dd>
-        <UserLink handle={report.donor.handle} /> · <Time value={report.created_at} />
-      </dd>
-      <dt>Tokens</dt>
-      <dd className="mono">
-        {formatExact(report.tokens_in)} in · {formatExact(report.tokens_out)} out
-      </dd>
-      <dt>API-equivalent cost</dt>
-      <dd>
-        <span className="mono">{formatUsd(report.cost_estimate)}</span>{' '}
-        <span className="muted">estimated by the runner, informational</span>
-      </dd>
-      {report.pr_url && (
-        <>
-          <dt>Pull request</dt>
-          <dd>
-            <a href={report.pr_url} rel="noreferrer">
-              {pullRequestLabel(report.pr_url)}
-            </a>
-            {report.branch && <span className="mono muted"> {report.branch}</span>}
-          </dd>
-        </>
-      )}
-      {report.head_sha && (
-        <>
-          <dt>Head commit</dt>
-          <dd>
-            <Hash value={report.head_sha} label="head commit" />
-          </dd>
-        </>
-      )}
-      {report.ci && (
-        <>
-          <dt>CI</dt>
-          <dd>
-            {report.ci.provider} · {report.ci.conclusion}
-            {report.ci.run_url && (
-              <>
-                {' · '}
-                <a href={report.ci.run_url} rel="noreferrer">
-                  View run
-                </a>
-              </>
-            )}
-          </dd>
-        </>
-      )}
-      <dt>Verify exit code</dt>
-      <dd className="mono">{report.verify_exit_code ?? 'not run'}</dd>
-      <dt>Run log digest</dt>
-      <dd>
-        <Hash value={report.log_digest} label="run log digest" length={16} />
-      </dd>
-      {(report.runner || report.model) && (
-        <>
-          <dt>Runner</dt>
-          <dd className="mono">{[report.runner, report.model].filter(Boolean).join(' · ')}</dd>
-        </>
-      )}
-      {report.duration_seconds != null && (
-        <>
-          <dt>Duration</dt>
-          <dd className="mono">{formatDuration(report.duration_seconds)}</dd>
-        </>
-      )}
-      {report.message && (
-        <>
-          <dt>Message</dt>
-          <dd>{report.message}</dd>
-        </>
-      )}
+    <dl className="grid grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 [overflow-wrap:anywhere]">{value}</dd>
+        </div>
+      ))}
     </dl>
   );
 }
 
+function Globs({ globs, strong }: { globs: string[]; strong?: boolean }) {
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {globs.map((glob) => (
+        <li key={glob} className={cn('num rounded-md border px-2 py-0.5 text-xs', strong ? 'bg-muted/60 text-foreground' : 'text-muted-foreground')}>
+          {glob}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ReportFacts({ report }: { report: Report }) {
+  const rows: [string, ReactNode][] = [
+    [
+      'Outcome',
+      <span key="o">
+        {REPORT_STATUS[report.status]} · {DELIVERY[report.delivery]}
+        {report.flagged_late && ' · reported late, not counted'}
+      </span>,
+    ],
+    [
+      'Donor',
+      <span key="d" className="inline-flex flex-wrap items-center gap-x-2">
+        <UserLink handle={report.donor.handle} avatar /> <Time value={report.created_at} className="text-muted-foreground" />
+      </span>,
+    ],
+    [
+      'Tokens',
+      <span key="t" className="num">
+        {formatExact(report.tokens_in)} in · {formatExact(report.tokens_out)} out
+      </span>,
+    ],
+    [
+      'API-equivalent',
+      <span key="c">
+        <span className="num">{formatUsd(report.cost_estimate)}</span>{' '}
+        <span className="text-muted-foreground">estimated by the runner</span>
+      </span>,
+    ],
+  ];
+  if (report.pr_url) {
+    rows.push([
+      'Pull request',
+      <span key="p" className="inline-flex flex-wrap items-center gap-x-2">
+        {/^https?:/.test(report.pr_url) ? (
+          <a href={report.pr_url} rel="noreferrer" className="link num">
+            {pullRequestLabel(report.pr_url)}
+          </a>
+        ) : (
+          <span className="num">{pullRequestLabel(report.pr_url)}</span>
+        )}
+        {report.branch && <span className="num text-xs text-muted-foreground">{report.branch}</span>}
+      </span>,
+    ]);
+  }
+  if (report.head_sha) rows.push(['Head commit', <Hash key="h" value={report.head_sha} label="head commit" />]);
+  if (report.ci) {
+    rows.push([
+      'CI',
+      <span key="ci">
+        {report.ci.provider} · {report.ci.conclusion}
+        {report.ci.run_url && (
+          <>
+            {' · '}
+            <a href={report.ci.run_url} rel="noreferrer" className="link">
+              View run
+            </a>
+          </>
+        )}
+      </span>,
+    ]);
+  }
+  rows.push(['Verify exit', <span key="v" className="num">{report.verify_exit_code ?? 'not run'}</span>]);
+  rows.push(['Run log digest', <Hash key="l" value={report.log_digest} label="run log digest" length={16} />]);
+  if (report.runner || report.model) {
+    rows.push(['Runner', <span key="r" className="num text-[0.8125rem]">{[report.runner, report.model].filter(Boolean).join(' · ')}</span>]);
+  }
+  if (report.duration_seconds != null) rows.push(['Duration', <span key="du" className="num">{formatDuration(report.duration_seconds)}</span>]);
+  if (report.message) rows.push(['Message', report.message]);
+  return <Facts rows={rows} />;
+}
+
 function TaskDetails({ task }: { task: Task }) {
   const { manifest, burn, active_claim: claim, latest_report: report } = task;
+  const status = taskStatus(task);
   return (
     <>
-      <section className="dialog-section" aria-label="Summary">
-        <div className="drawer-summary">
-          <Badge tone={task.state === 'claimed' && claim ? 'live' : 'strong'}>{STATE_LABELS[task.state]}</Badge>
-          {task.claimable && <Badge>Claimable</Badge>}
-          {task.blocked_by.length > 0 && <Badge>Blocked</Badge>}
+      <DialogSection>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={status.live ? 'outline' : 'secondary'} className={cn('gap-1.5', status.live && 'border-live/30 bg-live/8 text-live')}>
+            {status.live ? <span className="live-dot" aria-hidden="true" /> : <status.icon className="size-3" strokeWidth={1.75} aria-hidden="true" />}
+            {status.label}
+          </Badge>
+          {task.blocked_by.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              waits for <span className="num text-foreground">{task.blocked_by.join(', ')}</span>
+            </span>
+          )}
         </div>
         {claim && (
-          <Notice>
-            <p className="in-flight" data-active>
-              <span className="live-dot" aria-hidden="true" />
-              <span>{claim.donor ? <UserLink handle={claim.donor.handle} /> : 'A donor'} is running this now</span>
+          <div className="grid gap-1 rounded-lg border border-live/30 bg-live/5 p-3.5">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-live">
+              {claim.donor ? <UserLink handle={claim.donor.handle} avatar className="text-live" /> : 'A donor'} is running this now
               <TokenCounter value={claim.tokens_so_far ?? 0} label="tokens so far" size="md" tone="accent" />
             </p>
-            <p className="muted">
+            <p className="text-xs text-muted-foreground">
               {claim.phase ? `Phase: ${claim.phase}. ` : ''}
               {claim.claimed_at && (
                 <>
@@ -139,91 +162,80 @@ function TaskDetails({ task }: { task: Task }) {
                 </>
               )}
             </p>
-          </Notice>
+          </div>
         )}
-        <dl className="definitions">
-          <dt>Content hash</dt>
-          <dd>
-            <Hash value={task.content_hash} label="manifest content hash" length={16} />{' '}
-            <span className="muted">SHA-256 of the manifest file, as signed in the lock</span>
-          </dd>
-          <dt>Manifest</dt>
-          <dd className="mono">{task.manifest_path}</dd>
-          <dt>Pinned commit</dt>
-          <dd>
-            <Hash value={task.commit} label="pinned commit" />
-          </dd>
-          <dt>Token cap</dt>
-          <dd>
-            <span className="mono">{formatExact(manifest.max_tokens)}</span>{' '}
-            <span className="muted">hard limit per run</span>
-          </dd>
-          <dt>Time cap</dt>
-          <dd className="mono">{manifest.timeout_minutes ?? 60} min</dd>
-          <dt>Burn so far</dt>
-          <dd>
-            <Num value={burn.total} exact />{' '}
-            <span className="muted">
-              across {burn.runs} {burn.runs === 1 ? 'run' : 'runs'}
-            </span>
-          </dd>
-          <dt>Depends on</dt>
-          <dd className="mono">{task.depends_on.length > 0 ? task.depends_on.join(', ') : 'nothing'}</dd>
-          {task.blocked_by.length > 0 && (
-            <>
-              <dt>Blocked by</dt>
-              <dd className="mono">{task.blocked_by.join(', ')}</dd>
-            </>
-          )}
-        </dl>
-      </section>
+        <Facts
+          rows={[
+            [
+              'Token cap',
+              <span key="cap">
+                <span className="num">{formatExact(manifest.max_tokens)}</span> <span className="text-muted-foreground">hard limit per run</span>
+              </span>,
+            ],
+            ['Time cap', <span key="time" className="num">{manifest.timeout_minutes ?? 60} min</span>],
+            [
+              'Burn so far',
+              <span key="burn">
+                <Num value={burn.total} exact />{' '}
+                <span className="text-muted-foreground">
+                  across {burn.runs} {burn.runs === 1 ? 'run' : 'runs'}
+                </span>
+              </span>,
+            ],
+            ['Depends on', <span key="deps" className="num">{task.depends_on.length > 0 ? task.depends_on.join(', ') : 'nothing'}</span>],
+          ]}
+        />
+      </DialogSection>
 
-      <section className="dialog-section" aria-labelledby="task-prompt">
-        <h3 id="task-prompt">Prompt</h3>
-        <p className="muted">Handed to the agent verbatim.</p>
-        <pre className="code-block">{manifest.prompt}</pre>
-      </section>
+      <DialogSection title="Prompt" id="task-prompt">
+        <div className="-mt-1 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">Handed to the agent verbatim.</p>
+          <CopyButton text={manifest.prompt} label="the prompt" caption="Copy" />
+        </div>
+        <pre className="prose-block">{manifest.prompt}</pre>
+      </DialogSection>
 
-      <section className="dialog-section" aria-labelledby="task-scope">
-        <h3 id="task-scope">Scope</h3>
-        <dl className="definitions">
-          <dt>May write</dt>
-          <dd>
-            <ul className="glob-list mono">
-              {manifest.scope.write.map((glob) => (
-                <li key={glob}>{glob}</li>
-              ))}
-            </ul>
-          </dd>
-          <dt>May read</dt>
-          <dd>
-            {manifest.scope.read ? (
-              <ul className="glob-list mono">
-                {manifest.scope.read.map((glob) => (
-                  <li key={glob}>{glob}</li>
-                ))}
-              </ul>
-            ) : (
-              'the whole repository'
-            )}
-          </dd>
-        </dl>
-        <p className="muted">
-          A run that changes any other path is discarded. <code>agentfund.yaml</code>, <code>tasks/**</code> and{' '}
-          <code>.github/**</code> are never writable.
+      <DialogSection title="Scope" id="task-scope">
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <p className="label">May write</p>
+            <Globs globs={manifest.scope.write} strong />
+          </div>
+          <div className="grid gap-1.5">
+            <p className="label">May read</p>
+            {manifest.scope.read ? <Globs globs={manifest.scope.read} /> : <p className="text-sm">The whole repository</p>}
+          </div>
+        </div>
+        <p className="text-xs text-pretty text-muted-foreground">
+          A run that changes any other path is discarded. <code className="text-foreground">agentfund.yaml</code>,{' '}
+          <code className="text-foreground">tasks/**</code> and <code className="text-foreground">.github/**</code> are never writable.
         </p>
-      </section>
+      </DialogSection>
 
-      <section className="dialog-section" aria-labelledby="task-verify">
-        <h3 id="task-verify">Verify</h3>
-        <p className="muted">Runs after the agent. Exit code 0 means pass.</p>
+      <DialogSection title="Verify" id="task-verify">
+        <div className="-mt-1 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">Runs after the agent. Exit code 0 means pass.</p>
+          <CopyButton text={manifest.verify} label="the verify command" caption="Copy" />
+        </div>
         <pre className="code-block">{manifest.verify}</pre>
-      </section>
+      </DialogSection>
 
-      <section className="dialog-section" aria-labelledby="task-report">
-        <h3 id="task-report">Latest report</h3>
-        {report ? <ReportDetails report={report} /> : <p className="muted">No run has been reported for this task.</p>}
-      </section>
+      <DialogSection title="Provenance" id="task-provenance">
+        <Facts
+          rows={[
+            ['Content hash', <Hash key="hash" value={task.content_hash} label="manifest content hash" length={20} />],
+            ['Manifest', <span key="path" className="num text-[0.8125rem]">{task.manifest_path}</span>],
+            ['Pinned commit', <Hash key="commit" value={task.commit} label="pinned commit" length={12} />],
+          ]}
+        />
+        <p className="text-xs text-pretty text-muted-foreground">
+          The content hash is the SHA-256 of the manifest file, as listed in the lock the maintainer signed.
+        </p>
+      </DialogSection>
+
+      <DialogSection title="Latest report" id="task-report">
+        {report ? <ReportFacts report={report} /> : <p className="text-sm text-muted-foreground">No run has been reported for this task.</p>}
+      </DialogSection>
     </>
   );
 }
@@ -241,23 +253,21 @@ export function TaskDrawer({ slug, manifestId, onClose }: TaskDrawerProps) {
     <Dialog
       variant="drawer"
       title={task.data?.title ?? manifestId}
-      subtitle={<span className="mono">{`${slug}:${manifestId}`}</span>}
+      subtitle={<span className="num text-xs">{`${slug}:${manifestId}`}</span>}
       onClose={onClose}
     >
       {task.data ? (
         <TaskDetails task={task.data} />
       ) : task.isPending ? (
-        <div className="dialog-section">
-          <Loading label="task">
-            <SkeletonRows rows={6} />
-          </Loading>
-        </div>
+        <Loading label="task" className="p-5">
+          <SkeletonRows rows={6} />
+        </Loading>
       ) : (
-        <div className="dialog-section">
+        <div className="p-5">
           {missing ? (
-            <EmptyState title="No such task">
+            <EmptyState icon={FileSearch} title="No such task">
               <p>
-                There is no task <span className="mono">{manifestId}</span> in the lock at the pinned commit.
+                There is no task <span className="num text-foreground">{manifestId}</span> in the lock at the pinned commit.
               </p>
             </EmptyState>
           ) : (

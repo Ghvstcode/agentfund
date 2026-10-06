@@ -1,94 +1,149 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { ExternalLink, KeyRound, ListChecks } from 'lucide-react';
+import { type CSSProperties, type FormEvent, type ReactNode, useState } from 'react';
 import { Link } from 'react-router';
-import { api, unwrap } from '../api/client';
-import { queryKeys, useApiKeys, useMe, useMeta, useMyClaims } from '../api/queries';
-import type { ApiKey, ClaimSummary } from '../api/types';
-import { Badge } from '../components/Badge';
-import { Button } from '../components/Button';
-import { CommandLine } from '../components/CommandLine';
-import { ConfirmButton } from '../components/ConfirmButton';
-import { CopyButton } from '../components/CopyButton';
-import { TextField } from '../components/Field';
-import { Num } from '../components/Num';
-import { SignInRequired } from '../components/SignIn';
-import { describeError, EmptyState, ErrorState, Loading, Notice, SkeletonRows } from '../components/States';
-import { TableScroll } from '../components/TableScroll';
-import { Time } from '../components/Time';
-import { CLI_NAME } from '../config';
-import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { useSession } from '../hooks/useSession';
-import { loginCommand, loginFromStdinCommand } from '../lib/commands';
-import { manifestId } from '../lib/events';
-import { formatDate, humanize } from '../lib/format';
+import { api, unwrap } from '@/api/client';
+import { queryKeys, useApiKeys, useMe, useMeta, useMyClaims } from '@/api/queries';
+import type { ApiKey, ClaimSummary } from '@/api/types';
+import { Button } from '@/components/Button';
+import { CommandLine } from '@/components/CommandLine';
+import { ConfirmButton } from '@/components/ConfirmButton';
+import { CopyButton } from '@/components/CopyButton';
+import { TextField } from '@/components/Field';
+import { HandleAvatar } from '@/components/HandleAvatar';
+import { Num } from '@/components/Num';
+import { SignInRequired } from '@/components/SignIn';
+import { describeError, EmptyState, ErrorState, Loading, SkeletonRows } from '@/components/States';
+import { Time } from '@/components/Time';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { CLI_NAME } from '@/config';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useSession } from '@/hooks/useSession';
+import { loginCommand, loginFromStdinCommand } from '@/lib/commands';
+import { manifestId } from '@/lib/events';
+import { formatDate, humanize } from '@/lib/format';
+
+const COLUMN = 'h-9 text-xs font-medium text-muted-foreground';
+
+interface CardProps {
+  id: string;
+  title: string;
+  description?: string;
+  index: number;
+  children: ReactNode;
+}
+
+/** One settings group: a titled card that enters after the one above it. */
+function Card({ id, title, description, index, children }: CardProps) {
+  return (
+    <section className="surface rise overflow-hidden" style={{ '--i': index } as CSSProperties} aria-labelledby={id}>
+      <div className="grid gap-1 border-b px-5 py-4">
+        <h2 id={id} className="text-base font-semibold tracking-tight">
+          {title}
+        </h2>
+        {description && <p className="max-w-prose text-sm text-pretty text-muted-foreground">{description}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1 px-5 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-sm">{children}</dd>
+    </div>
+  );
+}
 
 function Account() {
   const me = useMe();
   if (me.isPending) {
     return (
-      <Loading label="account">
-        <SkeletonRows rows={3} height="2rem" />
+      <Loading label="account" className="p-5">
+        <SkeletonRows rows={3} className="h-8" />
       </Loading>
     );
   }
-  if (me.isError) return <ErrorState title="Couldn't load your account" error={me.error} onRetry={() => void me.refetch()} />;
+  if (me.isError) {
+    return <ErrorState className="m-5" title="Couldn't load your account" error={me.error} onRetry={() => void me.refetch()} />;
+  }
   const user = me.data;
   return (
-    <dl className="definitions definitions--wide">
-      <dt>Handle</dt>
-      <dd>
-        <Link to={`/u/${user.handle}`}>{user.handle}</Link> <span className="muted">your public donor profile</span>
-      </dd>
-      <dt>Role</dt>
-      <dd>{user.role}</dd>
-      <dt>GitHub</dt>
-      <dd>
-        {user.github_login ? (
-          <>
-            Linked as{' '}
-            <a href={`https://github.com/${user.github_login}`} rel="noreferrer">
-              {user.github_login}
-            </a>
-          </>
-        ) : (
-          <span className="muted">Not linked. This account was created with dev login.</span>
-        )}
-      </dd>
-      {user.email && (
-        <>
-          <dt>Email</dt>
-          <dd>{user.email}</dd>
-        </>
-      )}
-      <dt>Member since</dt>
-      <dd>{formatDate(user.created_at)}</dd>
-    </dl>
+    <>
+      <div className="flex items-center gap-4 border-b p-5">
+        <HandleAvatar handle={user.handle} className="size-12 text-lg" />
+        <div className="grid min-w-0 gap-1">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-base font-semibold tracking-tight">{user.handle}</span>
+            <Badge variant="outline">{humanize(user.role)}</Badge>
+          </p>
+          <p className="text-sm text-muted-foreground">
+            <Link to={`/u/${user.handle}`} className="link">
+              Your public donor profile
+            </Link>
+          </p>
+        </div>
+      </div>
+      <dl className="divide-y">
+        <Detail label="GitHub">
+          {user.github_login ? (
+            <>
+              Linked as{' '}
+              <a href={`https://github.com/${user.github_login}`} rel="noreferrer" className="link inline-flex items-center gap-1 font-medium">
+                {user.github_login}
+                <ExternalLink className="size-3.5 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+              </a>
+            </>
+          ) : (
+            <span className="text-muted-foreground">Not linked. This account was created with dev login.</span>
+          )}
+        </Detail>
+        {user.email && <Detail label="Email">{user.email}</Detail>}
+        <Detail label="Member since">
+          <span className="tabular-nums">{formatDate(user.created_at)}</span>
+        </Detail>
+      </dl>
+    </>
   );
 }
 
+/** Shown once, straight after a key is minted: the only time the secret is readable. */
 function NewKey({ secret, onDismiss }: { secret: string; onDismiss: () => void }) {
   const meta = useMeta();
   return (
-    <Notice tone="strong" title="Copy this key now. It is not shown again." role="status">
-      <span className="key-line">
-        <code className="key-line__value">{secret}</code>
-        <CopyButton text={secret} label="the new API key" />
-      </span>
-      {meta.data && (
-        <>
-          <p>Then sign your worker in. It prompts for the key:</p>
-          <CommandLine command={loginCommand(meta.data.base_url)} label="sign the worker in" />
-          <p>Or, in a script, pass it on standard input:</p>
-          <CommandLine command={loginFromStdinCommand(meta.data.base_url)} label="sign the worker in from a script" />
-        </>
-      )}
-      <p className="muted">Only a hash of the key is stored. If you lose it, revoke it and create another.</p>
-      <div className="button-row">
-        <Button size="sm" onClick={onDismiss}>
+    <div role="status" className="overflow-hidden rounded-xl border border-foreground/25 bg-muted/40 shadow-card">
+      <div className="grid gap-4 p-5">
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-card shadow-card">
+            <KeyRound className="size-4" strokeWidth={1.5} aria-hidden="true" />
+          </span>
+          <div className="grid gap-0.5">
+            <p className="text-sm font-semibold">Copy this key now. It is not shown again.</p>
+            <p className="text-sm text-muted-foreground">Only a hash of the key is stored. If you lose it, revoke it and create another.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg border border-input bg-background py-1.5 pr-1.5 pl-3">
+          <code className="num min-w-0 flex-1 text-[0.8125rem] break-all">{secret}</code>
+          <CopyButton text={secret} label="the new API key" caption="Copy" />
+        </div>
+        {meta.data && (
+          <div className="grid gap-2 text-sm text-muted-foreground">
+            <p>Then sign your worker in. It prompts for the key:</p>
+            <CommandLine command={loginCommand(meta.data.base_url)} label="sign the worker in" />
+            <p className="pt-1">Or, in a script, pass it on standard input:</p>
+            <CommandLine command={loginFromStdinCommand(meta.data.base_url)} label="sign the worker in from a script" />
+          </div>
+        )}
+      </div>
+      <div className="flex justify-end border-t border-foreground/10 px-5 py-3">
+        <Button size="sm" variant="primary" onClick={onDismiss}>
           I've saved it
         </Button>
       </div>
-    </Notice>
+    </div>
   );
 }
 
@@ -99,34 +154,30 @@ function KeyRow({ apiKey }: { apiKey: ApiKey }) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys }),
   });
   return (
-    <tr>
-      <th scope="row">{apiKey.label}</th>
-      <td className="mono">{apiKey.prefix}…</td>
-      <td>
+    <TableRow className="hover:bg-muted/40">
+      <TableHead scope="row" className="pl-5">
+        {apiKey.label}
+      </TableHead>
+      <TableCell className="num text-[0.8125rem] text-muted-foreground">{apiKey.prefix}…</TableCell>
+      <TableCell className="text-muted-foreground">
         <Time value={apiKey.created_at} />
-      </td>
-      <td>{apiKey.last_used_at ? <Time value={apiKey.last_used_at} /> : <span className="muted">Never</span>}</td>
-      <td className="table__actions">
+      </TableCell>
+      <TableCell className="text-muted-foreground">{apiKey.last_used_at ? <Time value={apiKey.last_used_at} /> : 'Never'}</TableCell>
+      <TableCell className="pr-5 text-right">
         {apiKey.revoked_at ? (
-          <span className="muted">
+          <span className="text-xs text-muted-foreground">
             Revoked <Time value={apiKey.revoked_at} />
           </span>
         ) : (
-          <ConfirmButton
-            label="Revoke"
-            confirmLabel="Revoke key"
-            subject={apiKey.label}
-            busy={revoke.isPending}
-            onConfirm={() => revoke.mutate()}
-          />
+          <ConfirmButton label="Revoke" confirmLabel="Revoke key" subject={apiKey.label} busy={revoke.isPending} onConfirm={() => revoke.mutate()} />
         )}
         {revoke.isError && (
-          <span className="table__sub" role="alert">
+          <span className="mt-1 block text-xs font-medium text-destructive" role="alert">
             {describeError(revoke.error)}
           </span>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -149,58 +200,65 @@ function ApiKeys() {
 
   return (
     <>
-      <p className="muted section-note">
-        A worker authenticates with an API key. Create one per machine so you can revoke them separately.
-      </p>
-      <form className="inline-form" onSubmit={submit}>
-        <TextField
-          label="Label for a new key"
-          placeholder="workstation"
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          maxLength={80}
-          required
-          error={create.isError ? describeError(create.error) : null}
-        />
-        <Button type="submit" busy={create.isPending} busyLabel="Creating…">
-          Create key
-        </Button>
-      </form>
-      {create.data && <NewKey secret={create.data.key} onDismiss={() => create.reset()} />}
+      <div className="grid gap-4 border-b p-5">
+        <form className="grid gap-2 sm:grid-cols-[minmax(0,20rem)_auto] sm:items-start" onSubmit={submit}>
+          <TextField
+            label="Label for a new key"
+            placeholder="workstation"
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            maxLength={80}
+            required
+            error={create.isError ? describeError(create.error) : null}
+          />
+          {/* mt-5 is the label's height plus its gap: the button lines up with the input. */}
+          <Button type="submit" className="h-9 justify-self-start sm:mt-5" busy={create.isPending} busyLabel="Creating…">
+            <KeyRound strokeWidth={1.5} aria-hidden="true" />
+            Create key
+          </Button>
+        </form>
+        {create.data && <NewKey secret={create.data.key} onDismiss={() => create.reset()} />}
+      </div>
 
       {keys.isPending ? (
-        <Loading label="API keys">
+        <Loading label="API keys" className="p-5">
           <SkeletonRows rows={2} />
         </Loading>
       ) : keys.isError ? (
-        <ErrorState title="Couldn't load your keys" error={keys.error} onRetry={() => void keys.refetch()} />
+        <ErrorState className="m-5" title="Couldn't load your keys" error={keys.error} onRetry={() => void keys.refetch()} />
       ) : keys.data.items.length === 0 ? (
-        <EmptyState title="No API keys yet">
+        <EmptyState className="m-5" title="No API keys yet" icon={KeyRound}>
           <p>
             Create one above, then run <code>{CLI_NAME} login</code> on the machine that will do the work.
           </p>
         </EmptyState>
       ) : (
-        <TableScroll label="API keys">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Label</th>
-                <th scope="col">Key</th>
-                <th scope="col">Created</th>
-                <th scope="col">Last used</th>
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.data.items.map((apiKey) => (
-                <KeyRow key={apiKey.id} apiKey={apiKey} />
-              ))}
-            </tbody>
-          </table>
-        </TableScroll>
+        <Table aria-label="API keys">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead scope="col" className={`${COLUMN} pl-5`}>
+                Label
+              </TableHead>
+              <TableHead scope="col" className={COLUMN}>
+                Key
+              </TableHead>
+              <TableHead scope="col" className={COLUMN}>
+                Created
+              </TableHead>
+              <TableHead scope="col" className={COLUMN}>
+                Last used
+              </TableHead>
+              <TableHead scope="col" className={`${COLUMN} pr-5`}>
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {keys.data.items.map((apiKey) => (
+              <KeyRow key={apiKey.id} apiKey={apiKey} />
+            ))}
+          </TableBody>
+        </Table>
       )}
     </>
   );
@@ -226,55 +284,73 @@ function Claims() {
   const claims = useMyClaims();
   if (claims.isPending) {
     return (
-      <Loading label="claims">
+      <Loading label="claims" className="p-5">
         <SkeletonRows rows={4} />
       </Loading>
     );
   }
-  if (claims.isError) return <ErrorState title="Couldn't load your claims" error={claims.error} onRetry={() => void claims.refetch()} />;
+  if (claims.isError) {
+    return <ErrorState className="m-5" title="Couldn't load your claims" error={claims.error} onRetry={() => void claims.refetch()} />;
+  }
   if (claims.data.items.length === 0) {
     return (
-      <EmptyState title="No claims yet">
+      <EmptyState className="m-5" title="No claims yet" icon={ListChecks}>
         <p>When your worker claims a task it shows up here, with what it burned and whether CI confirmed it.</p>
       </EmptyState>
     );
   }
   return (
-    <TableScroll label="Your recent claims">
-      <table className="table">
-        <thead>
-          <tr>
-            <th scope="col">Task</th>
-            <th scope="col">Outcome</th>
-            <th scope="col" className="table__num">
-              Tokens
-            </th>
-            <th scope="col">Claimed</th>
-          </tr>
-        </thead>
-        <tbody>
-          {claims.data.items.map((claim) => (
-            <tr key={claim.claim_id}>
-              <td>
-                <Link to={`/${claim.project}/tasks/${manifestId(claim.task_id)}`} className="mono">
-                  {manifestId(claim.task_id)}
-                </Link>
-                <span className="table__sub">
-                  <Link to={`/${claim.project}`}>{claim.project}</Link>
-                </span>
-              </td>
-              <td>{claim.status === 'active' ? <Badge tone="live">Running</Badge> : claimOutcome(claim)}</td>
-              <td className="table__num">
-                {claim.report ? <Num value={claim.report.tokens_in + claim.report.tokens_out} /> : '—'}
-              </td>
-              <td>
-                <Time value={claim.claimed_at} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableScroll>
+    <Table aria-label="Your recent claims">
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead scope="col" className={`${COLUMN} pl-5`}>
+            Task
+          </TableHead>
+          <TableHead scope="col" className={COLUMN}>
+            Outcome
+          </TableHead>
+          <TableHead scope="col" className={`${COLUMN} text-right`}>
+            Tokens
+          </TableHead>
+          <TableHead scope="col" className={`${COLUMN} pr-5 text-right`}>
+            Claimed
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {claims.data.items.map((claim) => (
+          <TableRow key={claim.claim_id} className="hover:bg-muted/40">
+            <TableCell className="py-2.5 pl-5">
+              <Link
+                to={`/${claim.project}/tasks/${manifestId(claim.task_id)}`}
+                className="num block py-1 text-[0.8125rem] font-medium underline-offset-4 hover:underline"
+              >
+                {manifestId(claim.task_id)}
+              </Link>
+              <Link to={`/${claim.project}`} className="inline-block py-1 text-xs text-muted-foreground underline-offset-4 hover:underline">
+                {claim.project}
+              </Link>
+            </TableCell>
+            <TableCell>
+              {claim.status === 'active' ? (
+                <Badge variant="outline" className="gap-1.5 border-live/25 bg-live/8 text-live">
+                  <span className="live-dot size-1.5" aria-hidden="true" />
+                  Running
+                </Badge>
+              ) : (
+                claimOutcome(claim)
+              )}
+            </TableCell>
+            <TableCell className="text-right">
+              {claim.report ? <Num value={claim.report.tokens_in + claim.report.tokens_out} /> : <span className="text-muted-foreground">—</span>}
+            </TableCell>
+            <TableCell className="pr-5 text-right text-muted-foreground">
+              <Time value={claim.claimed_at} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -285,22 +361,27 @@ export default function Settings() {
     return <SignInRequired title="Settings" reason="Sign in to manage your account and the API keys your workers use." />;
   }
   return (
-    <div className="page page--medium settings">
-      <header className="page__header">
-        <h1>Settings</h1>
-      </header>
-      <section className="settings__section" aria-labelledby="settings-account">
-        <h2 id="settings-account">Account</h2>
-        <Account />
-      </section>
-      <section className="settings__section" aria-labelledby="settings-keys">
-        <h2 id="settings-keys">API keys</h2>
-        <ApiKeys />
-      </section>
-      <section className="settings__section" aria-labelledby="settings-claims">
-        <h2 id="settings-claims">Recent claims</h2>
-        <Claims />
-      </section>
+    <div className="container-page py-10">
+      <div className="mx-auto grid max-w-3xl gap-6">
+        <header className="rise mb-2 grid gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">Your account, the keys your workers sign in with, and what they claimed.</p>
+        </header>
+        <Card id="settings-account" title="Account" index={1}>
+          <Account />
+        </Card>
+        <Card
+          id="settings-keys"
+          title="API keys"
+          description="A worker authenticates with an API key. Create one per machine so you can revoke them separately."
+          index={2}
+        >
+          <ApiKeys />
+        </Card>
+        <Card id="settings-claims" title="Recent claims" index={3}>
+          <Claims />
+        </Card>
+      </div>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { Plugin, UserConfig } from 'vite';
 import type { InlineConfig } from 'vitest/node';
@@ -14,7 +16,7 @@ function preloadLatinFonts(): Plugin {
       order: 'post',
       handler(_html, ctx) {
         const files = Object.keys(ctx.bundle ?? {}).filter((file) =>
-          /(inter|jetbrains-mono)-latin-wght-normal-[\w-]+\.woff2$/.test(file),
+          /geist(-mono)?-latin-wght-normal-[\w-]+\.woff2$/.test(file),
         );
         return files.map((file) => ({
           tag: 'link',
@@ -29,7 +31,8 @@ function preloadLatinFonts(): Plugin {
 // Typed explicitly rather than through defineConfig, so the `test` block type-checks no
 // matter how the workspace hoists vite and vitest.
 const config: UserConfig & { test: InlineConfig } = {
-  plugins: [react(), preloadLatinFonts()],
+  plugins: [react(), tailwindcss(), preloadLatinFonts()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: { port: 5173, strictPort: true },
   preview: { port: 4173, strictPort: true },
   build: { target: 'es2022', sourcemap: false, cssCodeSplit: false },

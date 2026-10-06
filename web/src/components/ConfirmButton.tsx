@@ -23,11 +23,11 @@ export function ConfirmButton({ label, confirmLabel, subject, onConfirm, busy }:
     );
   }
   return (
-    <span className="button-row button-row--tight">
+    <span className="inline-flex items-center gap-1.5">
       <Button
         size="sm"
         variant="primary"
-        // The first click moved focus here by replacing the button; keep the keyboard user in place.
+        // The first click replaced the button that had focus; keep the keyboard user in place.
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
         onClick={() => {

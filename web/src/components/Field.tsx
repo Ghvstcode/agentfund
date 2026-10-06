@@ -1,4 +1,9 @@
+import { ChevronDown } from 'lucide-react';
 import { type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, useId } from 'react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 
 interface FieldShellProps {
   label: string;
@@ -13,30 +18,24 @@ interface FieldParts {
   describedBy: string | undefined;
 }
 
-function FieldShell({
-  label,
-  hint,
-  error,
-  hideLabel,
-  children,
-}: FieldShellProps & { children: (parts: FieldParts) => ReactNode }) {
+function FieldShell({ label, hint, error, hideLabel, children }: FieldShellProps & { children: (parts: FieldParts) => ReactNode }) {
   const id = useId();
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   return (
-    <div className="field" data-invalid={error ? true : undefined}>
-      <label className={hideLabel ? 'sr-only' : 'field__label'} htmlFor={id}>
+    <div className="grid min-w-0 gap-1.5">
+      <Label htmlFor={id} className={hideLabel ? 'sr-only' : undefined}>
         {label}
-      </label>
+      </Label>
       {children({ id, describedBy: [hintId, errorId].filter(Boolean).join(' ') || undefined })}
       {hint && (
-        <p className="field__hint" id={hintId}>
+        <p id={hintId} className="text-xs text-pretty text-muted-foreground">
           {hint}
         </p>
       )}
       {error && (
-        <p className="field__error" id={errorId} role="alert">
-          <strong>Error:</strong> {error}
+        <p id={errorId} role="alert" className="text-xs font-medium text-destructive">
+          {error}
         </p>
       )}
     </div>
@@ -49,11 +48,11 @@ export function TextField({ label, hint, error, hideLabel, mono, className, ...i
   return (
     <FieldShell label={label} hint={hint} error={error} hideLabel={hideLabel}>
       {({ id, describedBy }) => (
-        <input
+        <Input
           type="text"
           {...input}
           id={id}
-          className={['input', mono && 'mono', className].filter(Boolean).join(' ')}
+          className={cn('h-9', mono && 'num text-[0.8125rem]', className)}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
         />
@@ -64,25 +63,51 @@ export function TextField({ label, hint, error, hideLabel, mono, className, ...i
 
 type SelectFieldProps = FieldShellProps & Omit<SelectHTMLAttributes<HTMLSelectElement>, 'id'>;
 
-export function SelectField({ label, hint, error, hideLabel, children, ...select }: SelectFieldProps) {
+/** A native select in the house style: best on phones and in dense tables. */
+export function SelectField({ label, hint, error, hideLabel, children, className, ...select }: SelectFieldProps) {
   return (
     <FieldShell label={label} hint={hint} error={error} hideLabel={hideLabel}>
       {({ id, describedBy }) => (
-        <select {...select} id={id} className="input input--select" aria-describedby={describedBy}>
-          {children}
-        </select>
+        <span className="relative block">
+          <select
+            {...select}
+            id={id}
+            aria-describedby={describedBy}
+            className={cn(
+              'h-9 w-full appearance-none rounded-lg border border-input bg-transparent pr-8 pl-2.5 text-sm transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+              className,
+            )}
+          >
+            {children}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+        </span>
       )}
     </FieldShell>
   );
 }
 
-type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { label: ReactNode };
+interface SwitchFieldProps {
+  label: ReactNode;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+}
 
-export function Checkbox({ label, ...input }: CheckboxProps) {
+/** A labelled on/off switch. */
+export function SwitchField({ label, checked, onCheckedChange, disabled, className }: SwitchFieldProps) {
+  const id = useId();
   return (
-    <label className="checkbox">
-      <input type="checkbox" {...input} />
-      <span>{label}</span>
-    </label>
+    <div className={cn('flex min-h-9 items-center gap-2.5', className)}>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      <Label htmlFor={id} className="text-sm leading-snug font-normal">
+        {label}
+      </Label>
+    </div>
   );
 }

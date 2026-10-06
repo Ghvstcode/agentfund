@@ -1,4 +1,5 @@
-import { formatCompact, formatExact } from '../lib/format';
+import { formatCompact, formatExact } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 interface NumProps {
   value: number;
@@ -6,13 +7,14 @@ interface NumProps {
   exact?: boolean;
   /** Unit for the tooltip; pass an empty string for bare counts. */
   unit?: string;
+  className?: string;
 }
 
 /** A token count in the mono face: compact on screen, exact in the tooltip. */
-export function Num({ value, exact = false, unit = 'tokens' }: NumProps) {
+export function Num({ value, exact = false, unit = 'tokens', className }: NumProps) {
   const full = formatExact(value);
   return (
-    <span className="mono num" title={unit ? `${full} ${unit}` : full}>
+    <span className={cn('num whitespace-nowrap', className)} title={unit ? `${full} ${unit}` : full}>
       {exact ? full : formatCompact(value)}
     </span>
   );

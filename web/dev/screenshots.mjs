@@ -30,6 +30,8 @@ const PAGES = [
   ['project-donors', '/gridrs/donors'],
   ['project-audit', '/gridrs/audit'],
   ['project-back-dialog', '/gridrs', { auth: true, act: (page) => page.getByRole('button', { name: /Back with tokens/ }).click() }],
+  ['project-back-dialog-behaviour', '/gridrs', { auth: true, act: async (page) => { await page.getByRole('button', { name: /Back with tokens/ }).click(); await page.getByRole('heading', { name: 'It never' }).scrollIntoViewIfNeeded(); } }],
+  ['command-palette', '/', { act: async (page) => { await page.keyboard.press('Control+k'); await page.getByPlaceholder(/Jump to/).waitFor(); } }],
   ['donor', '/u/ada'],
   ['leaderboard', '/donors'],
   ['maintain', '/maintain', { auth: true }],
@@ -109,7 +111,7 @@ try {
           }
           if (options.act && scenario === 'many') await options.act(page).catch((error) => console.warn(`${name}: ${error.message}`));
           await page.waitForTimeout(scenario === 'loading' ? 500 : 900);
-          await page.screenshot({ path: `${OUT}${scenario}/${name}--${viewportName}-${theme}.png`, fullPage: !/dialog|drawer/.test(name) });
+          await page.screenshot({ path: `${OUT}${scenario}/${name}--${viewportName}-${theme}.png`, fullPage: !/dialog|drawer|palette/.test(name) });
           await context.close();
           count += 1;
         }

@@ -51,6 +51,7 @@ export const queryKeys = {
   ledger: (slug: string) => ['project', slug, 'ledger'] as const,
   projectEvents: (slug: string) => ['project', slug, 'events'] as const,
   events: ['events'] as const,
+  deliveryEvents: ['events', 'deliveries'] as const,
   donors: ['donors'] as const,
   donor: (handle: string) => ['donor', handle] as const,
   apiKeys: ['me', 'api-keys'] as const,
@@ -133,17 +134,19 @@ export function useTask(slug: string, manifestId: string) {
   });
 }
 
-export function useLedger(slug: string) {
+export function useLedger(slug: string, enabled = true) {
   return useInfiniteQuery({
+    enabled,
     queryKey: queryKeys.ledger(slug),
     queryFn: ({ pageParam }) =>
       unwrap(
         api.GET('/v1/projects/{slug}/ledger', {
-          params: { path: { slug }, query: { limit: 50, cursor: pageParam } },
+          params: { path: { slug }, query: { limit: 100, cursor: pageParam } },
         }),
       ),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: nextCursor,
+    staleTime: 60_000,
   });
 }
 
@@ -167,6 +170,24 @@ export function useEvents(limit = 12) {
     queryFn: ({ pageParam }) => unwrap(api.GET('/v1/events', { params: { query: { limit, cursor: pageParam } } })),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: nextCursor,
+  });
+}
+
+/**
+ * Recent instance-wide deliveries, for the home page chart. There is no time-series endpoint,
+ * so this reads the newest audit events and keeps the ones that carry delivered tokens.
+ */
+export function useDeliveryEvents() {
+  return useQuery({
+    queryKey: queryKeys.deliveryEvents,
+    queryFn: async () => {
+      const page = await unwrap(api.GET('/v1/events', { params: { query: { limit: 100 } } }));
+      return page.items.flatMap((event) => {
+        const tokens = event.payload?.tokens;
+        return event.action === 'task.delivered' && typeof tokens === 'number' ? [{ at: event.at, tokens }] : [];
+      });
+    },
+    staleTime: 60_000,
   });
 }
 

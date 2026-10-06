@@ -1,78 +1,121 @@
+import { Columns3, Gauge, Link2, ListChecks, LockKeyhole, Rows3 } from 'lucide-react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { flatItems, useTasks } from '../../api/queries';
-import type { Task } from '../../api/types';
-import { Badge } from '../../components/Badge';
-import { Num } from '../../components/Num';
-import { EmptyState, ErrorState, Loading, SkeletonRows } from '../../components/States';
-import { TableScroll } from '../../components/TableScroll';
-import { KEEP_SCROLL } from '../../components/Tabs';
-import { TokenCounter } from '../../components/TokenCounter';
-import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { flatItems, useTasks } from '@/api/queries';
+import type { Task } from '@/api/types';
+import { HandleAvatar } from '@/components/HandleAvatar';
+import { Num } from '@/components/Num';
+import { EmptyState, ErrorState, Loading, Skeleton } from '@/components/States';
+import { KEEP_SCROLL } from '@/components/Tabs';
+import { TokenCounter } from '@/components/TokenCounter';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { cn } from '@/lib/utils';
 import { useProjectContext } from './ProjectPage';
 import { TaskDrawer } from './TaskDrawer';
-import { BOARD_STATES, STATE_HINTS, STATE_LABELS } from './taskStates';
+import { BOARD_STATES, STATE_HINTS, STATE_ICONS, STATE_LABELS, taskStatus } from './taskStates';
 
+type View = 'board' | 'table';
+const VIEW_KEY = 'agentfund.tasks.view';
+
+function storedView(): View | null {
+  try {
+    const value = window.localStorage.getItem(VIEW_KEY);
+    return value === 'board' || value === 'table' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Donor and streaming token count of the run in progress. */
 function ClaimLine({ task }: { task: Task }) {
   const claim = task.active_claim;
-  if (!claim) {
-    return task.state === 'claimed' ? <span className="claim-line claim-line--waiting">Awaiting CI</span> : null;
-  }
+  if (!claim) return null;
+  const handle = claim.donor?.handle ?? 'a donor';
   return (
-    <span className="claim-line">
-      <span className="live-dot" aria-hidden="true" />
-      <span className="claim-line__donor">{claim.donor?.handle ?? 'a donor'}</span>
+    <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-live">
+      <HandleAvatar handle={handle} className="size-4 text-[0.5rem]" />
+      <span className="truncate">{handle}</span>
       <TokenCounter value={claim.tokens_so_far ?? 0} label="tokens so far" size="sm" tone="accent" />
     </span>
   );
 }
 
-function TaskCard({ task, slug }: { task: Task; slug: string }) {
+function Chip({ icon: Icon, children, strong }: { icon: typeof Gauge; children: React.ReactNode; strong?: boolean }) {
   return (
-    <li className="task-card">
-      <p className="task-card__id mono">{task.task_id}</p>
-      <h4 className="task-card__title">
-        <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL}>
+    <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.6875rem]', strong ? 'border-foreground/25 text-foreground' : 'text-muted-foreground')}>
+      <Icon className="size-3" strokeWidth={1.5} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
+function TaskCard({ task, slug }: { task: Task; slug: string }) {
+  const status = taskStatus(task);
+  return (
+    <li
+      className={cn(
+        'relative grid gap-2 rounded-lg border bg-card p-3 shadow-card transition duration-200 ease-out focus-within:border-foreground/25 hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-raised',
+        status.live && 'border-live/35 shadow-[0_0_0_1px_color-mix(in_oklab,var(--live)_12%,transparent),0_8px_28px_-12px_color-mix(in_oklab,var(--live)_45%,transparent)]',
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="num truncate text-[0.6875rem] text-muted-foreground">{task.task_id}</span>
+        <span className={cn('flex shrink-0 items-center gap-1 text-[0.6875rem] font-medium', status.live ? 'text-live' : 'text-muted-foreground')}>
+          {status.live ? <span className="live-dot" aria-hidden="true" /> : <status.icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />}
+          {status.label}
+        </span>
+      </div>
+      <h4 className="text-sm leading-snug font-medium text-pretty">
+        <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL} className="after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none">
           {task.title}
         </Link>
       </h4>
       <ClaimLine task={task} />
-      {task.blocked_by.length > 0 && (
-        <p className="task-card__blocked">
-          Blocked by <span className="mono">{task.blocked_by.join(', ')}</span>
-        </p>
-      )}
-      <p className="task-card__burn muted">
+      <div className="flex flex-wrap gap-1">
         {task.burn.runs > 0 ? (
-          <>
+          <Chip icon={Gauge}>
             <Num value={task.burn.total} /> burned · {task.burn.runs} {task.burn.runs === 1 ? 'run' : 'runs'}
-          </>
+          </Chip>
         ) : (
-          <>
-            Cap <Num value={task.manifest.max_tokens} />
-          </>
+          <Chip icon={Gauge}>
+            <Num value={task.manifest.max_tokens} /> cap
+          </Chip>
         )}
-      </p>
+        {task.depends_on.map((dependency) => {
+          const blocking = task.blocked_by.includes(dependency);
+          return (
+            <Chip key={dependency} icon={blocking ? LockKeyhole : Link2} strong={blocking}>
+              <span className="num">{dependency.slice(0, 4)}</span>
+              <span className="sr-only">{blocking ? ' blocks this task' : ' is a merged dependency'}</span>
+            </Chip>
+          );
+        })}
+      </div>
     </li>
   );
 }
 
 function Board({ tasks, slug }: { tasks: Task[]; slug: string }) {
   return (
-    <div className="board">
+    <div className="grid grid-cols-4 gap-3">
       {BOARD_STATES.map((state) => {
         const column = tasks.filter((task) => task.state === state);
+        const Icon = STATE_ICONS[state];
         return (
-          <section key={state} className="board__column" aria-labelledby={`column-${state}`}>
-            <header className="board__header">
-              <h3 id={`column-${state}`}>
-                {STATE_LABELS[state]} <span className="mono muted">{column.length}</span>
+          <section key={state} aria-labelledby={`column-${state}`} className="grid min-w-0 content-start gap-2 rounded-xl border bg-muted/40 p-2">
+            <header className="flex items-center gap-2 px-1.5 pt-1 pb-0.5">
+              <Icon className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+              <h3 id={`column-${state}`} className="text-sm font-semibold tracking-tight">
+                {STATE_LABELS[state]}
               </h3>
-              <p className="muted">{STATE_HINTS[state]}</p>
+              <span className="num text-xs text-muted-foreground">{column.length}</span>
+              <span className="ml-auto truncate text-xs text-muted-foreground">{STATE_HINTS[state]}</span>
             </header>
             {column.length === 0 ? (
-              <p className="board__empty muted">None</p>
+              <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">Nothing here</p>
             ) : (
-              <ul className="board__cards">
+              <ul className="grid gap-2">
                 {column.map((task) => (
                   <TaskCard key={task.id} task={task} slug={slug} />
                 ))}
@@ -87,47 +130,76 @@ function Board({ tasks, slug }: { tasks: Task[]; slug: string }) {
 
 function TaskTable({ tasks, slug, label }: { tasks: Task[]; slug: string; label: string }) {
   return (
-    <TableScroll label={label}>
-      <table className="table table--dense">
-        <thead>
-          <tr>
-            <th scope="col">Task</th>
-            <th scope="col">State</th>
-            <th scope="col" className="table__num">
-              Burn
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {tasks.map((task) => (
-            <tr key={task.id}>
-              <td>
-                <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL}>
-                  {task.title}
-                </Link>
-                <span className="table__sub mono">{task.task_id}</span>
-                {task.blocked_by.length > 0 && (
-                  <span className="table__sub">
-                    Blocked by <span className="mono">{task.blocked_by.join(', ')}</span>
+    <div className="surface overflow-hidden">
+      <Table aria-label={label}>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="pl-4">Task</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="hidden text-right sm:table-cell">Cap</TableHead>
+            <TableHead className="pr-4 text-right">Burn</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {tasks.map((task) => {
+            const status = taskStatus(task);
+            return (
+              <TableRow key={task.id} className="hover:bg-muted/40">
+                <TableCell className="max-w-0 w-full pl-4 whitespace-normal">
+                  <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL} className="font-medium underline-offset-4 hover:underline">
+                    {task.title}
+                  </Link>
+                  <span className="num mt-0.5 block truncate text-xs text-muted-foreground">
+                    {task.task_id}
+                    {task.blocked_by.length > 0 && ` · blocked by ${task.blocked_by.join(', ')}`}
                   </span>
-                )}
-              </td>
-              <td>
-                {task.active_claim ? <Badge tone="live">Running</Badge> : STATE_LABELS[task.state]}
-                {task.active_claim && (
-                  <span className="table__sub">
-                    <ClaimLine task={task} />
+                </TableCell>
+                <TableCell>
+                  <span className={cn('flex items-center gap-1.5 text-xs font-medium', status.live ? 'text-live' : 'text-muted-foreground')}>
+                    {status.live ? <span className="live-dot" aria-hidden="true" /> : <status.icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />}
+                    {status.label}
                   </span>
-                )}
-              </td>
-              <td className="table__num">
-                <Num value={task.burn.total} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableScroll>
+                  {task.active_claim && (
+                    <span className="mt-1 block">
+                      <ClaimLine task={task} />
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="hidden text-right text-muted-foreground sm:table-cell">
+                  <Num value={task.manifest.max_tokens} />
+                </TableCell>
+                <TableCell className="pr-4 text-right">
+                  <Num value={task.burn.total} />
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function ViewToggle({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+  const options = [
+    ['board', 'Board', Columns3],
+    ['table', 'Table', Rows3],
+  ] as const;
+  return (
+    <div role="group" aria-label="Task layout" className="inline-flex rounded-lg border bg-muted/50 p-0.5">
+      {options.map(([value, label, Icon]) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={view === value}
+          onClick={() => onChange(value)}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-card"
+        >
+          <Icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -136,47 +208,80 @@ export default function TasksTab() {
   const { taskId } = useParams();
   const navigate = useNavigate();
   const wide = useMediaQuery('(min-width: 64rem)');
+  const [chosen, setChosen] = useState<View | null>(storedView);
   const query = useTasks(project.slug);
   const tasks = flatItems(query);
+  // The board needs room for four columns; narrow screens always get the table.
+  const view: View = wide ? (chosen ?? 'board') : 'table';
   const closed = tasks.filter((task) => task.state === 'failed');
+  const running = tasks.filter((task) => task.active_claim).length;
+
+  const choose = (next: View) => {
+    setChosen(next);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // The choice lasts for this visit only.
+    }
+  };
 
   return (
-    <section className="tab-panel" aria-labelledby="tasks-title">
-      <h2 id="tasks-title" className="sr-only">
-        Tasks
-      </h2>
+    <section aria-labelledby="tasks-title" className="grid min-w-0 gap-4">
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <h2 id="tasks-title" className="text-sm text-muted-foreground">
+          <span className="sr-only">Tasks: </span>
+          {query.isSuccess && (
+            <>
+              <span className="num font-medium text-foreground">{tasks.length}</span> signed at the pinned commit
+              {running > 0 && (
+                <>
+                  {' · '}
+                  <span className="font-medium text-live">
+                    <span className="num">{running}</span> running
+                  </span>
+                </>
+              )}
+            </>
+          )}
+        </h2>
+        {wide && <ViewToggle view={view} onChange={choose} />}
+      </div>
       {query.isPending ? (
-        <Loading label="tasks">
-          <SkeletonRows rows={5} height="4rem" />
+        <Loading label="tasks" className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-56 rounded-xl" />
+          ))}
         </Loading>
       ) : query.isError ? (
         <ErrorState title="Couldn't load tasks" error={query.error} onRetry={() => void query.refetch()} />
       ) : tasks.length === 0 ? (
-        <EmptyState title="No tasks at the pinned commit">
+        <EmptyState icon={ListChecks} title="No tasks at the pinned commit">
           <p>
-            The signed lock at <span className="mono">{project.pinned_commit.slice(0, 7)}</span> lists no task
-            manifests. Tasks appear here when the maintainer signs a lock that includes them and the project is
+            The signed lock at <span className="num text-foreground">{project.pinned_commit.slice(0, 7)}</span> lists no
+            task manifests. Tasks appear here when the maintainer signs a lock that includes them and the project is
             re-pinned.
           </p>
         </EmptyState>
-      ) : (
+      ) : view === 'board' ? (
         <>
-          {wide ? <Board tasks={tasks} slug={project.slug} /> : <TaskTable tasks={tasks} slug={project.slug} label="Tasks" />}
-          {wide && closed.length > 0 && (
-            <section className="tab-panel__section" aria-labelledby="closed-title">
-              <h3 id="closed-title">Closed</h3>
-              <p className="muted">Removed from the lock at a newer pin, or closed by an admin.</p>
+          <Board tasks={tasks} slug={project.slug} />
+          {closed.length > 0 && (
+            <section aria-labelledby="closed-title" className="grid gap-3 pt-4">
+              <div>
+                <h3 id="closed-title" className="text-sm font-semibold tracking-tight">
+                  Closed
+                </h3>
+                <p className="text-xs text-muted-foreground">Removed from the lock at a newer pin, or closed by an admin.</p>
+              </div>
               <TaskTable tasks={closed} slug={project.slug} label="Closed tasks" />
             </section>
           )}
         </>
+      ) : (
+        <TaskTable tasks={tasks} slug={project.slug} label="Tasks" />
       )}
       {taskId && (
-        <TaskDrawer
-          slug={project.slug}
-          manifestId={taskId}
-          onClose={() => void navigate(`/${project.slug}`, { state: KEEP_SCROLL })}
-        />
+        <TaskDrawer slug={project.slug} manifestId={taskId} onClose={() => void navigate(`/${project.slug}`, { state: KEEP_SCROLL })} />
       )}
     </section>
   );

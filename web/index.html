@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0b0b0c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <!-- Static defaults for standalone hosting. A server that renders per-route tags replaces
          the marker below with its own title, description, OpenGraph and JSON-LD. -->
@@ -23,10 +23,12 @@
     <meta name="twitter:card" content="summary" />
     <!--app-head-->
     <script>
-      // Apply a saved theme before first paint so the page never flashes the other palette.
+      // Apply the theme before first paint (saved choice, else the system setting) so the
+      // page never flashes the other palette.
       try {
         var saved = localStorage.getItem('agentfund.theme');
-        if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+        var dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.classList.add('dark');
       } catch (error) {}
     </script>
   </head>

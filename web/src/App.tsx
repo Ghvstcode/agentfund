@@ -3,14 +3,15 @@ import { Route, Routes } from 'react-router';
 import { AppShell } from './components/AppShell';
 import Discover from './pages/Discover';
 import NotFound from './pages/NotFound';
-import ActivityTab from './pages/project/ActivityTab';
-import AuditTab from './pages/project/AuditTab';
-import DonorsTab from './pages/project/DonorsTab';
-import ProjectPage from './pages/project/ProjectPage';
-import TasksTab from './pages/project/TasksTab';
 
-// Discover and the project page are the landing surfaces and ship in the main bundle;
-// everything else loads on demand.
+// Discover ships in the main bundle. The project page is one on-demand chunk (its tabs load
+// together, so switching between them is instant); every other page is its own chunk.
+const project = () => import('./pages/project');
+const ProjectPage = lazy(() => project().then((module) => ({ default: module.ProjectPage })));
+const TasksTab = lazy(() => project().then((module) => ({ default: module.TasksTab })));
+const ActivityTab = lazy(() => project().then((module) => ({ default: module.ActivityTab })));
+const DonorsTab = lazy(() => project().then((module) => ({ default: module.DonorsTab })));
+const AuditTab = lazy(() => project().then((module) => ({ default: module.AuditTab })));
 const Leaderboard = lazy(() => import('./pages/Leaderboard'));
 const DonorProfile = lazy(() => import('./pages/DonorProfile'));
 const Maintain = lazy(() => import('./pages/Maintain'));

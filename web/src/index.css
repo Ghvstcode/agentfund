@@ -1,0 +1,344 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import './styles/fonts.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * THE THEME. Everything visual derives from the variables in :root (light) and .dark.
+ * To restyle a fork, change values here; nothing else hard-codes a colour, radius or font.
+ * `--live` is the one accent: it is reserved for live values and progress.
+ * Documented live at /styleguide.
+ */
+:root {
+  --background: #fafafa;
+  --foreground: #0a0a0b;
+  --card: #ffffff;
+  --card-foreground: #0a0a0b;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0b;
+  --primary: #111113;
+  --primary-foreground: #fafafa;
+  --secondary: #f1f1f2;
+  --secondary-foreground: #111113;
+  --muted: #f3f3f4;
+  --muted-foreground: #62626a;
+  --accent: #f1f1f2;
+  --accent-foreground: #111113;
+  --destructive: #c4261b;
+  --border: #e6e6e8;
+  --input: #dcdce0;
+  --ring: #8b8b93;
+  --live: #bd3509;
+  --live-foreground: #ffffff;
+  --radius: 0.625rem;
+  /* Elevation: a hairline of shadow under cards, more under overlays. */
+  --shadow-card: 0 1px 2px rgb(10 10 11 / 0.04), 0 0 0 1px rgb(10 10 11 / 0.02);
+  --shadow-raised: 0 8px 24px -8px rgb(10 10 11 / 0.12), 0 2px 6px -2px rgb(10 10 11 / 0.06);
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --grid-line: rgb(10 10 11 / 0.05);
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --card: #0f0f12;
+  --card-foreground: #f4f4f5;
+  --popover: #141417;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #0b0b0d;
+  --secondary: #1b1b1f;
+  --secondary-foreground: #f4f4f5;
+  --muted: #17171a;
+  --muted-foreground: #a0a0ab;
+  --accent: #1b1b1f;
+  --accent-foreground: #f4f4f5;
+  --destructive: #ff6b5e;
+  --border: rgb(255 255 255 / 0.09);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #71717a;
+  --live: #ff6a33;
+  --live-foreground: #0b0b0d;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-raised: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 4px 12px -4px rgb(0 0 0 / 0.5);
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --grid-line: rgb(255 255 255 / 0.04);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', 'Geist Fallback', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-live: var(--live);
+  --color-live-foreground: var(--live-foreground);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --shadow-card: var(--shadow-card), var(--highlight);
+  --shadow-raised: var(--shadow-raised), var(--highlight);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-rise: rise 0.5s var(--ease-out-quint) both;
+  --animate-live: live-pulse 2s ease-in-out infinite;
+  --animate-enter: enter 0.35s var(--ease-out-quint) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes live-ring {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+    color-scheme: light;
+    scrollbar-gutter: stable;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* One focus treatment everywhere: a 2px ring in the text colour, offset from the element. */
+  :focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--foreground);
+    color: var(--background);
+  }
+
+  code,
+  kbd,
+  pre {
+    @apply font-mono;
+    font-variant-ligatures: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Every number, hash, commit and key: mono face, tabular figures. */
+  .num {
+    @apply font-mono tabular-nums;
+    font-variant-ligatures: none;
+    letter-spacing: -0.01em;
+  }
+
+  /* Page column. */
+  .container-page {
+    @apply mx-auto w-full max-w-[76rem] px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Raised surface: card colour, hairline border, soft shadow, inner top highlight. */
+  .surface {
+    @apply rounded-xl border bg-card shadow-card;
+  }
+
+  /* Staggered entrance for page sections: set --i on each child. */
+  .rise {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  /* Small label above a figure. Sentence case, not shouting. */
+  .label {
+    @apply text-xs font-medium text-muted-foreground;
+  }
+
+  /* Underlined inline link. */
+  .link {
+    @apply underline decoration-border decoration-1 underline-offset-4 transition-colors hover:decoration-foreground;
+  }
+
+  /* Faint dotted grid behind hero areas. */
+  .bg-grid {
+    background-image: radial-gradient(var(--grid-line) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  /* ── Live dot: accent core with an expanding ring ── */
+  .live-dot {
+    @apply relative inline-block size-2 shrink-0 rounded-full bg-live;
+    animation: var(--animate-live);
+  }
+
+  .live-dot::after {
+    content: '';
+    @apply absolute inset-0 rounded-full bg-live;
+    animation: live-ring 2s ease-out infinite;
+  }
+
+  .live-glow {
+    text-shadow: 0 0 24px color-mix(in oklab, var(--live) 45%, transparent);
+  }
+
+  :root:not(.dark) .live-glow {
+    text-shadow: none;
+  }
+
+  /* ── Token counter: fixed-height, clipped wheels ── */
+  .counter {
+    @apply inline-block align-middle font-mono font-medium whitespace-nowrap tabular-nums;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .counter--hero {
+    font-size: clamp(2.75rem, 10.5vw, 7.5rem);
+    font-weight: 500;
+    letter-spacing: -0.04em;
+  }
+
+  .counter--xl {
+    font-size: clamp(2.25rem, 7.5vw, 4.25rem);
+    font-weight: 500;
+    letter-spacing: -0.035em;
+  }
+
+  .counter--lg {
+    @apply text-3xl;
+  }
+
+  .counter--md {
+    @apply text-base;
+  }
+
+  .counter--sm {
+    @apply text-[0.8125rem];
+  }
+
+  .counter--accent {
+    @apply text-live;
+  }
+
+  .counter__digits {
+    display: inline-flex;
+    height: 1em;
+    overflow: hidden;
+  }
+
+  .counter__wheel {
+    display: block;
+    flex: none;
+    width: 1ch;
+    height: 1em;
+    line-height: 1em;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  .counter__strip {
+    display: block;
+    will-change: transform;
+  }
+
+  .counter__strip > span {
+    display: block;
+    width: 1ch;
+    height: 1em;
+    line-height: 1em;
+  }
+
+  .counter__separator {
+    display: block;
+    flex: none;
+    width: 0.28em;
+  }
+
+  .counter--placeholder {
+    @apply text-muted-foreground/25;
+  }
+
+  /* ── Prose block for manifest prompts ── */
+  .prose-block {
+    @apply rounded-lg border bg-muted/40 p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .code-block {
+    @apply rounded-lg border bg-muted/50 p-3 font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}

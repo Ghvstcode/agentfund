@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router';
+import { cn } from '@/lib/utils';
 
 /** Router state that tells the shell not to scroll to the top for this navigation. */
 export const KEEP_SCROLL = { keepScroll: true } as const;
@@ -12,16 +13,31 @@ export interface TabItem {
   end?: boolean;
 }
 
-/** URL-addressable section tabs: plain links, with the current one marked for assistive tech. */
-export function Tabs({ label, items }: { label: string; items: TabItem[] }) {
+/**
+ * URL-addressable section tabs: plain links, with the current one marked for assistive tech.
+ * The underline grows in from the centre when a tab becomes current.
+ */
+export function Tabs({ label, items, className }: { label: string; items: TabItem[]; className?: string }) {
   return (
-    <nav className="tabs" aria-label={label}>
-      <ul className="tabs__list">
+    <nav aria-label={label} className={cn('overflow-x-auto border-b [scrollbar-width:none]', className)}>
+      <ul className="flex gap-1">
         {items.map((item) => (
           <li key={item.to}>
-            <NavLink to={item.to} end={item.end} className="tabs__tab" state={KEEP_SCROLL}>
+            <NavLink
+              to={item.to}
+              end={item.end}
+              state={KEEP_SCROLL}
+              className={cn(
+                'group relative flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors -outline-offset-2 hover:text-foreground aria-[current=page]:text-foreground',
+                'after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:origin-center after:scale-x-0 after:rounded-full after:bg-foreground after:transition-transform after:duration-200 after:ease-out aria-[current=page]:after:scale-x-100',
+              )}
+            >
               {item.label}
-              {item.count !== undefined && <span className="tabs__count mono">{item.count}</span>}
+              {item.count !== undefined && (
+                <span className="num rounded-full bg-muted px-1.5 py-px text-[0.6875rem] text-muted-foreground group-aria-[current=page]:text-foreground">
+                  {item.count}
+                </span>
+              )}
             </NavLink>
           </li>
         ))}

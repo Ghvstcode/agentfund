@@ -1191,7 +1191,7 @@ async function handleApi(req, res, scenario, pathname, query) {
       const match = method === req.method && regex.exec(pathname);
       if (!match) continue;
       const body = ['POST', 'PATCH'].includes(req.method) ? await readBody(req) : {};
-      const result = await handler({ world, req, res, query, body, params: match.groups ?? {} });
+      const result = await handler({ world, req, res, query, body, params: Object.fromEntries(Object.entries(match.groups ?? {}).map(([key, value]) => [key, decodeURIComponent(value)])) });
       if (result === null) return;
       const [status, payload] = Array.isArray(result) ? result : [200, result];
       if (payload === null) {

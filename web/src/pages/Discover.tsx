@@ -1,30 +1,37 @@
+import { Activity as ActivityIcon, ArrowRight, FolderGit2, Search, SearchX, Zap } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { flatItems, type ProjectFilters, useEvents, useProjects, useStats } from '../api/queries';
-import type { AuditEvent } from '../api/types';
-import { Button, ButtonLink } from '../components/Button';
-import { EventLine } from '../components/EventLine';
-import { Checkbox, SelectField, TextField } from '../components/Field';
-import { LiveIndicator } from '../components/LiveIndicator';
-import { Num } from '../components/Num';
-import { ProjectCard, ProjectCardSkeleton } from '../components/ProjectCard';
-import { EmptyState, ErrorState, Loading, LoadMore, Skeleton, SkeletonRows } from '../components/States';
-import { StatList } from '../components/StatList';
-import { TokenCounter } from '../components/TokenCounter';
-import { CLI_NAME } from '../config';
-import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { useLive } from '../hooks/useLive';
+import { flatItems, type ProjectFilters, useDeliveryEvents, useEvents, useProjects, useStats } from '@/api/queries';
+import type { AuditEvent } from '@/api/types';
+import { Button, ButtonLink } from '@/components/Button';
+import { EventLine } from '@/components/EventLine';
+import { SelectField, SwitchField } from '@/components/Field';
+import { InFlight } from '@/components/InFlight';
+import { LiveIndicator } from '@/components/LiveIndicator';
+import { Num } from '@/components/Num';
+import { ProjectCard, ProjectCardSkeleton } from '@/components/ProjectCard';
+import { Sparkline } from '@/components/Sparkline';
+import { Stat } from '@/components/Stat';
+import { EmptyState, ErrorState, Loading, LoadMore, Skeleton, SkeletonRows } from '@/components/States';
+import { TokenCounter } from '@/components/TokenCounter';
+import { Input } from '@/components/ui/input';
+import { CLI_NAME } from '@/config';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useLive } from '@/hooks/useLive';
+import { formatCompact } from '@/lib/format';
+import { cumulative, dailySeries } from '@/lib/series';
 
 const SORTS = [
-  { value: 'trending', label: 'Trending (7-day delivery)' },
+  { value: 'trending', label: 'Trending' },
   { value: 'active', label: 'Recently active' },
   { value: 'recent', label: 'Newest' },
   { value: 'delivered', label: 'Most delivered' },
 ] as const;
 
 type Sort = (typeof SORTS)[number]['value'];
-const FEED_LENGTH = 12;
+const FEED_LENGTH = 10;
 const PAGE_SIZE = 12;
+const CHART_DAYS = 14;
 
 function useFilters() {
   const [params, setParams] = useSearchParams();
@@ -56,57 +63,90 @@ function useFilters() {
   return { filters, set, active, clear: () => setParams({}, { replace: true }) };
 }
 
+/** The side panel of the hero: recent delivery as a chart, and the instance in four figures. */
+function Pulse({ totals }: { totals: { pledged: number; merged: number } | undefined }) {
+  const stats = useStats();
+  const deliveries = useDeliveryEvents();
+  const series = dailySeries(deliveries.data ?? [], CHART_DAYS);
+  const recent = series.reduce((sum, value) => sum + value, 0);
+  const figure = (value: number | undefined, unit = 'tokens') =>
+    value === undefined ? <Skeleton className="h-5 w-12" /> : <Num value={value} unit={unit} />;
+
+  return (
+    <aside aria-label="Instance at a glance" className="surface rise grid content-start gap-5 p-5" style={{ '--i': 2 } as React.CSSProperties}>
+      <div className="grid gap-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="label">Delivered, last {CHART_DAYS} days</h2>
+          <span className="num text-sm font-medium">{deliveries.data ? formatCompact(recent) : ' '}</span>
+        </div>
+        <Sparkline
+          values={cumulative(series)}
+          className="h-20 text-foreground"
+          label={`Delivery over the last ${CHART_DAYS} days: ${formatCompact(recent)} tokens`}
+        />
+      </div>
+      {stats.isError ? (
+        <ErrorState title="Couldn't load instance totals" error={stats.error} onRetry={() => void stats.refetch()} className="p-4" />
+      ) : (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-5 border-t pt-5">
+          <Stat label="Pledged" value={figure(totals?.pledged)} />
+          <Stat label="Merged" value={figure(totals?.merged)} />
+          <Stat label="Projects" value={figure(stats.data?.projects, '')} />
+          <Stat label="Donors" value={figure(stats.data?.donors, '')} />
+        </dl>
+      )}
+    </aside>
+  );
+}
+
 function Hero({ onEvent }: { onEvent: (event: AuditEvent) => void }) {
   const stats = useStats();
   const live = useLive(undefined, onEvent);
   const totals = live.frame?.totals ?? stats.data?.totals;
-  const count = (value: number | undefined) =>
-    value === undefined ? <Skeleton width="3ch" /> : <Num value={value} unit="" />;
 
   return (
-    <section className="hero" aria-labelledby="hero-title">
-      <div className="hero__label">
-        <h1 id="hero-title" className="eyebrow">
-          Tokens delivered
-        </h1>
-        <LiveIndicator status={live.status} />
+    <section aria-labelledby="hero-title" className="relative overflow-hidden border-b">
+      <div
+        aria-hidden="true"
+        className="bg-grid pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_70%_90%_at_20%_0%,black,transparent)]"
+      />
+      <div className="container-page relative grid gap-10 py-12 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-end lg:py-16">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <LiveIndicator status={live.status} />
+            <h1 id="hero-title" className="text-sm font-medium text-muted-foreground">
+              Tokens delivered to open source
+            </h1>
+          </div>
+          <p className="mt-5 -ml-[0.04em]">
+            <TokenCounter value={totals?.delivered} label="tokens delivered" size="hero" placeholderDigits={8} />
+          </p>
+          <InFlight tokens={totals?.in_flight} className="mt-4" />
+          <p className="rise mt-8 max-w-xl text-lg leading-snug text-pretty text-muted-foreground" style={{ '--i': 1 } as React.CSSProperties}>
+            <span className="font-medium text-foreground">Fund open source with inference.</span> Donors run signed
+            tasks on their own machines, under their own Claude Code subscription. A token counts only after CI passes
+            on the pull request it produced.
+          </p>
+          <div className="rise mt-6 flex flex-wrap gap-2.5" style={{ '--i': 2 } as React.CSSProperties}>
+            <Button asChild variant="primary" size="lg">
+              <a href="#projects">
+                <Zap className="fill-current" strokeWidth={0} aria-hidden="true" />
+                Back a project
+              </a>
+            </Button>
+            <ButtonLink to="/maintain/new" size="lg">
+              List your project
+              <ArrowRight strokeWidth={1.5} aria-hidden="true" />
+            </ButtonLink>
+          </div>
+        </div>
+        <Pulse totals={totals} />
       </div>
-      <p className="hero__counter">
-        <TokenCounter value={totals?.delivered} label="tokens delivered" size="hero" placeholderDigits={8} />
-      </p>
-      <p className="in-flight" data-active={totals && totals.in_flight > 0 ? true : undefined}>
-        {totals && totals.in_flight > 0 ? (
-          <>
-            <span className="live-dot" aria-hidden="true" />
-            <span>Running now</span>
-            <TokenCounter value={totals.in_flight} label="tokens in flight" size="md" tone="accent" />
-          </>
-        ) : (
-          <span className="muted">{totals ? 'No worker is running right now.' : ' '}</span>
-        )}
-      </p>
-      <p className="hero__lede">
-        Donors run signed tasks for open-source projects on their own machines, under their own Claude Code
-        subscription. A token counts as delivered only after CI passes on the pull request it produced.
-      </p>
-      {stats.isError ? (
-        <ErrorState title="Couldn't load instance totals" error={stats.error} onRetry={() => void stats.refetch()} />
-      ) : (
-        <StatList
-          stats={[
-            { label: 'Pledged', value: totals ? <Num value={totals.pledged} /> : <Skeleton width="5ch" /> },
-            { label: 'Merged', value: totals ? <Num value={totals.merged} /> : <Skeleton width="5ch" /> },
-            { label: 'Projects', value: count(stats.data?.projects) },
-            { label: 'Donors', value: count(stats.data?.donors) },
-            { label: 'Tasks merged', value: count(stats.data?.tasks_merged) },
-          ]}
-        />
-      )}
     </section>
   );
 }
 
-function Filters({ languages }: { languages: string[] }) {
+function Toolbar({ languages }: { languages: string[] }) {
   const { filters, set } = useFilters();
   const [search, setSearch] = useState(filters.q);
 
@@ -118,17 +158,36 @@ function Filters({ languages }: { languages: string[] }) {
   }, [search, filters.q, set]);
 
   return (
-    <form className="filters" role="search" aria-label="Filter projects" onSubmit={(event) => event.preventDefault()}>
-      <TextField
-        label="Search projects"
+    <form
+      role="search"
+      aria-label="Filter projects"
+      onSubmit={(event) => event.preventDefault()}
+      className="flex flex-wrap items-center gap-2"
+    >
+      <div className="relative min-w-48 flex-1">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+        <Input
+          type="search"
+          data-slash-focus
+          aria-label="Search projects"
+          aria-keyshortcuts="/"
+          placeholder="Search projects"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          maxLength={200}
+          className="h-9 pr-9 pl-8 [&::-webkit-search-cancel-button]:hidden"
+        />
+        <kbd aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium text-muted-foreground">
+          /
+        </kbd>
+      </div>
+      <SelectField
+        label="Language"
         hideLabel
-        type="search"
-        placeholder="Search projects"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        maxLength={200}
-      />
-      <SelectField label="Language" hideLabel value={filters.language} onChange={(event) => set({ language: event.target.value || null })}>
+        value={filters.language}
+        onChange={(event) => set({ language: event.target.value || null })}
+        className="min-w-36"
+      >
         <option value="">Any language</option>
         {languages.map((language) => (
           <option key={language} value={language}>
@@ -150,6 +209,7 @@ function Filters({ languages }: { languages: string[] }) {
         hideLabel
         value={filters.sort}
         onChange={(event) => set({ sort: event.target.value === 'trending' ? null : event.target.value })}
+        className="min-w-40"
       >
         {SORTS.map((option) => (
           <option key={option.value} value={option.value}>
@@ -157,11 +217,7 @@ function Filters({ languages }: { languages: string[] }) {
           </option>
         ))}
       </SelectField>
-      <Checkbox
-        label="Needs donors"
-        checked={filters.needsDonors}
-        onChange={(event) => set({ needs_donors: event.target.checked ? 'true' : null })}
-      />
+      <SwitchField label="Needs donors" checked={filters.needsDonors} onCheckedChange={(checked) => set({ needs_donors: checked ? 'true' : null })} />
     </form>
   );
 }
@@ -192,29 +248,32 @@ function Projects() {
   const projects = useProjects(query);
   const items = flatItems(projects);
   const languages = useKnownLanguages(items.map((project) => project.language), filters.language);
+  const grid = 'grid gap-4 sm:grid-cols-2';
 
   return (
-    <section className="discover__projects" aria-labelledby="projects-title">
-      <div className="section-header">
-        <h2 id="projects-title">Projects</h2>
+    <section id="projects" aria-labelledby="projects-title" className="grid min-w-0 scroll-mt-20 content-start gap-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="projects-title" className="text-lg font-semibold tracking-tight">
+          Projects
+        </h2>
+        <p className="text-xs text-muted-foreground">Trending ranks by tokens delivered in the last 7 days.</p>
       </div>
-      <Filters languages={languages} />
+      <Toolbar languages={languages} />
       {projects.isPending ? (
-        <Loading label="projects">
-          <div className="project-grid">
-            {Array.from({ length: 4 }, (_, index) => (
-              <ProjectCardSkeleton key={index} />
-            ))}
-          </div>
+        <Loading label="projects" className={grid}>
+          {Array.from({ length: 4 }, (_, index) => (
+            <ProjectCardSkeleton key={index} />
+          ))}
         </Loading>
       ) : projects.isError ? (
         <ErrorState title="Couldn't load projects" error={projects.error} onRetry={() => void projects.refetch()} />
       ) : items.length === 0 && active ? (
-        <EmptyState title="No projects match these filters" action={<Button onClick={clear}>Clear filters</Button>}>
+        <EmptyState icon={SearchX} title="No projects match these filters" action={<Button onClick={clear}>Clear filters</Button>}>
           <p>Try a broader search, or drop a filter.</p>
         </EmptyState>
       ) : items.length === 0 ? (
         <EmptyState
+          icon={FolderGit2}
           title="No projects yet"
           action={
             <ButtonLink to="/maintain/new" variant="primary">
@@ -224,19 +283,28 @@ function Projects() {
         >
           <p>
             This instance is running and waiting for its first project. A project is any repository that carries an{' '}
-            <code>agentfund.yaml</code> and a signed list of task manifests.
+            <code className="text-foreground">agentfund.yaml</code> and a signed list of task manifests.
           </p>
-          <ol className="steps">
-            <li>Write tasks as small YAML manifests: a prompt, the files it may touch, and a command that verifies it.</li>
-            <li>
-              Sign them with <code>{CLI_NAME} sign</code> and push.
-            </li>
-            <li>Register the repository here. Donors approve your key once and their workers take it from there.</li>
+          <ol className="grid gap-2">
+            {[
+              'Write tasks as small YAML manifests: a prompt, the files it may touch, and a command that verifies it.',
+              <>
+                Sign them with <code className="text-foreground">{CLI_NAME} sign</code> and push.
+              </>,
+              'Register the repository here. Donors approve your key once and their workers take it from there.',
+            ].map((step, index) => (
+              <li key={index} className="flex gap-3">
+                <span className="num flex size-5 shrink-0 items-center justify-center rounded-full border bg-card text-[0.6875rem] text-foreground">
+                  {index + 1}
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
           </ol>
         </EmptyState>
       ) : (
         <>
-          <div className="project-grid" data-count={items.length === 1 ? 'one' : undefined}>
+          <div className={items.length === 1 ? 'grid gap-4' : grid}>
             {items.map((project) => (
               <ProjectCard key={project.slug} project={project} />
             ))}
@@ -257,28 +325,29 @@ function Activity({ liveEvents }: { liveEvents: AuditEvent[] }) {
   const events = useEvents(FEED_LENGTH);
   const fetched = flatItems(events);
   const known = new Set(fetched.map((event) => event.id));
-  const items = [...liveEvents.filter((event) => !known.has(event.id)), ...fetched].slice(0, FEED_LENGTH);
+  const fresh = liveEvents.filter((event) => !known.has(event.id));
+  const items = [...fresh, ...fetched].slice(0, FEED_LENGTH);
 
   return (
-    <aside className="discover__activity" aria-labelledby="activity-title">
-      <div className="section-header">
-        <h2 id="activity-title">Recent activity</h2>
-      </div>
+    <aside aria-labelledby="activity-title" className="grid min-w-0 content-start gap-4 lg:sticky lg:top-20">
+      <h2 id="activity-title" className="text-lg font-semibold tracking-tight">
+        Activity
+      </h2>
       {events.isPending ? (
         <Loading label="recent activity">
-          <SkeletonRows rows={6} height="3rem" />
+          <SkeletonRows rows={6} className="h-12" />
         </Loading>
       ) : events.isError ? (
         <ErrorState title="Couldn't load activity" error={events.error} onRetry={() => void events.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState title="Nothing has happened yet">
+        <EmptyState icon={ActivityIcon} title="Nothing has happened yet">
           <p>Claims, deliveries and merges appear here the moment they are recorded.</p>
         </EmptyState>
       ) : (
-        <ol className="event-list">
+        <ol className="surface divide-y px-4">
           {items.map((event) => (
             <li key={event.id}>
-              <EventLine event={event} />
+              <EventLine event={event} fresh={fresh.includes(event)} />
             </li>
           ))}
         </ol>
@@ -296,12 +365,12 @@ export default function Discover() {
   );
 
   return (
-    <div className="page discover">
+    <>
       <Hero onEvent={onEvent} />
-      <div className="discover__body">
+      <div className="container-page grid gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <Projects />
         <Activity liveEvents={liveEvents} />
       </div>
-    </div>
+    </>
   );
 }

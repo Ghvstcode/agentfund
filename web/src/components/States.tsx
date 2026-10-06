@@ -1,32 +1,30 @@
-import type { CSSProperties, ReactNode } from 'react';
-import { ApiError } from '../api/client';
+import { AlertTriangle, type LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ApiError } from '@/api/client';
+import { Skeleton as UiSkeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import { Button } from './Button';
 
-interface SkeletonProps {
-  width?: string;
-  height?: string;
-}
-
 /** A neutral block that stands in for content of the same size while it loads. */
-export function Skeleton({ width = '100%', height = '1em' }: SkeletonProps) {
-  return <span className="skeleton" style={{ width, height } as CSSProperties} aria-hidden="true" />;
+export function Skeleton({ className }: { className?: string }) {
+  return <UiSkeleton aria-hidden="true" className={cn('h-4 w-full', className)} />;
 }
 
 /** Wraps skeletons so assistive tech hears one "Loading" instead of nothing. */
-export function Loading({ label, children }: { label: string; children: ReactNode }) {
+export function Loading({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className="loading" aria-busy="true">
+    <div aria-busy="true" className={className}>
       <span className="sr-only">Loading {label}</span>
       {children}
     </div>
   );
 }
 
-export function SkeletonRows({ rows = 5, height = '2.75rem' }: { rows?: number; height?: string }) {
+export function SkeletonRows({ rows = 5, className = 'h-11' }: { rows?: number; className?: string }) {
   return (
-    <div className="skeleton-rows">
+    <div className="grid gap-2">
       {Array.from({ length: rows }, (_, index) => (
-        <Skeleton key={index} height={height} />
+        <Skeleton key={index} className={className} />
       ))}
     </div>
   );
@@ -34,16 +32,25 @@ export function SkeletonRows({ rows = 5, height = '2.75rem' }: { rows?: number; 
 
 interface EmptyStateProps {
   title: string;
+  /** A lucide icon that hints at what belongs here. */
+  icon?: LucideIcon;
   children?: ReactNode;
   action?: ReactNode;
+  className?: string;
 }
 
-export function EmptyState({ title, children, action }: EmptyStateProps) {
+/** What a list shows when it has nothing: what would be here, and the next step. */
+export function EmptyState({ title, icon: Icon, children, action, className }: EmptyStateProps) {
   return (
-    <div className="state">
-      <p className="state__title">{title}</p>
-      {children && <div className="state__body">{children}</div>}
-      {action && <div className="state__action">{action}</div>}
+    <div className={cn('bg-grid flex flex-col items-start gap-3 rounded-xl border border-dashed p-6 sm:p-8', className)}>
+      {Icon && (
+        <span className="flex size-9 items-center justify-center rounded-lg border bg-card shadow-card">
+          <Icon className="size-4 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+        </span>
+      )}
+      <p className="text-[0.9375rem] font-semibold tracking-tight">{title}</p>
+      {children && <div className="grid max-w-prose gap-3 text-sm text-pretty text-muted-foreground">{children}</div>}
+      {action && <div className="mt-1 flex flex-wrap gap-2">{action}</div>}
     </div>
   );
 }
@@ -68,35 +75,51 @@ interface ErrorStateProps {
   title: string;
   error: unknown;
   onRetry?: () => void;
+  className?: string;
 }
 
-export function ErrorState({ title, error, onRetry }: ErrorStateProps) {
+export function ErrorState({ title, error, onRetry, className }: ErrorStateProps) {
   return (
-    <div className="state state--error" role="alert">
-      <p className="state__title">{title}</p>
-      <p className="state__body">{describeError(error)}</p>
+    <div role="alert" className={cn('flex flex-col items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-6', className)}>
+      <span className="flex size-9 items-center justify-center rounded-lg border border-destructive/30 bg-card">
+        <AlertTriangle className="size-4 text-destructive" strokeWidth={1.5} aria-hidden="true" />
+      </span>
+      <p className="text-[0.9375rem] font-semibold tracking-tight">{title}</p>
+      <p className="max-w-prose text-sm text-muted-foreground">{describeError(error)}</p>
       {onRetry && (
-        <div className="state__action">
-          <Button onClick={onRetry}>Try again</Button>
-        </div>
+        <Button size="sm" onClick={onRetry}>
+          Try again
+        </Button>
       )}
     </div>
   );
 }
 
 interface NoticeProps {
-  /** `strong` draws a full-contrast border for things that need attention. */
+  /** `strong` is for things that need attention; `plain` is informational. */
   tone?: 'plain' | 'strong';
   title?: string;
+  icon?: LucideIcon;
   children: ReactNode;
   role?: 'alert' | 'status';
+  className?: string;
 }
 
-export function Notice({ tone = 'plain', title, children, role }: NoticeProps) {
+export function Notice({ tone = 'plain', title, icon: Icon, children, role, className }: NoticeProps) {
   return (
-    <div className={`notice notice--${tone}`} role={role}>
-      {title && <p className="notice__title">{title}</p>}
-      <div className="notice__body">{children}</div>
+    <div
+      role={role}
+      className={cn(
+        'flex gap-3 rounded-lg border p-3.5 text-sm',
+        tone === 'strong' ? 'border-foreground/25 bg-muted/60' : 'bg-muted/30',
+        className,
+      )}
+    >
+      {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />}
+      <div className="grid min-w-0 flex-1 gap-1.5">
+        {title && <p className="font-semibold">{title}</p>}
+        <div className="min-w-0 text-muted-foreground [&>*+*]:mt-2 [&_code]:text-foreground [&_strong]:text-foreground">{children}</div>
+      </div>
     </div>
   );
 }
@@ -111,7 +134,7 @@ interface LoadMoreProps {
 export function LoadMore({ hasMore, loading, onLoad, label = 'Load more' }: LoadMoreProps) {
   if (!hasMore) return null;
   return (
-    <div className="load-more">
+    <div className="flex justify-center pt-6">
       <Button onClick={onLoad} busy={loading} busyLabel="Loading…">
         {label}
       </Button>

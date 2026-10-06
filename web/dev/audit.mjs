@@ -97,7 +97,8 @@ async function runAxe() {
           await page.goto(`${ORIGIN}${path}`, { waitUntil: 'load' });
           await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'), null, { timeout: 5000 }).catch(() => undefined);
           if (act) await act(page);
-          await page.waitForTimeout(500);
+          // Let entrance animations finish: axe reads colours mid-fade as low contrast.
+          await page.waitForTimeout(1200);
           const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice']).analyze();
           const blocking = violations.filter((violation) => ['serious', 'critical'].includes(violation.impact));
           const label = `${name} ${theme} ${viewport.width}px`;

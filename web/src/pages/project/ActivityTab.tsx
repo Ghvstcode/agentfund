@@ -1,22 +1,24 @@
-import { useLedger } from '../../api/queries';
-import type { LedgerEntry } from '../../api/types';
-import { Hash } from '../../components/Hash';
-import { Num } from '../../components/Num';
-import { EmptyState, ErrorState, Loading, LoadMore, SkeletonRows } from '../../components/States';
-import { TableScroll } from '../../components/TableScroll';
-import { Time } from '../../components/Time';
-import { UserLink } from '../../components/UserLink';
-import { manifestId } from '../../lib/events';
-import { humanize } from '../../lib/format';
-import { pullRequestLabel, pullRequestsFromLedger, type PullRequestStage } from '../../lib/prs';
+import { CircleCheck, CircleX, GitMerge, GitPullRequestClosed, Hourglass, type LucideIcon, ScrollText } from 'lucide-react';
+import { useLedger } from '@/api/queries';
+import type { LedgerEntry } from '@/api/types';
+import { Hash } from '@/components/Hash';
+import { Num } from '@/components/Num';
+import { EmptyState, ErrorState, Loading, LoadMore, SkeletonRows } from '@/components/States';
+import { Time } from '@/components/Time';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { UserLink } from '@/components/UserLink';
+import { manifestId } from '@/lib/events';
+import { humanize } from '@/lib/format';
+import { pullRequestLabel, pullRequestsFromLedger, type PullRequestStage } from '@/lib/prs';
+import { cn } from '@/lib/utils';
 import { useProjectContext } from './ProjectPage';
 
-const STAGES: Record<PullRequestStage, string> = {
-  awaiting_ci: 'Awaiting CI',
-  ci_failed: 'CI failed · task reopened',
-  closed: 'Closed without merging',
-  delivered: 'Delivered · CI passed',
-  merged: 'Merged',
+const STAGES: Record<PullRequestStage, { label: string; icon: LucideIcon; tone: string }> = {
+  awaiting_ci: { label: 'Awaiting CI', icon: Hourglass, tone: 'text-muted-foreground' },
+  ci_failed: { label: 'CI failed · task reopened', icon: CircleX, tone: 'text-destructive' },
+  closed: { label: 'Closed without merging', icon: GitPullRequestClosed, tone: 'text-muted-foreground' },
+  delivered: { label: 'Delivered · CI passed', icon: CircleCheck, tone: 'text-live' },
+  merged: { label: 'Merged', icon: GitMerge, tone: 'text-foreground' },
 };
 
 const ENTRY_LABELS: Record<LedgerEntry['type'], string> = {
@@ -33,6 +35,8 @@ function entryNote(entry: LedgerEntry): string | null {
   return null;
 }
 
+const isWeb = (url: string) => /^https?:\/\//.test(url);
+
 export default function ActivityTab() {
   const { project } = useProjectContext();
   const ledger = useLedger(project.slug);
@@ -41,132 +45,128 @@ export default function ActivityTab() {
 
   if (ledger.isPending) {
     return (
-      <section className="tab-panel">
-        <Loading label="activity">
-          <SkeletonRows rows={6} />
-        </Loading>
-      </section>
+      <Loading label="activity">
+        <SkeletonRows rows={6} />
+      </Loading>
     );
   }
   if (ledger.isError) {
-    return (
-      <section className="tab-panel">
-        <ErrorState title="Couldn't load the ledger" error={ledger.error} onRetry={() => void ledger.refetch()} />
-      </section>
-    );
+    return <ErrorState title="Couldn't load the ledger" error={ledger.error} onRetry={() => void ledger.refetch()} />;
   }
   if (entries.length === 0) {
     return (
-      <section className="tab-panel">
-        <EmptyState title="No activity yet">
-          <p>Pledges, reported runs, CI results and merges are listed here as the ledger records them.</p>
-        </EmptyState>
-      </section>
+      <EmptyState icon={ScrollText} title="No activity yet">
+        <p>Pledges, reported runs, CI results and merges are listed here as the ledger records them.</p>
+      </EmptyState>
     );
   }
 
   return (
-    <div className="tab-panel">
-      <section className="tab-panel__section" aria-labelledby="prs-title">
-        <h2 id="prs-title">Pull requests</h2>
+    <div className="grid min-w-0 gap-10">
+      <section aria-labelledby="prs-title" className="grid min-w-0 gap-3">
+        <h2 id="prs-title" className="text-base font-semibold tracking-tight">
+          Pull requests
+        </h2>
         {pullRequests.length === 0 ? (
-          <p className="muted">No run has produced a pull request yet.</p>
+          <p className="text-sm text-muted-foreground">No run has produced a pull request yet.</p>
         ) : (
-          <TableScroll label="Pull requests">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Pull request</th>
-                  <th scope="col">Task</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Donor</th>
-                  <th scope="col" className="table__num">
-                    Tokens
-                  </th>
-                  <th scope="col">Head</th>
-                  <th scope="col">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pullRequests.map((pr) => (
-                  <tr key={pr.url}>
-                    <td>
-                      <a href={pr.url} rel="noreferrer" className="mono">
-                        {pullRequestLabel(pr.url)}
-                      </a>
-                    </td>
-                    <td>
-                      {pr.taskTitle ?? 'Unknown task'}
-                      {pr.taskId && <span className="table__sub mono">{manifestId(pr.taskId)}</span>}
-                    </td>
-                    <td>
-                      {STAGES[pr.stage]}
-                      {pr.ciRunUrl && (
-                        <span className="table__sub">
-                          <a href={pr.ciRunUrl} rel="noreferrer">
+          <div className="surface overflow-hidden">
+            <Table aria-label="Pull requests table">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-4">Pull request</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Donor</TableHead>
+                  <TableHead className="text-right">Tokens</TableHead>
+                  <TableHead>Head</TableHead>
+                  <TableHead className="pr-4 text-right">Updated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pullRequests.map((pr) => {
+                  const stage = STAGES[pr.stage];
+                  return (
+                    <TableRow key={pr.url} className="hover:bg-muted/40">
+                      <TableCell className="pl-4">
+                        <span className="flex items-baseline gap-2">
+                          {isWeb(pr.url) ? (
+                            <a href={pr.url} rel="noreferrer" className="link num font-medium">
+                              {pullRequestLabel(pr.url)}
+                            </a>
+                          ) : (
+                            <span className="num font-medium">{pullRequestLabel(pr.url)}</span>
+                          )}
+                          <span className="max-w-64 truncate">{pr.taskTitle ?? 'Unknown task'}</span>
+                        </span>
+                        {pr.taskId && <span className="num mt-0.5 block text-xs text-muted-foreground">{manifestId(pr.taskId)}</span>}
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn('flex items-center gap-1.5 text-xs font-medium', stage.tone)}>
+                          <stage.icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
+                          {stage.label}
+                        </span>
+                        {pr.ciRunUrl && (
+                          <a href={pr.ciRunUrl} rel="noreferrer" className="link mt-0.5 block text-xs text-muted-foreground">
                             CI run
                           </a>
-                        </span>
-                      )}
-                    </td>
-                    <td>{pr.donor ? <UserLink handle={pr.donor.handle} /> : '—'}</td>
-                    <td className="table__num">
-                      <Num value={pr.tokens} />
-                    </td>
-                    <td>{pr.headSha ? <Hash value={pr.headSha} label="head commit" /> : '—'}</td>
-                    <td>
-                      <Time value={pr.at} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
+                        )}
+                      </TableCell>
+                      <TableCell>{pr.donor ? <UserLink handle={pr.donor.handle} avatar /> : '—'}</TableCell>
+                      <TableCell className="text-right">
+                        <Num value={pr.tokens} />
+                      </TableCell>
+                      <TableCell>{pr.headSha ? <Hash value={pr.headSha} label="head commit" /> : '—'}</TableCell>
+                      <TableCell className="pr-4 text-right text-muted-foreground">
+                        <Time value={pr.at} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </section>
 
-      <section className="tab-panel__section" aria-labelledby="ledger-title">
-        <h2 id="ledger-title">Ledger</h2>
-        <p className="muted">Every pledge, reported run, delivery and merge, newest first. Failed runs are listed, not hidden.</p>
-        <TableScroll label="Ledger entries">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Entry</th>
-                <th scope="col">Donor</th>
-                <th scope="col">Task</th>
-                <th scope="col" className="table__num">
-                  Tokens
-                </th>
-                <th scope="col">When</th>
-              </tr>
-            </thead>
-            <tbody>
+      <section aria-labelledby="ledger-title" className="grid min-w-0 gap-3">
+        <div>
+          <h2 id="ledger-title" className="text-base font-semibold tracking-tight">
+            Ledger
+          </h2>
+          <p className="text-sm text-muted-foreground">Every pledge, reported run, delivery and merge, newest first. Failed runs are listed, not hidden.</p>
+        </div>
+        <div className="surface overflow-hidden">
+          <Table aria-label="Ledger entries table">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-4">Entry</TableHead>
+                <TableHead>Donor</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead className="text-right">Tokens</TableHead>
+                <TableHead className="pr-4 text-right">When</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td>
+                <TableRow key={entry.id} className="hover:bg-muted/40">
+                  <TableCell className="pl-4 font-medium">
                     {ENTRY_LABELS[entry.type]}
-                    {entryNote(entry) && <span className="table__sub">{entryNote(entry)}</span>}
-                  </td>
-                  <td>{entry.donor ? <UserLink handle={entry.donor.handle} /> : '—'}</td>
-                  <td>{entry.task_id ? <span className="mono">{manifestId(entry.task_id)}</span> : '—'}</td>
-                  <td className="table__num">
+                    {entryNote(entry) && <span className="ml-2 text-xs font-normal text-muted-foreground">{entryNote(entry)}</span>}
+                  </TableCell>
+                  <TableCell>{entry.donor ? <UserLink handle={entry.donor.handle} avatar /> : '—'}</TableCell>
+                  <TableCell className="num text-xs text-muted-foreground">{entry.task_id ? manifestId(entry.task_id) : '—'}</TableCell>
+                  <TableCell className="text-right">
                     <Num value={entry.tokens} exact />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell className="pr-4 text-right text-muted-foreground">
                     <Time value={entry.at} />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </TableScroll>
-        <LoadMore
-          hasMore={ledger.hasNextPage}
-          loading={ledger.isFetchingNextPage}
-          onLoad={() => void ledger.fetchNextPage()}
-          label="Load older entries"
-        />
+            </TableBody>
+          </Table>
+        </div>
+        <LoadMore hasMore={ledger.hasNextPage} loading={ledger.isFetchingNextPage} onLoad={() => void ledger.fetchNextPage()} label="Load older entries" />
       </section>
     </div>
   );

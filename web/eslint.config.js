@@ -5,7 +5,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev/screenshots', 'dev/reports', 'src/api/schema.d.ts'] },
+  { ignores: ['dist', 'dev/screenshots', 'dev/reports', 'src/api/schema.d.ts', 'src/components/ui'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   jsxA11y.flatConfigs.recommended,
