@@ -61,7 +61,10 @@ public's ability to **verify** every number the system shows.
 2. **The egress proxy does not inspect content.** It decides *where* the sandbox may connect,
    not *what* is sent. Data could in principle be sent to an allow-listed host — for example
    inside the prompts the agent sends to the model API. Only the checked-out public repository
-   is in the sandbox, so there is nothing private to send unless you put it there.
+   is in the sandbox, so there is nothing private to send unless you put it there. The proxy
+   pins the IP an allow-listed name resolved to but does not check the TLS server name inside
+   the tunnel, so domain fronting through a shared CDN edge is not ruled out; SNI pinning is a
+   planned hardening.
 3. **Your subscription's terms are between you and your AI provider.** The worker executes
    prompts under the donor's own login, on the donor's own machine. AgentFund makes no claim on
    any provider's behalf about what their terms permit. The worker runs the unmodified Claude

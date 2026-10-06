@@ -1,0 +1,42 @@
+[package]
+name = "egress-proxy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "CONNECT-only egress allowlist proxy for the AgentFund sandbox"
+license = "MIT"
+publish = false
+
+[lib]
+name = "egress_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "egress-proxy"
+path = "src/main.rs"
+
+[dependencies]
+# The only runtime dependency. JSON logging and RFC 3339 timestamps are
+# hand-rolled (see src/log.rs) to keep the trusted base small.
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "net",
+    "io-util",
+    "time",
+    "macros",
+    "signal",
+    "sync",
+] }
+
+[dev-dependencies]
+# Test-only: used to prove every log line is valid JSON.
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# Keep unwinding: a panic in one connection task must not take down the
+# only route out of the sandbox for every other connection.
+panic = "unwind"
