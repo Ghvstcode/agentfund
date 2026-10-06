@@ -1,0 +1,18 @@
+spec_version: 1
+id: 0002-truncate
+title: truncate() with ellipsis
+prompt: |
+  Implement `truncate(text: str, width: int) -> str` in src/textutil.py, next to the
+  existing `slugify`.
+
+  - Return `text` unchanged when len(text) <= width.
+  - Otherwise return the first (width - 1) characters followed by "…" (U+2026).
+  - Raise ValueError when width < 1.
+
+  Add tests in tests/test_truncate.py with the standard library `unittest` module.
+scope:
+  write: [src/textutil.py, tests/test_truncate.py]
+verify: python3 -m unittest discover -s tests
+max_tokens: 1000000
+timeout_minutes: 20
+depends_on: [0001-slugify]

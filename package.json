@@ -1,0 +1,21 @@
+{
+  "name": "agentfund",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.32.1",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "spec:validate": "node scripts/validate-spec.mjs",
+    "spec:lint": "redocly lint spec/openapi.yaml",
+    "spec:check": "pnpm spec:validate && pnpm spec:lint",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.0"
+  }
+}

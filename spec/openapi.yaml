@@ -1,0 +1,1377 @@
+openapi: 3.1.0
+info:
+  title: AgentFund wire protocol
+  version: 1.0.0
+  summary: The contract between AgentFund servers, workers and UIs.
+  description: |
+    JSON over HTTPS under `/v1/`. Any server implementing these endpoints is a valid instance.
+    This document is normative; `protocol.md` explains the semantics.
+
+    Conventions: all token quantities are integers (tokens). All timestamps are RFC 3339 UTC.
+    Errors are RFC 9457 `application/problem+json`. List endpoints take `limit` (1-100,
+    default 50) and an opaque `cursor`, and return `{items, next_cursor}`.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://localhost:8787
+    description: Local instance
+tags:
+  - name: meta
+    description: Instance identity and capability negotiation
+  - name: projects
+    description: Public project, task and ledger reads
+  - name: work
+    description: Worker protocol - pledge, claim, heartbeat, report, release
+  - name: live
+    description: Server-sent events
+  - name: auth
+    description: Sessions and API keys
+  - name: maintain
+    description: Project creation and maintenance
+  - name: admin
+    description: Instance administration
+  - name: webhooks
+    description: CI result ingestion
+
+security: []
+
+paths:
+  /v1/meta:
+    get:
+      tags: [meta]
+      operationId: getMeta
+      summary: Instance name, version, supported spec versions, capability flags
+      responses:
+        "200":
+          description: Instance metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Meta" }
+
+  /v1/stats:
+    get:
+      tags: [meta]
+      operationId: getStats
+      summary: Instance-wide totals
+      responses:
+        "200":
+          description: Totals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+
+  /v1/projects:
+    get:
+      tags: [projects]
+      operationId: listProjects
+      summary: List projects
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Full-text search over name, description and tags" }
+        - { name: language, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, paused], default: active }
+        - { name: needs_donors, in: query, schema: { type: boolean }, description: Only projects with claimable tasks }
+        - name: sort
+          in: query
+          description: "`trending` ranks by 7-day delivered-token velocity."
+          schema: { type: string, enum: [trending, recent, active, delivered], default: trending }
+        - { name: maintainer, in: query, schema: { type: string }, description: Filter by maintainer handle (any status when it is the caller) }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Project" } }
+                  next_cursor: { type: [string, "null"] }
+    post:
+      tags: [maintain]
+      operationId: createProject
+      summary: Create a project from a repo that carries agentfund.yaml and a signed lock
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProjectCreate" }
+      responses:
+        "201":
+          description: Project created (status `active`, or `pending` when the instance requires approval)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/preview:
+    post:
+      tags: [maintain]
+      operationId: previewProject
+      summary: Fetch agentfund.yaml and the lock from a repo and verify them, without creating anything
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo_url]
+              properties:
+                repo_url: { type: string }
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectPreview" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    get:
+      tags: [projects]
+      operationId: getProject
+      summary: Project detail - repo URL, pubkey fingerprint, pinned commit, funding totals
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [maintain]
+      operationId: updateProject
+      summary: Pause/resume a project or change its goal (maintainer or admin)
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status: { type: string, enum: [active, paused] }
+                token_goal: { type: integer, minimum: 1 }
+                follow_branch: { type: boolean, description: Let the indexer advance the pinned commit to validly signed heads of the base branch }
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/repin:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    post:
+      tags: [maintain]
+      operationId: repinProject
+      summary: Re-index now and pin a commit (default - head of the base branch)
+      security: [{ session: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                commit: { type: string, pattern: "^[0-9a-f]{40}$" }
+      responses:
+        "200":
+          description: Project at the new pin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/tasks:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    get:
+      tags: [projects]
+      operationId: listTasks
+      summary: Tasks with manifest hashes and state
+      parameters:
+        - name: state
+          in: query
+          schema: { $ref: "#/components/schemas/TaskState" }
+        - { name: claimable, in: query, schema: { type: boolean }, description: Only tasks that can be claimed right now }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of tasks, ordered by task id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Task" } }
+                  next_cursor: { type: [string, "null"] }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/pledges:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    post:
+      tags: [work]
+      operationId: createPledge
+      summary: Pledge tokens to a project
+      security: [{ donorKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token_amount]
+              properties:
+                token_amount: { type: integer, minimum: 1, maximum: 1000000000000 }
+      responses:
+        "201":
+          description: Pledge recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pledge" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/ledger:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    get:
+      tags: [projects]
+      operationId: getLedger
+      summary: Pledge/delivery ledger, per-donor and total
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Ledger. `donors` is the full leaderboard ordered by delivered desc; `entries` is paginated newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ledger" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/events:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    get:
+      tags: [projects]
+      operationId: listProjectEvents
+      summary: Append-only audit log for a project, newest first
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/events:
+    get:
+      tags: [projects]
+      operationId: listEvents
+      summary: Instance-wide public activity feed, newest first
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+
+  /v1/donors:
+    get:
+      tags: [projects]
+      operationId: listDonors
+      summary: Instance-wide donor leaderboard, ranked by delivered tokens
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of donors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DonorStanding" } }
+                  next_cursor: { type: [string, "null"] }
+
+  /v1/donors/{handle}:
+    parameters:
+      - { $ref: "#/components/parameters/Handle" }
+    get:
+      tags: [projects]
+      operationId: getDonor
+      summary: Public donor profile - delivered tokens, merged tasks, projects backed
+      responses:
+        "200":
+          description: Donor profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Donor" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/tasks/{task_id}/claim:
+    parameters:
+      - { $ref: "#/components/parameters/TaskId" }
+    post:
+      tags: [work]
+      operationId: claimTask
+      summary: Atomically claim a task
+      description: |
+        Succeeds for exactly one caller. The response names the commit and content hash the
+        worker must verify before executing anything.
+      security: [{ donorKey: [] }]
+      responses:
+        "201":
+          description: Claim granted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Claim" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "Not claimable. Problem `type` ends in one of: `task-not-open`, `dependencies-unmet`, `project-not-active`, `claim-limit`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/claims/{claim_id}/heartbeat:
+    parameters:
+      - { $ref: "#/components/parameters/ClaimId" }
+    post:
+      tags: [work]
+      operationId: heartbeatClaim
+      summary: Extend the lease while running; optionally publish in-flight token usage
+      security: [{ donorKey: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                tokens_in: { type: integer, minimum: 0, description: Cumulative so far for this claim }
+                tokens_out: { type: integer, minimum: 0 }
+                phase: { type: string, enum: [verifying, sandbox, agent, verify, pushing] }
+      responses:
+        "200":
+          description: Lease extended
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lease_expires_at]
+                properties:
+                  lease_expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: Claim is no longer active (`claim-not-active`) - stop work.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/claims/{claim_id}/report:
+    parameters:
+      - { $ref: "#/components/parameters/ClaimId" }
+    post:
+      tags: [work]
+      operationId: reportClaim
+      summary: Report the outcome and real token usage of a claim
+      description: |
+        Exactly one report per claim. A report for an expired claim is recorded but
+        `flagged_late` and never changes task state. Reported tokens count as *delivered* only
+        after CI confirms the branch, and as *merged* when the PR merges.
+      security: [{ donorKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportCreate" }
+      responses:
+        "201":
+          description: Report recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: Already reported (`already-reported`) or released (`claim-not-active`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/claims/{claim_id}/release:
+    parameters:
+      - { $ref: "#/components/parameters/ClaimId" }
+    post:
+      tags: [work]
+      operationId: releaseClaim
+      summary: Voluntary unclaim (policy stop, shutdown, rate limit)
+      security: [{ donorKey: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 500 }
+                tokens_in: { type: integer, minimum: 0, description: "Tokens burned before releasing, recorded as reported-but-undelivered" }
+                tokens_out: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: Released; the task is back in the queue }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /v1/stream:
+    get:
+      tags: [live]
+      operationId: stream
+      summary: Server-sent events - live totals and audit events
+      description: |
+        `text/event-stream`. Events:
+        - `totals` - data is `StreamTotals`; sent on connect and whenever a counter moves.
+        - `event` - data is `Event`; every public audit event in scope.
+        - `ping` - keep-alive every 15 s.
+        With `project` the stream is scoped to one project, otherwise it is instance-wide.
+      parameters:
+        - { name: project, in: query, schema: { type: string }, description: Project slug }
+      responses:
+        "200":
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /v1/auth/github/start:
+    get:
+      tags: [auth]
+      operationId: authGithubStart
+      summary: Begin GitHub OAuth; redirects to GitHub
+      parameters:
+        - name: redirect
+          in: query
+          description: Where to send the browser afterwards. Must be on an origin the instance allows. The session token is appended as `#token=afs_…`.
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to GitHub }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/github/callback:
+    get:
+      tags: [auth]
+      operationId: authGithubCallback
+      summary: GitHub OAuth callback; redirects back to the UI with a session token in the fragment
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        "302": { description: Redirect to the UI }
+        "400": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/dev:
+    post:
+      tags: [auth]
+      operationId: authDev
+      summary: Development login without GitHub (only when capability `dev_login` is on)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [handle]
+              properties:
+                handle: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,38}$" }
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, user]
+                properties:
+                  token: { type: string, description: "Session token, `afs_` prefix" }
+                  user: { $ref: "#/components/schemas/Me" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      summary: Revoke the current session
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Logged out }
+
+  /v1/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: The authenticated user
+      security: [{ session: [] }, { donorKey: [] }]
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /v1/me/api-keys:
+    get:
+      tags: [auth]
+      operationId: listApiKeys
+      summary: List the caller's API keys (never the secret)
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
+        "401": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [auth]
+      operationId: createApiKey
+      summary: Mint a worker API key; the secret is returned exactly once
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties:
+                label: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        "201":
+          description: Key created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/ApiKey" }
+                  - type: object
+                    required: [key]
+                    properties:
+                      key: { type: string, description: "The secret, `af_` prefix. Shown once; stored hashed." }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /v1/me/api-keys/{key_id}:
+    parameters:
+      - { name: key_id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [auth]
+      operationId: revokeApiKey
+      summary: Revoke an API key
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/me/claims:
+    get:
+      tags: [work]
+      operationId: listMyClaims
+      summary: The caller's recent claims, newest first
+      security: [{ donorKey: [] }, { session: [] }]
+      parameters:
+        - { name: active, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Claims
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ClaimSummary" } }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/users:
+    get:
+      tags: [admin]
+      operationId: adminListUsers
+      summary: List users
+      security: [{ session: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Me" } }
+                  next_cursor: { type: [string, "null"] }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/users/{handle}:
+    parameters:
+      - { $ref: "#/components/parameters/Handle" }
+    patch:
+      tags: [admin]
+      operationId: adminUpdateUser
+      summary: Change a user's role or ban state
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role: { $ref: "#/components/schemas/Role" }
+                banned: { type: boolean }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/projects:
+    get:
+      tags: [admin]
+      operationId: adminListProjects
+      summary: List projects in every status
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Project" } }
+                  next_cursor: { type: [string, "null"] }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/projects/{slug}:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    patch:
+      tags: [admin]
+      operationId: adminUpdateProject
+      summary: Moderate a project (approve, pause, remove)
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/ProjectStatus" }
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/instance:
+    get:
+      tags: [admin]
+      operationId: adminGetInstance
+      summary: Instance configuration
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstanceConfig" }
+        "403": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [admin]
+      operationId: adminUpdateInstance
+      summary: Update instance configuration
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstanceConfigUpdate" }
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstanceConfig" }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /v1/webhooks/ci:
+    post:
+      tags: [webhooks]
+      operationId: ciWebhook
+      summary: CI result ingestion
+      description: |
+        Two adapters, selected by headers:
+        - **github** - a GitHub webhook (`X-GitHub-Event` of `workflow_run`, `check_suite` or
+          `pull_request`), authenticated by `X-Hub-Signature-256` with the instance webhook secret.
+        - **generic** - body is `GenericCiResult`, authenticated by
+          `X-AgentFund-Signature: sha256=<hex HMAC-SHA256 of the raw body with the webhook secret>`.
+      security: [{ webhookSignature: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/GenericCiResult" }
+                - { type: object, description: GitHub webhook payload }
+      responses:
+        "202":
+          description: Accepted. `matched` says whether it corresponded to a known report.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matched]
+                properties:
+                  matched: { type: boolean }
+        "401": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    donorKey:
+      type: http
+      scheme: bearer
+      description: "Worker API key minted in the UI. `af_` prefix, hashed at rest."
+    session:
+      type: http
+      scheme: bearer
+      description: "Browser session token. `afs_` prefix. Obtained via GitHub OAuth or dev login."
+    webhookSignature:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: HMAC-SHA256 of the raw body with the instance webhook secret (`X-AgentFund-Signature` for the generic adapter).
+
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+    Handle:
+      name: handle
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,38}$" }
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      description: "Instance-unique task reference, `<project slug>:<manifest id>`, e.g. `gridrs:0042-csv-parser`."
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}:[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$" }
+    ClaimId:
+      name: claim_id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^clm_[a-z0-9]{16,32}$" }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: Error (RFC 9457)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, description: "URI reference, `<base_url>/problems/<code>`. The trailing code is stable and machine-readable." }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+
+    Role:
+      type: string
+      enum: [admin, maintainer, donor]
+
+    ProjectStatus:
+      type: string
+      enum: [pending, active, paused, removed]
+
+    TaskState:
+      type: string
+      enum: [open, claimed, delivered, merged, failed]
+      description: |
+        `open` claimable (subject to dependencies) - `claimed` an active lease exists, or a
+        completed report is awaiting CI - `delivered` CI passed on the reported branch -
+        `merged` the PR merged - `failed` removed from the lock or administratively closed.
+        A failed/timed-out/expired run returns the task to `open`.
+
+    Totals:
+      type: object
+      required: [pledged, reported, delivered, merged, in_flight]
+      properties:
+        pledged: { type: integer, description: Sum of pledges }
+        reported: { type: integer, description: "All tokens workers reported burning, including failed runs" }
+        delivered: { type: integer, description: Reported tokens whose branch has a CI-passing run }
+        merged: { type: integer, description: Delivered tokens whose PR merged }
+        in_flight: { type: integer, description: Tokens of currently running claims as of their last heartbeat (not yet reported) }
+
+    Meta:
+      type: object
+      required: [app, name, version, base_url, protocol_versions, spec_versions, capabilities]
+      properties:
+        app: { type: string, description: "Software name (APP_NAME), e.g. `AgentFund`" }
+        name: { type: string, description: Instance display name }
+        description: { type: string }
+        version: { type: string, description: Server software version }
+        base_url: { type: string, description: Canonical base URL; the prefix of every global id }
+        protocol_versions: { type: array, items: { type: string }, examples: [["v1"]] }
+        spec_versions: { type: array, items: { type: integer }, examples: [[1]] }
+        instance_pubkey: { type: string, description: Instance Ed25519 identity (minisign encoding). Unused in v1; reserved for federation. }
+        capabilities:
+          type: object
+          description: Feature flags. Unknown keys MUST be ignored by clients.
+          required: [github_oauth, dev_login, sse, ci_providers, ci_poll, federation]
+          properties:
+            github_oauth: { type: boolean }
+            dev_login: { type: boolean }
+            sse: { type: boolean }
+            ci_providers: { type: array, items: { type: string, enum: [github, generic] } }
+            ci_poll: { type: boolean, description: "Server also polls the CI provider, so webhooks need not reach it" }
+            federation: { type: boolean }
+          additionalProperties: true
+        defaults:
+          type: object
+          properties:
+            lease_seconds: { type: integer }
+            heartbeat_interval_seconds: { type: integer }
+
+    Stats:
+      type: object
+      required: [totals, projects, donors, tasks_merged]
+      properties:
+        totals: { $ref: "#/components/schemas/Totals" }
+        projects: { type: integer }
+        donors: { type: integer, description: Users with at least one pledge or report }
+        tasks_merged: { type: integer }
+        tasks_delivered: { type: integer }
+
+    UserRef:
+      type: object
+      required: [id, handle]
+      properties:
+        id: { type: string, description: "Global id `<base_url>/u/<handle>`" }
+        handle: { type: string }
+        avatar_url: { type: [string, "null"] }
+
+    Me:
+      allOf:
+        - { $ref: "#/components/schemas/UserRef" }
+        - type: object
+          required: [role, created_at]
+          properties:
+            role: { $ref: "#/components/schemas/Role" }
+            email: { type: [string, "null"] }
+            github_login: { type: [string, "null"] }
+            banned: { type: boolean }
+            created_at: { type: string, format: date-time }
+
+    ApiKey:
+      type: object
+      required: [id, label, prefix, created_at]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        prefix: { type: string, description: "First characters of the key, for recognition" }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: [string, "null"], format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+
+    TaskCounts:
+      type: object
+      required: [open, claimed, delivered, merged, failed]
+      properties:
+        open: { type: integer }
+        claimed: { type: integer }
+        delivered: { type: integer }
+        merged: { type: integer }
+        failed: { type: integer }
+        claimable: { type: integer }
+
+    ProjectTrust:
+      type: object
+      description: Reputation computed from the ledger, never self-declared. Workers treat these as an upper bound on their own policy.
+      required: [tier, merged_tasks, max_tokens_per_task, max_tokens_per_day]
+      properties:
+        tier: { type: string, enum: [new, established] }
+        merged_tasks: { type: integer }
+        max_tokens_per_task: { type: [integer, "null"], description: Recommended per-task ceiling for this project; null = no server-side recommendation }
+        max_tokens_per_day: { type: [integer, "null"] }
+
+    Project:
+      type: object
+      required:
+        [id, slug, name, description, repo_url, status, ci_provider, base_branch, maintainer, pubkey, pubkey_fingerprint,
+         pinned_commit, token_goal, totals, tasks, donors, velocity_7d, trust, follow_branch, created_at]
+      properties:
+        id: { type: string, description: "Global id `<base_url>/<slug>`" }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        repo_url: { type: string }
+        homepage: { type: [string, "null"] }
+        language: { type: [string, "null"] }
+        tags: { type: array, items: { type: string } }
+        status: { $ref: "#/components/schemas/ProjectStatus" }
+        ci_provider: { type: string, enum: [github, generic] }
+        base_branch: { type: string }
+        follow_branch: { type: boolean }
+        maintainer: { $ref: "#/components/schemas/UserRef" }
+        pubkey: { type: string, description: Maintainer public key (minisign encoding) registered at creation }
+        pubkey_fingerprint: { type: string, description: "`SHA256:<hex>` - compare with `agentfund approve`" }
+        pinned_commit: { type: string, description: Commit the task list was indexed from; what claims name }
+        lock_sha256: { type: [string, "null"], description: SHA-256 of tasks/MANIFEST.lock at the pinned commit }
+        lock_url: { type: [string, "null"], description: Browser URL of MANIFEST.lock at the pinned commit }
+        token_goal: { type: integer }
+        totals: { $ref: "#/components/schemas/Totals" }
+        tasks: { $ref: "#/components/schemas/TaskCounts" }
+        donors: { type: integer }
+        velocity_7d: { type: integer, description: Tokens delivered in the trailing 7 days }
+        trust: { $ref: "#/components/schemas/ProjectTrust" }
+        created_at: { type: string, format: date-time }
+        last_activity_at: { type: [string, "null"], format: date-time }
+        last_indexed_at: { type: [string, "null"], format: date-time }
+        index_error: { type: [string, "null"], description: Why the last index attempt was rejected (e.g. bad signature at head) }
+
+    ProjectCreate:
+      type: object
+      additionalProperties: false
+      required: [repo_url]
+      properties:
+        repo_url: { type: string }
+        slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: Defaults to a slug of the project name }
+        token_goal: { type: integer, minimum: 1, description: Overrides agentfund.yaml }
+
+    ProjectPreview:
+      type: object
+      required: [ok, errors]
+      properties:
+        ok: { type: boolean, description: True when the repo can be created as a project as-is }
+        errors: { type: array, items: { type: string } }
+        commit: { type: string }
+        base_branch: { type: string }
+        agentfund: { type: object, description: Parsed agentfund.yaml }
+        suggested_slug: { type: string }
+        pubkey_fingerprint: { type: string }
+        signature_valid: { type: boolean }
+        lock_sha256: { type: string }
+        token_total: { type: integer, description: Sum of max_tokens over manifests }
+        manifests:
+          type: array
+          items:
+            type: object
+            required: [id, title, path, max_tokens, content_hash]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              path: { type: string }
+              max_tokens: { type: integer }
+              content_hash: { type: string }
+              depends_on: { type: array, items: { type: string } }
+
+    Manifest:
+      type: object
+      description: A parsed task manifest. See schemas/manifest.schema.json (normative).
+      required: [spec_version, id, title, prompt, scope, verify, max_tokens]
+      properties:
+        spec_version: { type: integer }
+        id: { type: string }
+        title: { type: string }
+        prompt: { type: string }
+        scope:
+          type: object
+          required: [write]
+          properties:
+            write: { type: array, items: { type: string } }
+            read: { type: array, items: { type: string } }
+        verify: { type: string }
+        max_tokens: { type: integer }
+        timeout_minutes: { type: integer }
+        depends_on: { type: array, items: { type: string } }
+        base_branch: { type: string }
+
+    Task:
+      type: object
+      required: [id, task_id, project, title, state, content_hash, manifest_path, commit, manifest, depends_on, blocked_by, claimable, burn, updated_at]
+      properties:
+        id: { type: string, description: "`<slug>:<manifest id>` - the `task_id` path parameter" }
+        task_id: { type: string, description: Manifest id within the repo }
+        project: { type: string, description: Project slug }
+        title: { type: string }
+        state: { $ref: "#/components/schemas/TaskState" }
+        content_hash: { type: string, description: "SHA-256 (hex) of the manifest file bytes, as listed in the lock" }
+        manifest_path: { type: string }
+        commit: { type: string, description: Pinned commit the manifest was read from }
+        manifest: { $ref: "#/components/schemas/Manifest" }
+        depends_on: { type: array, items: { type: string } }
+        blocked_by: { type: array, items: { type: string }, description: Dependencies not yet merged }
+        claimable: { type: boolean }
+        burn:
+          type: object
+          required: [tokens_in, tokens_out, total, runs]
+          properties:
+            tokens_in: { type: integer }
+            tokens_out: { type: integer }
+            total: { type: integer, description: All tokens reported against this task across every run }
+            runs: { type: integer }
+        active_claim:
+          type: [object, "null"]
+          properties:
+            donor: { $ref: "#/components/schemas/UserRef" }
+            claimed_at: { type: string, format: date-time }
+            lease_expires_at: { type: string, format: date-time }
+            tokens_so_far: { type: integer }
+            phase: { type: [string, "null"] }
+        latest_report:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/Report" }
+        updated_at: { type: string, format: date-time }
+
+    Pledge:
+      type: object
+      required: [id, project, donor, token_amount, created_at]
+      properties:
+        id: { type: string }
+        project: { type: string }
+        donor: { $ref: "#/components/schemas/UserRef" }
+        token_amount: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    Claim:
+      type: object
+      required: [claim_id, task, project, repo_url, base_branch, commit, content_hash, lease_expires_at, lease_seconds, heartbeat_interval_seconds]
+      properties:
+        claim_id: { type: string }
+        task: { $ref: "#/components/schemas/Task" }
+        project: { type: string, description: Project slug }
+        repo_url: { type: string }
+        base_branch: { type: string }
+        commit: { type: string, description: Commit the worker must verify against and check out }
+        content_hash: { type: string, description: Expected SHA-256 of the task's manifest file }
+        lease_expires_at: { type: string, format: date-time }
+        lease_seconds: { type: integer, default: 7200 }
+        heartbeat_interval_seconds: { type: integer, default: 60 }
+
+    ClaimSummary:
+      type: object
+      required: [claim_id, task_id, project, status, claimed_at, lease_expires_at]
+      properties:
+        claim_id: { type: string }
+        task_id: { type: string, description: "`<slug>:<manifest id>`" }
+        project: { type: string }
+        status: { type: string, enum: [active, reported, released, expired] }
+        claimed_at: { type: string, format: date-time }
+        lease_expires_at: { type: string, format: date-time }
+        report:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/Report" }
+
+    ReportStatus:
+      type: string
+      enum: [completed, failed, verification_failed, budget_exceeded, timeout]
+      description: |
+        `completed` agent ran, verify exited 0, scope check passed, branch pushed and PR opened -
+        `failed` agent or verify failed - `verification_failed` signature/hash/approval/scope
+        check failed (nothing executed, or the run was discarded) - `budget_exceeded` killed at
+        `max_tokens` - `timeout` killed at `timeout_minutes`.
+
+    ReportCreate:
+      type: object
+      additionalProperties: false
+      required: [status, tokens_in, tokens_out, cost_estimate, log_digest]
+      properties:
+        status: { $ref: "#/components/schemas/ReportStatus" }
+        tokens_in: { type: integer, minimum: 0 }
+        tokens_out: { type: integer, minimum: 0 }
+        cost_estimate: { type: number, minimum: 0, description: API-equivalent cost in USD as estimated by the runner. Informational. }
+        branch: { type: [string, "null"], maxLength: 255, description: "Pushed branch, `agentfund/<task-id>-<claim-short>`. Required when status is `completed`." }
+        pr_url: { type: [string, "null"], maxLength: 512, description: Required when status is `completed`. }
+        head_sha: { type: [string, "null"], pattern: "^[0-9a-f]{40}$", description: Commit pushed to the branch. Required when status is `completed`. }
+        verify_exit_code: { type: [integer, "null"] }
+        log_digest: { type: string, pattern: "^[0-9a-f]{64}$", description: SHA-256 of the worker's local run log }
+        duration_seconds: { type: integer, minimum: 0 }
+        runner: { type: string, maxLength: 80, description: "e.g. `claude-code/2.1.0`" }
+        model: { type: string, maxLength: 80 }
+        message: { type: string, maxLength: 2000, description: Short human-readable reason on non-completed statuses }
+
+    Report:
+      type: object
+      required: [id, claim_id, task_id, project, donor, status, tokens_in, tokens_out, cost_estimate, log_digest, flagged_late, delivery, created_at]
+      properties:
+        id: { type: string }
+        claim_id: { type: string }
+        task_id: { type: string, description: "`<slug>:<manifest id>`" }
+        project: { type: string }
+        donor: { $ref: "#/components/schemas/UserRef" }
+        status: { $ref: "#/components/schemas/ReportStatus" }
+        tokens_in: { type: integer }
+        tokens_out: { type: integer }
+        cost_estimate: { type: number }
+        branch: { type: [string, "null"] }
+        pr_url: { type: [string, "null"] }
+        head_sha: { type: [string, "null"] }
+        verify_exit_code: { type: [integer, "null"] }
+        log_digest: { type: string }
+        duration_seconds: { type: [integer, "null"] }
+        runner: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        flagged_late: { type: boolean, description: "Reported after the lease expired; recorded, never counted" }
+        delivery:
+          type: string
+          enum: [none, pending_ci, ci_failed, delivered, merged, closed]
+          description: |
+            Where this report sits in the ledger: `none` not a completed run - `pending_ci`
+            awaiting a CI result - `ci_failed` - `delivered` CI passed - `merged` PR merged -
+            `closed` PR closed unmerged.
+        ci:
+          type: [object, "null"]
+          properties:
+            provider: { type: string }
+            conclusion: { type: string }
+            run_url: { type: [string, "null"] }
+            received_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    DonorStanding:
+      allOf:
+        - { $ref: "#/components/schemas/UserRef" }
+        - type: object
+          required: [pledged, reported, delivered, merged, tasks_delivered, tasks_merged]
+          properties:
+            pledged: { type: integer }
+            reported: { type: integer }
+            delivered: { type: integer }
+            merged: { type: integer }
+            tasks_delivered: { type: integer }
+            tasks_merged: { type: integer }
+
+    LedgerEntry:
+      type: object
+      required: [id, type, at, tokens]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [pledge, report, delivery, merge] }
+        at: { type: string, format: date-time }
+        donor: { $ref: "#/components/schemas/UserRef" }
+        project: { type: string }
+        tokens: { type: integer }
+        task_id: { type: [string, "null"] }
+        task_title: { type: [string, "null"] }
+        report_status: { type: [string, "null"] }
+        pr_url: { type: [string, "null"] }
+        ci_run_url: { type: [string, "null"] }
+        branch: { type: [string, "null"] }
+        head_sha: { type: [string, "null"] }
+
+    Ledger:
+      type: object
+      required: [project, totals, donors, entries, next_cursor]
+      properties:
+        project: { type: string }
+        token_goal: { type: integer }
+        totals: { $ref: "#/components/schemas/Totals" }
+        donors: { type: array, items: { $ref: "#/components/schemas/DonorStanding" } }
+        entries: { type: array, items: { $ref: "#/components/schemas/LedgerEntry" } }
+        next_cursor: { type: [string, "null"] }
+
+    Donor:
+      allOf:
+        - { $ref: "#/components/schemas/DonorStanding" }
+        - type: object
+          required: [joined_at, projects_backed, streak_days, projects, recent]
+          properties:
+            github_login: { type: [string, "null"] }
+            joined_at: { type: string, format: date-time }
+            projects_backed: { type: integer }
+            streak_days: { type: integer, description: "Consecutive UTC days, ending today or yesterday, with at least one delivered run" }
+            rank: { type: [integer, "null"], description: Position on the instance leaderboard by delivered tokens }
+            projects:
+              type: array
+              items:
+                type: object
+                required: [slug, name, pledged, delivered, merged]
+                properties:
+                  slug: { type: string }
+                  name: { type: string }
+                  pledged: { type: integer }
+                  delivered: { type: integer }
+                  merged: { type: integer }
+            recent: { type: array, items: { $ref: "#/components/schemas/LedgerEntry" } }
+
+    Event:
+      type: object
+      required: [id, at, action]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: [string, "null"], description: "User handle, or `system` / `ci` / `indexer`" }
+        action:
+          type: string
+          description: |
+            Dotted verb, e.g. `project.created`, `project.repinned`, `project.paused`,
+            `project.index_failed`, `manifest.added`, `manifest.changed`, `manifest.removed`,
+            `pledge.created`, `task.claimed`, `claim.released`, `claim.expired`, `report.received`,
+            `report.late`, `ci.result`, `task.delivered`, `task.merged`, `task.reopened`.
+        project: { type: [string, "null"] }
+        task_id: { type: [string, "null"] }
+        payload: { type: object, additionalProperties: true }
+
+    EventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        next_cursor: { type: [string, "null"] }
+
+    StreamTotals:
+      type: object
+      required: [scope, totals]
+      properties:
+        scope: { type: string, enum: [instance, project] }
+        project: { type: [string, "null"] }
+        totals: { $ref: "#/components/schemas/Totals" }
+        token_goal: { type: [integer, "null"] }
+        tasks:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/TaskCounts" }
+
+    GenericCiResult:
+      type: object
+      additionalProperties: false
+      required: [provider, repo_url, branch, head_sha, conclusion]
+      properties:
+        provider: { const: generic }
+        repo_url: { type: string, description: The project repo the PR targets }
+        branch: { type: string, description: The reported branch name }
+        head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
+        conclusion: { type: string, enum: [success, failure, cancelled] }
+        run_url: { type: string }
+        merged: { type: boolean, description: True when the PR for this branch has merged }
+        closed: { type: boolean, description: True when the PR was closed without merging }
+
+    InstanceConfig:
+      type: object
+      required: [name, description, project_creation, lease_seconds, new_project_max_tokens_per_task, new_project_max_tokens_per_day, established_after_merged_tasks, max_active_claims_per_donor]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        project_creation: { type: string, enum: [open, approval], description: "`approval` = new projects start `pending` until an admin activates them" }
+        lease_seconds: { type: integer, minimum: 60 }
+        new_project_max_tokens_per_task: { type: integer }
+        new_project_max_tokens_per_day: { type: integer }
+        established_after_merged_tasks: { type: integer, description: "Merged, CI-passing tasks needed before the new-project caps lift" }
+        max_active_claims_per_donor: { type: integer, minimum: 1 }
+
+    InstanceConfigUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: string, maxLength: 500 }
+        project_creation: { type: string, enum: [open, approval] }
+        lease_seconds: { type: integer, minimum: 60 }
+        new_project_max_tokens_per_task: { type: integer, minimum: 1 }
+        new_project_max_tokens_per_day: { type: integer, minimum: 1 }
+        established_after_merged_tasks: { type: integer, minimum: 0 }
+        max_active_claims_per_donor: { type: integer, minimum: 1 }

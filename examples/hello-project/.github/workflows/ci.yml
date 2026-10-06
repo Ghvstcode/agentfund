@@ -1,0 +1,26 @@
+# CI is what turns "reported" tokens into "delivered" tokens: AgentFund counts a
+# run only when this workflow passes on the worker's branch.
+#
+# Hardening checklist (see docs/maintainers.md):
+#  - trigger on `pull_request`, never `pull_request_target`
+#  - no secrets, read-only token
+#  - pin actions by commit SHA
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests

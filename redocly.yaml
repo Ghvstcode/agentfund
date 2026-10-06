@@ -1,0 +1,8 @@
+extends:
+  - recommended
+rules:
+  operation-4xx-response: off
+  no-server-example.com: off
+  security-defined: error
+  operation-2xx-response: off
+  no-unused-components: off

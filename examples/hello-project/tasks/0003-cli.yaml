@@ -1,0 +1,18 @@
+spec_version: 1
+id: 0003-cli
+title: Command-line entry point
+prompt: |
+  Add src/cli.py exposing `main(argv: list[str]) -> int`:
+
+    python3 -m src.cli slugify "Hello, World!"   -> prints hello-world
+    python3 -m src.cli truncate 5 "Hello, World" -> prints Hell…
+
+  Unknown commands print usage to stderr and return 2. Use argparse.
+  Add tests in tests/test_cli.py (standard library `unittest`) that call main()
+  directly and capture stdout.
+scope:
+  write: [src/cli.py, tests/test_cli.py]
+verify: python3 -m unittest discover -s tests
+max_tokens: 1000000
+timeout_minutes: 20
+depends_on: [0001-slugify, 0002-truncate]

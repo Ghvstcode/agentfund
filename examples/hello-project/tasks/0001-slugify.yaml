@@ -1,0 +1,20 @@
+spec_version: 1
+id: 0001-slugify
+title: slugify() for titles
+prompt: |
+  Implement `slugify(text: str) -> str` in src/textutil.py.
+
+  Rules:
+  - lowercase the input;
+  - replace every run of characters that are not a-z or 0-9 with a single "-";
+  - strip leading and trailing "-";
+  - return "untitled" when the result would be empty.
+
+  Add unit tests in tests/test_slugify.py using only the standard library
+  `unittest` module. Do not add dependencies.
+scope:
+  write: [src/textutil.py, tests/test_slugify.py]
+  read: [src/**, tests/**, README.md]
+verify: python3 -m unittest discover -s tests -p "test_slugify.py"
+max_tokens: 1000000
+timeout_minutes: 20
