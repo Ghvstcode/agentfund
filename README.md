@@ -58,6 +58,32 @@ You need Docker (running), Node 22 with pnpm, Go 1.27+, git, curl and openssl. W
 already built it takes about 30 seconds; the first run also builds two container images.
 `make demo-manual` starts the same instance and lets you type the worker commands yourself.
 
+## Documentation
+
+| Start here | |
+| --- | --- |
+| [Quickstart](docs/quickstart.md) | The zero-token demo, step by step, then the same thing for real |
+| [Concepts](docs/concepts.md) | Manifest → lock → signature → claim → sandbox → PR → CI → ledger |
+| [Donor guide](docs/donors.md) | Approving, the policy file, the sandbox, reading your own logs |
+| [Maintainer guide](docs/maintainers.md) | Decomposing a project, signing, keys, hardening CI |
+| [Self-hosting](docs/self-hosting.md) | Configuring and running an instance |
+| [Security](docs/SECURITY.md) · [FAQ](docs/faq.md) · [Decisions](docs/decisions.md) | The threat model, the questions, the defaults |
+
+<details>
+<summary>Repository layout</summary>
+
+| Path | What | Stack |
+| --- | --- | --- |
+| [`spec/`](spec/) | The contract: manifest format, lock and signature, wire protocol v1 | JSON Schema, OpenAPI 3.1 |
+| [`worker/`](worker/) | `agentfund`, the CLI for backers and maintainers | Go, one static binary |
+| [`server/`](server/) | The API, indexer, claim queue and ledger | TypeScript, Hono, Postgres |
+| [`web/`](web/) | The UI. It uses only the public API, so anyone can host their own | React, shadcn/ui |
+| [`images/`](images/) | The sandbox image and the egress-allowlist proxy | Docker, Rust |
+| [`examples/hello-project/`](examples/hello-project/) | A three-task project to copy from | Python |
+| [`scripts/`](scripts/) | `demo.sh`, `e2e.sh`, the installer, docs and asset tooling | sh |
+
+</details>
+
 ## How it works
 
 <picture>
@@ -127,14 +153,6 @@ in `.env` to make it real. It is one Node process and one Postgres; nothing has 
 beyond that. → [Self-hosting](docs/self-hosting.md)
 
 ## What it looks like
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/shot-discover-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/shot-discover-light.png">
-  <img alt="The Discover page of an instance: a large live counter of tokens delivered to open source, totals for pledged and merged, and the list of projects." src="docs/assets/shot-discover-light.png" width="100%">
-</picture>
-
-<sub><b>An instance's front page.</b> One number, and it only counts tokens whose pull request passed CI.</sub>
 
 <table>
   <tr>
@@ -340,32 +358,6 @@ Treat a first real run as a test: `--once`, a small `--budget`, and read `agentf
 Not planned: money anywhere in the system, microVM isolation, an agent that writes your
 manifests for you, mobile apps, analytics beyond the ledger. The defaults we picked where the
 design left a choice, and how to change each, are in [docs/decisions.md](docs/decisions.md).
-
-## Documentation
-
-| Start here | |
-| --- | --- |
-| [Quickstart](docs/quickstart.md) | The zero-token demo, step by step, then the same thing for real |
-| [Concepts](docs/concepts.md) | Manifest → lock → signature → claim → sandbox → PR → CI → ledger |
-| [Donor guide](docs/donors.md) | Approving, the policy file, the sandbox, reading your own logs |
-| [Maintainer guide](docs/maintainers.md) | Decomposing a project, signing, keys, hardening CI |
-| [Self-hosting](docs/self-hosting.md) | Configuring and running an instance |
-| [Security](docs/SECURITY.md) · [FAQ](docs/faq.md) · [Decisions](docs/decisions.md) | The threat model, the questions, the defaults |
-
-<details>
-<summary>Repository layout</summary>
-
-| Path | What | Stack |
-| --- | --- | --- |
-| [`spec/`](spec/) | The contract: manifest format, lock and signature, wire protocol v1 | JSON Schema, OpenAPI 3.1 |
-| [`worker/`](worker/) | `agentfund`, the CLI for backers and maintainers | Go, one static binary |
-| [`server/`](server/) | The API, indexer, claim queue and ledger | TypeScript, Hono, Postgres |
-| [`web/`](web/) | The UI. It uses only the public API, so anyone can host their own | React, shadcn/ui |
-| [`images/`](images/) | The sandbox image and the egress-allowlist proxy | Docker, Rust |
-| [`examples/hello-project/`](examples/hello-project/) | A three-task project to copy from | Python |
-| [`scripts/`](scripts/) | `demo.sh`, `e2e.sh`, the installer, docs and asset tooling | sh |
-
-</details>
 
 ## Contributing
 
