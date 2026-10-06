@@ -40,6 +40,12 @@ export const githubAdapter: CiAdapter = {
   name: "github",
   signatureHeader: "x-hub-signature-256",
   accepts: (headers) => headers.has("x-github-event"),
+  claimedRepo(payload) {
+    const repo = (payload as { repository?: { full_name?: unknown; html_url?: unknown } } | null)?.repository;
+    if (repo && typeof repo.full_name === "string" && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo.full_name)) return githubRepoKey(repo.full_name);
+    if (repo && typeof repo.html_url === "string" && /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/i.test(repo.html_url)) return repo.html_url.toLowerCase();
+    return null;
+  },
   parse(headers, body): Delivery {
     const event = headers.get("x-github-event") ?? "";
     const payload = obj(body, "payload");

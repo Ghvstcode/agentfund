@@ -134,7 +134,7 @@ describe("serving the built SPA", () => {
     expect(home).toContain('<script type="module" src="/assets/app-abc123.js"></script>');
     expect(home.match(/<title>/g)).toHaveLength(1);
 
-    for (const path of ["/gridrs", "/gridrs/tasks", "/gridrs/"]) {
+    for (const path of ["/gridrs", "/gridrs/tasks/0001-a", "/gridrs/audit", "/gridrs/"]) {
       const res = await w.request(path);
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("text/html");
@@ -150,10 +150,33 @@ describe("serving the built SPA", () => {
     const donor = await (await w.request("/u/some-donor")).text();
     expect(donor).toContain("<title>some-donor · AgentFund</title>");
     expect(donor).toContain('"@type":"ProfilePage"');
-    // Unknown routes still get the shell (the SPA renders its own 404) with generic meta.
-    const other = await (await w.request("/some/spa/route")).text();
-    expect(other).toContain("<title>AgentFund</title>");
-    expect(other).toContain('<div id="root"></div>');
+    expect(donor).not.toContain("noindex");
+  });
+
+  it("no soft 404s: unknown projects, donors, tasks and routes get the shell with status 404 and noindex", async () => {
+    for (const path of ["/nope", "/no-such-project/audit", "/u/nobody-here", "/u", "/u/some-donor/extra", "/gridrs/unknown-tab", "/gridrs/tasks", "/gridrs/tasks/0099-missing", "/gridrs/tasks/0001-a/more", "/some/spa/route", "/donors/extra", "/auth/nope", "/Not_A_Slug"]) {
+      const res = await w.request(path);
+      expect(res.status, path).toBe(404);
+      const html = await res.text();
+      expect(html, path).toContain('<meta name="robots" content="noindex">');
+      expect(html).toContain('<div id="root"></div>'); // still the app shell
+      expect(html).toContain("window.__AGENTFUND__=");
+      expect(html).not.toContain('rel="canonical"');
+      expect(html).not.toContain("application/ld+json");
+    }
+    // Every route the UI has is 200.
+    for (const path of ["/", "/donors", "/maintain", "/maintain/new", "/settings", "/admin", "/admin/users", "/styleguide", "/styleguide/buttons", "/auth/callback", "/u/some-donor", "/gridrs", "/gridrs/activity", "/gridrs/donors", "/gridrs/audit", "/gridrs/tasks/0001-a"]) {
+      expect((await w.request(path)).status, path).toBe(200);
+    }
+    // App screens are real pages but not for indexing; public pages are.
+    expect(await (await w.request("/settings")).text()).toContain("noindex");
+    expect(await (await w.request("/donors")).text()).not.toContain("noindex");
+    // A project that is not public is a 404 to crawlers.
+    const admin = await w.login("gridrs-owner");
+    await w.call("adminUpdateProject", { token: admin, path: { slug: "gridrs" }, body: { status: "removed" } });
+    expect((await w.request("/gridrs")).status).toBe(404);
+    await w.call("adminUpdateProject", { token: admin, path: { slug: "gridrs" }, body: { status: "active" } });
+    expect((await w.request("/gridrs")).status).toBe(200);
   });
 
   it("escapes instance and project text in the head", async () => {

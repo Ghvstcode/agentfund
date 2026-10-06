@@ -128,6 +128,18 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
     return json<ResponseOf<"repinProject", 200>>(c, 200, await indexer.repinProject(ctx, who, row, body?.commit));
   });
 
+  op("getProjectWebhook", async ({ c, path, who }) => {
+    const row = await projects.visibleProject(ctx, path.slug, who.user);
+    projects.requireMaintainer(row, who);
+    return json<ResponseOf<"getProjectWebhook", 200>>(c, 200, projects.webhookConfig(ctx, row));
+  });
+
+  op("rotateProjectWebhook", async ({ c, path, who }) => {
+    const row = await projects.visibleProject(ctx, path.slug, who.user);
+    projects.requireMaintainer(row, who);
+    return json<ResponseOf<"rotateProjectWebhook", 200>>(c, 200, await projects.rotateWebhookSecret(ctx, who, row));
+  });
+
   /* ---- work ---- */
 
   op("createPledge", async ({ c, path, body, who }) => {
@@ -237,16 +249,29 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
     async ({ c, raw }) => {
       const headers = c.req.raw.headers;
       const adapter = ADAPTERS.find((a) => a.accepts(headers));
-      // The signature is checked over the raw bytes before anything is parsed.
-      if (!adapter || !verifySignature(ctx.webhookSecret, raw, headers.get(adapter.signatureHeader))) {
-        throw new Problem("bad-signature", "Missing or invalid webhook signature.");
-      }
+      const signature = adapter ? headers.get(adapter.signatureHeader) : null;
+      const refuse = new Problem("bad-signature", "Missing or invalid webhook signature.");
+      if (!adapter || !signature) throw refuse;
+
+      // The body is read once, untrusted, only to learn which project it claims to be about;
+      // nothing in it is acted on until the HMAC over the raw bytes verifies under that
+      // project's secret (or the operator's instance-wide secret, when one is configured).
       let payload: unknown;
+      let parsed = true;
       try {
         payload = JSON.parse(new TextDecoder().decode(raw));
       } catch {
-        throw new Problem("validation", "The body is not valid JSON.", { errors: [{ path: "/", message: "invalid JSON" }] });
+        parsed = false;
       }
+      const operator = ctx.config.webhookSecret !== undefined && verifySignature(ctx.config.webhookSecret, raw, signature);
+      const claimed = parsed ? adapter.claimedRepo(payload) : null;
+      const candidates = claimed ? await projectsForRepo(ctx, claimed) : [];
+      // Every candidate is checked (no early exit) so timing does not depend on which one matched.
+      const trusted = candidates.filter((p) => verifySignature(p.webhookSecret, raw, signature) || operator);
+      // Unknown project and wrong secret are indistinguishable to the sender.
+      if (!operator && trusted.length === 0) throw refuse;
+
+      if (!parsed) throw new Problem("validation", "The body is not valid JSON.", { errors: [{ path: "/", message: "invalid JSON" }] });
       if (adapter.name === "generic" && !genericSchema(payload)) {
         throw new Problem("validation", "The body is not a GenericCiResult.", { errors: formatErrors(genericSchema.errors) });
       }
@@ -258,20 +283,17 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
         throw err;
       }
       let matched = false;
-      if (delivery.repoKey) {
-        const targets = (await projectsForRepo(ctx, delivery.repoKey)).filter((p) => p.ciProvider === adapter.name);
-        for (const p of targets) {
-          if (delivery.pushedRef !== undefined) {
-            if (delivery.pushedRef === `refs/heads/${p.baseBranch}`) {
-              matched = true;
-              // Re-index in the background; the webhook must answer quickly.
-              void indexer.indexProject(ctx, p.id).catch((err) => ctx.log.error("push re-index failed", { project: p.slug, err }));
-            }
-            continue;
+      for (const p of trusted.filter((x) => x.ciProvider === adapter.name)) {
+        if (delivery.pushedRef !== undefined) {
+          if (delivery.pushedRef === `refs/heads/${p.baseBranch}`) {
+            matched = true;
+            // Re-index in the background; the webhook must answer quickly.
+            void indexer.indexProject(ctx, p.id).catch((err) => ctx.log.error("push re-index failed", { project: p.slug, err }));
           }
-          for (const ev of delivery.evidence) {
-            if ((await recordEvidence(ctx, p.id, ev)).matched) matched = true;
-          }
+          continue;
+        }
+        for (const ev of delivery.evidence) {
+          if ((await recordEvidence(ctx, p.id, ev)).matched) matched = true;
         }
       }
       return json<ResponseOf<"ciWebhook", 202>>(c, 202, { matched });

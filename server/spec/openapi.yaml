@@ -203,6 +203,42 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
 
+  /v1/projects/{slug}/webhook:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    get:
+      tags: [maintain]
+      operationId: getProjectWebhook
+      summary: CI webhook URL and this project's signing secret (maintainer or admin)
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Webhook configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectWebhook" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/projects/{slug}/webhook/rotate:
+    parameters:
+      - { $ref: "#/components/parameters/Slug" }
+    post:
+      tags: [maintain]
+      operationId: rotateProjectWebhook
+      summary: Replace the project's webhook secret; the old one stops working immediately
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: New webhook configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectWebhook" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
   /v1/projects/{slug}/tasks:
     parameters:
       - { $ref: "#/components/parameters/Slug" }
@@ -1362,6 +1398,17 @@ components:
           oneOf:
             - { type: "null" }
             - { $ref: "#/components/schemas/TaskCounts" }
+
+    ProjectWebhook:
+      type: object
+      required: [url, secret, provider, content_type, events, ci_poll]
+      properties:
+        url: { type: string, description: "Payload URL, `<base_url>/v1/webhooks/ci`" }
+        secret: { type: string, description: Per-project HMAC secret. Signs CI results for this project only. }
+        provider: { type: string, enum: [github, generic] }
+        content_type: { type: string, description: "Always `application/json`" }
+        events: { type: array, items: { type: string }, description: Provider events to subscribe to }
+        ci_poll: { type: boolean, description: True when the instance also polls the provider and the webhook is optional }
 
     GenericCiResult:
       type: object

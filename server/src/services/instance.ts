@@ -3,7 +3,6 @@ import { APP_NAME } from "../constants.js";
 import type { AppContext } from "../context.js";
 import type { Queryable } from "../db/client.js";
 import { instances } from "../db/schema.js";
-import { newSecret } from "../lib/ids.js";
 import { generateKeyPair } from "../lib/minisign.js";
 import type { BodyOf, Schemas } from "../lib/openapi.js";
 import type { Config } from "../config.js";
@@ -29,7 +28,6 @@ export async function ensureInstance(db: Db, config: Config, clock: Clock): Prom
       baseUrl: config.baseUrl,
       pubkey: pair.publicKey,
       secretKey: pair.secretSeed.toString("base64"),
-      webhookSecret: newSecret(),
       createdAt: now,
       updatedAt: now,
     })

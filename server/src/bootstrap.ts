@@ -24,7 +24,7 @@ export async function createContext(config: Config, overrides: { clock?: Clock; 
   try {
     const dataDir = resolve(config.dataDir);
     mkdirSync(resolve(dataDir, "repos"), { recursive: true });
-    const instance = await ensureInstance(database.db, config, clock);
+    await ensureInstance(database.db, config, clock);
     const hub = new StreamHub(database, log);
     await hub.start();
     const ctx: AppContext = {
@@ -33,11 +33,10 @@ export async function createContext(config: Config, overrides: { clock?: Clock; 
       db: database.db,
       clock,
       log,
-      git: new Git({ dataDir, allowFile: config.allowFileRepos }),
+      git: new Git({ dataDir, allowFile: config.allowFileRepos, onError: (info) => log.warn("git command failed", info) }),
       spec: loadSpec(),
       hub,
       fetch: overrides.fetch ?? ((input, init) => fetch(input, init)),
-      webhookSecret: config.webhookSecret ?? instance.webhookSecret,
     };
     return {
       ctx,

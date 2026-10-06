@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../src/config.js";
-import { parseRepoUrl } from "../src/lib/git.js";
+import { friendlyGitMessage, parseRepoUrl } from "../src/lib/git.js";
 import { validateAgentfund, validateManifest } from "../src/lib/schemas.js";
 import { parseStrictYaml } from "../src/lib/yaml.js";
 import { streakDays } from "../src/services/ledger.js";
@@ -83,6 +83,22 @@ describe("repo URL validation", () => {
   it("allows file:// only when enabled", () => {
     expect(p("file:///tmp/af-repo-1", true).scheme).toBe("file");
     expect(() => p("file:///tmp/../etc", true)).toThrow();
+  });
+});
+
+describe("git failures are reported in plain words", () => {
+  it.each([
+    ["remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found", false, "repository not found or not public"],
+    ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "repository not found or not public"],
+    ["fatal: unable to access 'https://gitlab.com/a/b/': The requested URL returned error: 403", false, "repository not found or not public"],
+    ["fatal: '/nonexistent/x' does not appear to be a git repository", false, "repository not found or not public"],
+    ["fatal: unable to access 'https://nope.invalid/a/b/': Could not resolve host: nope.invalid", false, "could not reach host"],
+    ["fatal: unable to access 'https://h.example/a/b/': Failed to connect to h.example port 443", false, "could not reach host"],
+    ["", true, "timed out"],
+    ["fatal: unable to access 'https://h.example/a/b/': Operation timed out after 30000 milliseconds", false, "timed out"],
+    ["something nobody has seen before", false, "could not read the repository"],
+  ])("%s", (stderr, timedOut, message) => {
+    expect(friendlyGitMessage(stderr, timedOut)).toBe(message);
   });
 });
 

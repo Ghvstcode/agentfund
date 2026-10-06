@@ -33,6 +33,7 @@ interface Head {
   url: string;
   image?: string;
   type: "website" | "profile";
+  noindex?: boolean;
   jsonLd?: Record<string, unknown>;
 }
 
@@ -40,7 +41,7 @@ function headTags(ctx: AppContext, instanceName: string, h: Head): string {
   const tags = [
     `<title>${esc(h.title)}</title>`,
     `<meta name="description" content="${esc(h.description)}">`,
-    `<link rel="canonical" href="${esc(h.url)}">`,
+    h.noindex ? `<meta name="robots" content="noindex">` : `<link rel="canonical" href="${esc(h.url)}">`,
     `<link rel="alternate" type="application/atom+xml" title="${esc(instanceName)}" href="${esc(ctx.config.baseUrl)}/feed.atom">`,
     `<meta property="og:site_name" content="${esc(instanceName)}">`,
     `<meta property="og:type" content="${h.type}">`,
@@ -60,48 +61,74 @@ function headTags(ctx: AppContext, instanceName: string, h: Head): string {
   return tags.join("\n    ");
 }
 
-async function headFor(ctx: AppContext, path: string): Promise<{ head: Head; instanceName: string }> {
+/** Single-segment UI routes with no sub-paths, and prefixes whose sub-paths belong to the UI (web/src/App.tsx). */
+const UI_EXACT = new Set(["donors", "settings", "maintain", "admin", "styleguide"]);
+const UI_PREFIX = new Set(["maintain", "admin", "styleguide"]);
+const PROJECT_TABS = new Set(["activity", "donors", "audit"]);
+
+/**
+ * Head tags for a path, and whether the path is a real page. Unknown projects, donors, tasks
+ * and paths outside the UI's routes still get the SPA shell (it renders its own "not found"),
+ * but with status 404 and `noindex`, so crawlers do not see soft 404s.
+ */
+async function headFor(ctx: AppContext, path: string): Promise<{ head: Head; instanceName: string; found: boolean }> {
   const instance = await getInstance(ctx.db);
   const base = ctx.config.baseUrl;
   const url = `${base}${path === "/" ? "" : path}`;
-  const fallback: Head = { title: instance.name, description: instance.description, url: url || base, type: "website", jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: instance.name, description: instance.description, url: base } };
+  const generic: Head = { title: instance.name, description: instance.description, url: url || base, type: "website" };
+  const home: Head = { ...generic, jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: instance.name, description: instance.description, url: base } };
+  const missing = { instanceName: instance.name, found: false, head: { ...generic, title: `Not found · ${instance.name}`, description: "This page does not exist.", noindex: true } };
   const segments = path.split("/").filter(Boolean);
-  if (segments[0] === "u" && segments[1] && /^[a-z0-9][a-z0-9-]{0,38}$/.test(segments[1])) {
-    const [user] = await rows<{ handle: string; avatar_url: string | null }>(ctx.db, sql`SELECT handle, avatar_url FROM users WHERE handle = ${segments[1]} AND NOT banned`);
-    if (user) {
-      const description = `${user.handle}'s delivered and merged agent work on ${instance.name}.`;
-      return {
-        instanceName: instance.name,
-        head: { title: `${user.handle} · ${instance.name}`, description, url, type: "profile", jsonLd: { "@context": "https://schema.org", "@type": "ProfilePage", url: `${base}/u/${user.handle}`, mainEntity: { "@type": "Person", name: user.handle, identifier: `${base}/u/${user.handle}`, ...(user.avatar_url ? { image: user.avatar_url } : {}) } } },
-      };
-    }
-  } else if (segments[0] && /^[a-z0-9][a-z0-9-]{0,62}$/.test(segments[0])) {
-    const p = await getProjectRow(ctx.db, segments[0]);
-    if (p && (p.status === "active" || p.status === "paused")) {
-      return {
-        instanceName: instance.name,
-        head: {
-          title: `${p.name} · ${instance.name}`,
-          description: p.description,
-          url,
-          image: `${base}/og/${p.slug}.png`,
-          type: "website",
-          jsonLd: {
-            "@context": "https://schema.org",
-            "@type": "SoftwareSourceCode",
-            name: p.name,
-            description: p.description,
-            url: `${base}/${p.slug}`,
-            codeRepository: p.repoUrl,
-            ...(p.language ? { programmingLanguage: p.language } : {}),
-            ...(p.tags.length ? { keywords: p.tags.join(", ") } : {}),
-            dateCreated: p.createdAt.toISOString(),
-          },
-        },
-      };
-    }
+  const [first, second, third] = segments;
+  if (!first) return { head: home, instanceName: instance.name, found: true };
+  if ((segments.length === 1 && UI_EXACT.has(first)) || (segments.length > 1 && UI_PREFIX.has(first)) || (first === "auth" && second === "callback" && segments.length === 2)) {
+    // App screens (settings, admin, …) are real pages but nothing a crawler should index.
+    return { head: { ...generic, noindex: first !== "donors" }, instanceName: instance.name, found: true };
   }
-  return { head: fallback, instanceName: instance.name };
+  if (first === "u") {
+    if (segments.length !== 2 || !second || !/^[a-z0-9][a-z0-9-]{0,38}$/.test(second)) return missing;
+    const [user] = await rows<{ handle: string; avatar_url: string | null }>(ctx.db, sql`SELECT handle, avatar_url FROM users WHERE handle = ${second} AND NOT banned`);
+    if (!user) return missing;
+    const description = `${user.handle}'s delivered and merged agent work on ${instance.name}.`;
+    return {
+      instanceName: instance.name,
+      found: true,
+      head: { title: `${user.handle} · ${instance.name}`, description, url, type: "profile", jsonLd: { "@context": "https://schema.org", "@type": "ProfilePage", url: `${base}/u/${user.handle}`, mainEntity: { "@type": "Person", name: user.handle, identifier: `${base}/u/${user.handle}`, ...(user.avatar_url ? { image: user.avatar_url } : {}) } } },
+    };
+  }
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(first)) return missing;
+  const p = await getProjectRow(ctx.db, first);
+  // Pending and removed projects are not public; their maintainer still reaches them in the app.
+  if (!p || (p.status !== "active" && p.status !== "paused")) return missing;
+  if (segments.length === 2 && !PROJECT_TABS.has(second!)) return missing;
+  if (segments.length === 3) {
+    if (second !== "tasks" || !third) return missing;
+    const [task] = await rows<{ id: string }>(ctx.db, sql`SELECT id FROM manifests WHERE project_id = ${p.id} AND manifest_id = ${third}`);
+    if (!task) return missing;
+  }
+  if (segments.length > 3) return missing;
+  return {
+    instanceName: instance.name,
+    found: true,
+    head: {
+      title: `${p.name} · ${instance.name}`,
+      description: p.description,
+      url,
+      image: `${base}/og/${p.slug}.png`,
+      type: "website",
+      jsonLd: {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        name: p.name,
+        description: p.description,
+        url: `${base}/${p.slug}`,
+        codeRepository: p.repoUrl,
+        ...(p.language ? { programmingLanguage: p.language } : {}),
+        ...(p.tags.length ? { keywords: p.tags.join(", ") } : {}),
+        dateCreated: p.createdAt.toISOString(),
+      },
+    },
+  };
 }
 
 function placeholder(ctx: AppContext, head: string, instanceName: string): string {
@@ -131,7 +158,7 @@ export function injectHead(shell: string, head: string): string | null {
   const strip = (s: string) =>
     s
       .replace(/<title>[\s\S]*?<\/title>[ \t]*\n?/gi, "")
-      .replace(/[ \t]*<meta\s+[^>]*?(?:name|property)\s*=\s*["'](?:description|og:[^"']*|twitter:[^"']*)["'][^>]*>[ \t]*\n?/gi, "")
+      .replace(/[ \t]*<meta\s+[^>]*?(?:name|property)\s*=\s*["'](?:description|robots|og:[^"']*|twitter:[^"']*)["'][^>]*>[ \t]*\n?/gi, "")
       .replace(/[ \t]*<link\s+[^>]*?rel\s*=\s*["']canonical["'][^>]*>[ \t]*\n?/gi, "");
   if (shell.includes(MARKER)) return strip(shell).replace(MARKER, head);
   if (/<\/head>/i.test(shell)) return strip(shell).replace(/<\/head>/i, `${head}\n  </head>`);
@@ -258,11 +285,11 @@ export function registerPages(app: Hono, ctx: AppContext): void {
     }
     // Anything that looks like a file but is not there is a real 404, not the app shell.
     if (extname(path) && !path.endsWith(".html")) return c.text("Not found", 404);
-    const { head, instanceName } = await headFor(ctx, path.replace(/\/+$/, "") || "/");
+    const { head, instanceName, found } = await headFor(ctx, path.replace(/\/+$/, "") || "/");
     const tags = headTags(ctx, instanceName, head);
     const html = readShell();
     const page = (html && injectHead(html, tags)) ?? placeholder(ctx, tags, instanceName);
-    return c.html(page, 200, { "cache-control": "no-cache" });
+    return c.html(page, found ? 200 : 404, { "cache-control": "no-cache" });
   };
   app.get("*", spa);
 }

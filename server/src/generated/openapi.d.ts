@@ -112,6 +112,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{slug}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: components["parameters"]["Slug"];
+            };
+            cookie?: never;
+        };
+        /** CI webhook URL and this project's signing secret (maintainer or admin) */
+        get: operations["getProjectWebhook"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{slug}/webhook/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: components["parameters"]["Slug"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace the project's webhook secret; the old one stops working immediately */
+        post: operations["rotateProjectWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{slug}/tasks": {
         parameters: {
             query?: never;
@@ -1088,6 +1126,20 @@ export interface components {
             token_goal?: number | null;
             tasks?: null | components["schemas"]["TaskCounts"];
         };
+        ProjectWebhook: {
+            /** @description Payload URL, `<base_url>/v1/webhooks/ci` */
+            url: string;
+            /** @description Per-project HMAC secret. Signs CI results for this project only. */
+            secret: string;
+            /** @enum {string} */
+            provider: "github" | "generic";
+            /** @description Always `application/json` */
+            content_type: string;
+            /** @description Provider events to subscribe to */
+            events: string[];
+            /** @description True when the instance also polls the provider and the webhook is optional */
+            ci_poll: boolean;
+        };
         GenericCiResult: {
             /** @constant */
             provider: "generic";
@@ -1377,6 +1429,56 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    getProjectWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: components["parameters"]["Slug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhook configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectWebhook"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    rotateProjectWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: components["parameters"]["Slug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New webhook configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectWebhook"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listTasks: {

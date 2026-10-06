@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { expect } from "vitest";
 import { signBody } from "../../src/ci/adapter.js";
 import type { Schemas } from "../../src/lib/openapi.js";
-import { WEBHOOK_SECRET, type CallResult, type TestApp } from "./app.js";
+import { repoKeyOf } from "../../src/lib/git.js";
+import { projectSecret, type CallResult, type TestApp } from "./app.js";
 import { TestRepo, type ManifestSpec } from "./repo.js";
 
 export const SHA = (c: string): string => c.repeat(40).slice(0, 40);
@@ -54,7 +55,7 @@ export async function reportCompleted(t: TestApp, key: string, c: Schemas["Claim
   return res.body;
 }
 
-/** Posts a signed generic CI result. */
+/** Posts a generic CI result signed with the secret of the project that owns `repoUrl`. */
 export async function genericCi(
   t: TestApp,
   repoUrl: string,
@@ -62,7 +63,7 @@ export async function genericCi(
   result: { conclusion?: "success" | "failure" | "cancelled"; merged?: boolean; closed?: boolean; run_url?: string },
 ): Promise<CallResult<{ matched: boolean }>> {
   const raw = JSON.stringify({ provider: "generic", repo_url: repoUrl, branch: report.branch, head_sha: report.head_sha, conclusion: result.conclusion ?? "success", run_url: result.run_url ?? "https://ci.example/run/1", ...(result.merged !== undefined ? { merged: result.merged } : {}), ...(result.closed !== undefined ? { closed: result.closed } : {}) });
-  return t.call<{ matched: boolean }>("ciWebhook", { raw, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, raw) } });
+  return t.call<{ matched: boolean }>("ciWebhook", { raw, headers: { "x-agentfund-signature": signBody(await projectSecret(t, repoKeyOf(repoUrl)), raw) } });
 }
 
 export async function getProject(t: TestApp, slug: string): Promise<Schemas["Project"]> {

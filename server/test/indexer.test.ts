@@ -122,13 +122,23 @@ describe("indexer: rejects what does not verify", () => {
     const bare = new TestRepo();
     bare.remove("agentfund.yaml");
     bare.commit("nothing");
-    expect((await preview(bare)).errors.join()).toMatch(/agentfund\.yaml is missing/);
+    expect((await preview(bare)).errors.join()).toBe("no agentfund.yaml at the repo root");
     const foreign = TestRepo.create([{ id: "0001-a" }], { repoUrl: "https://github.com/someone/else" });
     expect((await preview(foreign)).errors.join()).toMatch(/is not the repository being registered/);
     expect((await create(foreign, "foreign")).code).toBe("repo-unverifiable");
     const gone = await t.call<Preview>("previewProject", { token: session, body: { repo_url: "file:///nonexistent/af-nope" } });
     expect(gone.body).toMatchObject({ ok: false });
-    expect(gone.body.errors.join()).toMatch(/could not fetch/);
+    expect(gone.body.errors).toEqual(["repository not found or not public"]);
+    const created = await t.call<Schemas["Problem"]>("createProject", { token: session, body: { repo_url: "file:///nonexistent/af-nope" } });
+    expect(created.code).toBe("repo-unverifiable");
+    expect(created.body.detail).toBe("repository not found or not public");
+    expect(JSON.stringify(created.body)).not.toMatch(/fatal|git fetch|stderr/);
+    // A base branch that is not there.
+    const nobranch = TestRepo.create([{ id: "0001-a" }]);
+    nobranch.descriptor.base_branch = "release";
+    nobranch.writeDescriptor();
+    nobranch.commit("names a missing branch");
+    expect((await preview(nobranch)).errors.join()).toMatch(/^branch "release" not found/);
   });
 
   it.each(cases.slice(0, 7))("on re-index: %s → index_error, pin untouched", async (name, tamper, message) => {

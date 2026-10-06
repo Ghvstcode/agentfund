@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signBody, verifySignature } from "../src/ci/adapter.js";
 import { judgeCheckRuns, parsePrUrl, pollOnce } from "../src/ci/poller.js";
 import type { Schemas } from "../src/lib/openapi.js";
-import { createTestApp, WEBHOOK_SECRET, type CallResult, type TestApp } from "./helpers/app.js";
+import { createTestApp, projectSecret, WEBHOOK_SECRET, type CallResult, type TestApp } from "./helpers/app.js";
 import { claim, genericCi, getProject, getTask, reportCompleted, setupProject } from "./helpers/scenario.js";
 
 type Json = Record<string, unknown>;
@@ -31,11 +31,13 @@ afterAll(async () => {
   await t.close();
 });
 
-function gh(event: string, payload: Json, opts: { secret?: string | null; signature?: string } = {}): Promise<CallResult<{ matched: boolean }>> {
+/** Sends a GitHub delivery, signed by default with the secret of the project the payload names. */
+async function gh(event: string, payload: Json, opts: { secret?: string | null; signature?: string } = {}): Promise<CallResult<{ matched: boolean }>> {
   const raw = JSON.stringify(payload);
   const headers: Record<string, string> = { "x-github-event": event, "x-github-delivery": "72d3162e-cc78-11e3-81ab-4c9367dc0958", "user-agent": "GitHub-Hookshot/044aadd" };
+  const fullName = (payload.repository as Json | undefined)?.full_name;
   if (opts.signature !== undefined) headers["x-hub-signature-256"] = opts.signature;
-  else if (opts.secret !== null) headers["x-hub-signature-256"] = signBody(opts.secret ?? WEBHOOK_SECRET, raw);
+  else if (opts.secret !== null) headers["x-hub-signature-256"] = signBody(opts.secret ?? (await projectSecret(t, `https://github.com/${String(fullName).toLowerCase()}`)), raw);
   return t.call<{ matched: boolean }>("ciWebhook", { raw, headers });
 }
 
@@ -80,39 +82,154 @@ describe("webhook signatures", () => {
     expect(signBody("It's a Secret to Everybody", "Hello, World!")).toBe("sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17");
   });
 
-  it("GitHub: good signature accepted; bad, missing and wrong-secret rejected with 401 bad-signature", async () => {
-    const ping = fixture("ping.json");
+  it("GitHub: the project's secret is accepted; bad, missing, foreign and unknown-project signatures are 401 bad-signature", async () => {
+    await githubProject("sigs", "acme/sigs");
+    await githubProject("sigs-other", "acme/sigs-other");
+    const f = fixture("ping.json");
+    const ping = { ...f, repository: { ...(f.repository as Json), full_name: "acme/sigs" } };
     const ok = await gh("ping", ping);
     expect(ok.status).toBe(202);
     expect(ok.body).toEqual({ matched: false });
-    for (const res of [await gh("ping", ping, { secret: null }), await gh("ping", ping, { secret: "not-the-secret-not-the-secret" }), await gh("ping", ping, { signature: "sha256=" + "0".repeat(64) }), await gh("ping", ping, { signature: "garbage" })]) {
+    const other = await projectSecret(t, "https://github.com/acme/sigs-other");
+    const refused = [
+      await gh("ping", ping, { secret: null }),
+      await gh("ping", ping, { secret: "not-the-secret-not-the-secret" }),
+      await gh("ping", ping, { secret: other }), // another maintainer's secret
+      await gh("ping", ping, { secret: WEBHOOK_SECRET }), // operator secret is not configured on this instance
+      await gh("ping", ping, { signature: "sha256=" + "0".repeat(64) }),
+      await gh("ping", ping, { signature: "garbage" }),
+      await gh("ping", { ...f, repository: { full_name: "nobody/unknown" } }, { secret: other }), // no such project
+      await gh("ping", { zen: "x", hook_id: 1 }, { secret: other }), // names no repository at all
+    ];
+    for (const res of refused) {
       expect(res.status).toBe(401);
       expect(res.code).toBe("bad-signature");
     }
+    // Unknown project and wrong secret look exactly the same from outside.
+    expect(new Set(refused.map((r) => JSON.stringify(r.body))).size).toBe(1);
   });
 
   it("generic: signature header required and checked; body must be a GenericCiResult", async () => {
-    const raw = JSON.stringify({ provider: "generic", repo_url: "https://git.example/x/y", branch: "b", head_sha: "a".repeat(40), conclusion: "success" });
-    expect((await t.call("ciWebhook", { raw })).code).toBe("bad-signature");
-    expect((await t.call("ciWebhook", { raw, headers: { "x-agentfund-signature": signBody("wrong-wrong-wrong-wrong", raw) } })).code).toBe("bad-signature");
-    const ok = await t.call("ciWebhook", { raw, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, raw) } });
+    const { repo } = await setupProject(t, "gensig", [{ id: "0001-a" }]);
+    const secret = await projectSecret(t, repo.url);
+    const post = (body: string, key: string | null) => t.call<{ matched: boolean }>("ciWebhook", { raw: body, headers: key === null ? {} : { "x-agentfund-signature": signBody(key, body) } });
+    const raw = JSON.stringify({ provider: "generic", repo_url: repo.url, branch: "b", head_sha: "a".repeat(40), conclusion: "success" });
+    expect((await post(raw, null)).code).toBe("bad-signature");
+    expect((await post(raw, "wrong-wrong-wrong-wrong")).code).toBe("bad-signature");
+    const ok = await post(raw, secret);
     expect(ok.status).toBe(202);
     expect(ok.body).toEqual({ matched: false });
-    for (const bad of [{ provider: "generic" }, { provider: "other", repo_url: "x", branch: "b", head_sha: "a".repeat(40), conclusion: "success" }, { provider: "generic", repo_url: "x", branch: "b", head_sha: "short", conclusion: "success" }, { provider: "generic", repo_url: "x", branch: "b", head_sha: "a".repeat(40), conclusion: "success", extra: 1 }]) {
-      const body = JSON.stringify(bad);
-      const res = await t.call("ciWebhook", { raw: body, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, body) } });
+    // A repo nobody registered: 401, whatever it is signed with.
+    const stray = JSON.stringify({ provider: "generic", repo_url: "https://git.example/x/y", branch: "b", head_sha: "a".repeat(40), conclusion: "success" });
+    expect((await post(stray, secret)).code).toBe("bad-signature");
+    for (const bad of [{ provider: "other", repo_url: repo.url, branch: "b", head_sha: "a".repeat(40), conclusion: "success" }, { provider: "generic", repo_url: repo.url, branch: "b", head_sha: "short", conclusion: "success" }, { provider: "generic", repo_url: repo.url, branch: "b", head_sha: "a".repeat(40), conclusion: "success", extra: 1 }, { provider: "generic", repo_url: repo.url }]) {
+      const res = await post(JSON.stringify(bad), secret);
       expect(res.status).toBe(422);
       expect(res.code).toBe("validation");
     }
-    const notJson = "{nope";
-    expect((await t.call("ciWebhook", { raw: notJson, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, notJson) } })).status).toBe(422);
+    // Unparseable bodies name no project, so they cannot be authenticated at all.
+    expect((await post("{nope", secret)).code).toBe("bad-signature");
+  });
+
+  it("a maintainer's secret signs for their project only", async () => {
+    const a = await setupProject(t, "mine", [{ id: "0001-a" }]);
+    const b = await setupProject(t, "theirs", [{ id: "0001-a" }]);
+    const victim = await t.donor("victim");
+    const c = await claim(t, victim.key, "theirs:0001-a");
+    const report = await reportCompleted(t, victim.key, c);
+    const mine = (await t.call<Schemas["ProjectWebhook"]>("getProjectWebhook", { token: a.maintainer, path: { slug: "mine" } })).body.secret;
+    // The maintainer of "mine" forges a green, merged result for "theirs".
+    const forged = JSON.stringify({ provider: "generic", repo_url: b.repo.url, branch: report.branch, head_sha: report.head_sha, conclusion: "success", merged: true });
+    const res = await t.call("ciWebhook", { raw: forged, headers: { "x-agentfund-signature": signBody(mine, forged) } });
+    expect(res.status).toBe(401);
+    expect(res.code).toBe("bad-signature");
+    expect((await getTask(t, "theirs", "0001-a")).state).toBe("claimed");
+    expect((await getProject(t, "theirs")).totals).toMatchObject({ delivered: 0, merged: 0 });
+    // The same bytes signed by the right project go through.
+    expect((await genericCi(t, b.repo.url, report, { conclusion: "success" })).body.matched).toBe(true);
+    expect((await getProject(t, "theirs")).totals.delivered).toBe(100_000);
+  });
+
+  it("webhook config is for the maintainer or an admin; rotation kills the old secret at once", async () => {
+    const { repo, maintainer } = await setupProject(t, "hooked", [{ id: "0001-a" }]);
+    const get = (token?: string) => t.call<Schemas["ProjectWebhook"]>("getProjectWebhook", { token, path: { slug: "hooked" } });
+    const cfg = await get(maintainer);
+    expect(cfg.status).toBe(200);
+    expect(cfg.body).toMatchObject({ url: "http://af.test/v1/webhooks/ci", provider: "generic", content_type: "application/json", events: [], ci_poll: false });
+    expect(cfg.body.secret).toMatch(/^[0-9a-f]{64}$/);
+    expect((await get(await t.login("root"))).body.secret).toBe(cfg.body.secret); // admin
+    const stranger = await t.donor("hook-stranger");
+    expect((await get()).status).toBe(401);
+    expect((await get(stranger.session)).status).toBe(403);
+    expect((await get(stranger.key)).status).toBe(401);
+    expect((await get(await t.apiKey(maintainer))).status).toBe(401); // session only
+    expect((await t.call("getProjectWebhook", { token: maintainer, path: { slug: "no-such" } })).status).toBe(404);
+    expect((await t.call("rotateProjectWebhook", { token: stranger.session, path: { slug: "hooked" } })).status).toBe(403);
+    expect((await t.call("rotateProjectWebhook", { path: { slug: "hooked" } })).status).toBe(401);
+    expect((await t.call("rotateProjectWebhook", { token: maintainer, path: { slug: "no-such" } })).status).toBe(404);
+
+    // GitHub projects list the events to subscribe to and whether polling makes the hook optional.
+    const ghp = await githubProject("hooked-gh", "acme/hooked-gh");
+    expect((await t.call<Schemas["ProjectWebhook"]>("getProjectWebhook", { token: ghp.maintainer, path: { slug: "hooked-gh" } })).body).toMatchObject({ provider: "github", events: ["workflow_run", "check_suite", "pull_request", "push"], ci_poll: true });
+
+    const body = JSON.stringify({ provider: "generic", repo_url: repo.url, branch: "b", head_sha: "a".repeat(40), conclusion: "success" });
+    const send = (secret: string) => t.call("ciWebhook", { raw: body, headers: { "x-agentfund-signature": signBody(secret, body) } });
+    expect((await send(cfg.body.secret)).status).toBe(202);
+    const rotated = await t.call<Schemas["ProjectWebhook"]>("rotateProjectWebhook", { token: maintainer, path: { slug: "hooked" } });
+    expect(rotated.status).toBe(200);
+    expect(rotated.body.secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(rotated.body.secret).not.toBe(cfg.body.secret);
+    expect((await send(cfg.body.secret)).status).toBe(401);
+    expect((await send(rotated.body.secret)).status).toBe(202);
+    expect((await get(maintainer)).body.secret).toBe(rotated.body.secret);
+
+    // The secret is in no public response and not in the audit log.
+    const dump = JSON.stringify([
+      (await t.call("getProject", { path: { slug: "hooked" } })).body,
+      (await t.call("listProjects", { query: { limit: 100 } })).body,
+      (await t.call("listProjectEvents", { path: { slug: "hooked" }, query: { limit: 100 } })).body,
+      (await t.call("adminListProjects", { token: await t.login("root"), query: { limit: 100 } })).body,
+      (await t.call("getMeta")).body,
+    ]);
+    expect(dump).not.toContain(rotated.body.secret);
+    expect(dump).not.toContain(cfg.body.secret);
+    expect(dump).toContain("project.webhook_rotated");
+  });
+
+  it("the operator secret works only when WEBHOOK_SECRET is configured, for any project, and is never shown", async () => {
+    const op = await createTestApp({ env: { WEBHOOK_SECRET } });
+    try {
+      const { repo, maintainer } = await setupProject(op, "orgwide", [{ id: "0001-a" }]);
+      const d = await op.donor("org-d");
+      const c = await claim(op, d.key, "orgwide:0001-a");
+      const report = await reportCompleted(op, d.key, c);
+      const body = JSON.stringify({ provider: "generic", repo_url: repo.url, branch: report.branch, head_sha: report.head_sha, conclusion: "success" });
+      const res = await op.call<{ matched: boolean }>("ciWebhook", { raw: body, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, body) } });
+      expect(res.status).toBe(202);
+      expect(res.body.matched).toBe(true);
+      const cfg = (await op.call<Schemas["ProjectWebhook"]>("getProjectWebhook", { token: maintainer, path: { slug: "orgwide" } })).body;
+      expect(cfg.secret).not.toBe(WEBHOOK_SECRET);
+      expect(JSON.stringify([cfg, (await op.call("getMeta")).body, (await op.call("adminGetInstance", { token: maintainer })).body])).not.toContain(WEBHOOK_SECRET);
+      // With it, a delivery that names no known project is authenticated but matches nothing; bad JSON is a 422.
+      const stray = JSON.stringify({ provider: "generic", repo_url: "https://git.example/x/y", branch: "b", head_sha: "a".repeat(40), conclusion: "success" });
+      expect((await op.call("ciWebhook", { raw: stray, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, stray) } })).body).toEqual({ matched: false });
+      expect((await op.call("ciWebhook", { raw: "{nope", headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, "{nope") } })).status).toBe(422);
+      const ping = JSON.stringify({ zen: "x", hook_id: 1 });
+      expect((await op.call("ciWebhook", { raw: ping, headers: { "x-github-event": "ping", "x-hub-signature-256": signBody(WEBHOOK_SECRET, ping) } })).status).toBe(202);
+    } finally {
+      await op.close();
+    }
+    // The very same signature on an instance without WEBHOOK_SECRET: refused (first test above).
   });
 
   it("a generic result cannot confirm a GitHub project, and vice versa", async () => {
     const { repo } = await githubProject("crossed", "acme/crossed");
     const { report } = await reported("crossed", "acme/crossed", "0001-a", "cross-d", 1);
-    expect((await genericCi(t, repo.url, report, { conclusion: "success" })).body.matched).toBe(false);
-    expect((await genericCi(t, "https://github.com/acme/crossed", report, { conclusion: "success" })).body.matched).toBe(false);
+    const secret = await projectSecret(t, "https://github.com/acme/crossed");
+    // Correctly signed with the project's own secret, but through the wrong adapter: accepted, matches nothing.
+    const body = JSON.stringify({ provider: "generic", repo_url: "https://github.com/acme/crossed", branch: report.branch, head_sha: report.head_sha, conclusion: "success" });
+    expect((await t.call<{ matched: boolean }>("ciWebhook", { raw: body, headers: { "x-agentfund-signature": signBody(secret, body) } })).body).toEqual({ matched: false });
+    expect((await genericCi(t, repo.url, report, { conclusion: "success" })).status).toBe(401); // the file URL is not how this project is known
     expect((await getTask(t, "crossed", "0001-a")).state).toBe("claimed");
   });
 });
@@ -126,7 +243,7 @@ describe("GitHub adapter", () => {
     expect((await gh("workflow_run", { ...workflowRun("acme/widgets", report), action: "requested" })).body.matched).toBe(false);
     expect((await gh("workflow_run", workflowRun("acme/widgets", report, { head_branch: "main" }))).body.matched).toBe(false);
     expect((await gh("workflow_run", workflowRun("acme/widgets", report, { head_sha: "f".repeat(40) }))).body.matched).toBe(false);
-    expect((await gh("workflow_run", workflowRun("someone/else", report))).body.matched).toBe(false);
+    expect((await gh("workflow_run", workflowRun("someone/else", report), { secret: await projectSecret(t, "https://github.com/acme/widgets") })).status).toBe(401);
     expect((await getTask(t, "widgets", "0001-a")).state).toBe("claimed");
 
     // repository.full_name is matched case-insensitively (fixture says "Acme/Widgets").
@@ -203,13 +320,13 @@ describe("GitHub adapter", () => {
     const push = (ref: string, full_name = "acme/pushy") => gh("push", { ...f, ref, after: head, repository: { ...(f.repository as Json), full_name } });
     expect((await push("refs/heads/feature")).body).toEqual({ matched: false });
     expect((await push("refs/tags/v1")).body).toEqual({ matched: false });
-    expect((await push("refs/heads/main", "nobody/nothing")).body).toEqual({ matched: false });
+    expect((await push("refs/heads/main", "nobody/nothing")).status).toBe(401);
     expect((await getProject(t, "pushy")).pinned_commit).toBe(project.pinned_commit);
     expect((await push("refs/heads/main")).body).toEqual({ matched: true });
     await expect.poll(async () => (await getProject(t, "pushy")).pinned_commit, { timeout: 15_000 }).toBe(head);
 
     expect((await gh("issues", { action: "opened", repository: { full_name: "acme/pushy" } })).body).toEqual({ matched: false });
-    for (const [event, payload] of [["workflow_run", { action: "completed", repository: { full_name: "acme/pushy" } }], ["workflow_run", { action: "completed", workflow_run: { id: 1, head_sha: "nope", conclusion: "success" }, repository: { full_name: "acme/pushy" } }], ["pull_request", { action: "closed", pull_request: { merged: true }, repository: { full_name: "acme/pushy" } }], ["push", { ref: "refs/heads/main" }]] as [string, Json][]) {
+    for (const [event, payload] of [["workflow_run", { action: "completed", repository: { full_name: "acme/pushy" } }], ["workflow_run", { action: "completed", workflow_run: { id: 1, head_sha: "nope", conclusion: "success" }, repository: { full_name: "acme/pushy" } }], ["pull_request", { action: "closed", pull_request: { merged: true }, repository: { full_name: "acme/pushy" } }]] as [string, Json][]) {
       const res = await gh(event, payload);
       expect(res.status, event).toBe(422);
       expect(res.code).toBe("validation");

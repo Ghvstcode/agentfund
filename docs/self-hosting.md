@@ -21,7 +21,7 @@ Open <http://localhost:8787>. With no `.env` at all you get:
 - Postgres 17 in a volume, the app on host port **8787**;
 - **dev login** (anyone can log in as any handle; the first one becomes admin) and a loud
   warning in the log, because GitHub OAuth is not configured;
-- a webhook secret generated on first boot and stored in the database.
+- a webhook secret per project, generated when the project is created.
 
 That is a complete local instance. To make it a real one, copy `.env.example` to `.env`, set at
 least `BASE_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `ADMIN_HANDLES`, and run
@@ -43,7 +43,7 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `AUTH_DEV_LOGIN` | `true` iff OAuth is unset | Password-less dev login (capability `dev_login`) |
 | `ADMIN_HANDLES` | – (first user is admin) | Comma-separated admin handles |
 | `WEB_ORIGINS` | – | Extra origins for token-bearing browser calls and OAuth redirects |
-| `WEBHOOK_SECRET` | generated, stored in DB | HMAC secret for `/v1/webhooks/ci` |
+| `WEBHOOK_SECRET` | – (none) | Optional operator-level webhook secret accepted for every project; projects have their own secrets regardless |
 | `CI_POLL` | `false` | Poll GitHub for check runs / PR state (capability `ci_poll`) |
 | `CI_POLL_INTERVAL_SECONDS` | `30` | Poll period |
 | `GITHUB_TOKEN` | – | Raises the poller's GitHub rate limit |
@@ -86,26 +86,42 @@ login turns itself off unless you force `AUTH_DEV_LOGIN=true`.
 Tokens count as *delivered* only when the project's CI passes on the worker's branch, and as
 *merged* when the PR merges. The instance learns both in one of two ways.
 
-**Webhook (preferred).** In each project repository: Settings → Webhooks → Add webhook.
+**Webhook (preferred).** Every project has its own webhook secret, generated when the project
+is created. Its maintainer opens the project's maintenance page in the UI
+(`GET /v1/projects/<slug>/webhook`, maintainer or admin, session only), which shows the payload
+URL, the secret, and the events to subscribe to; "rotate" replaces the secret and the old one
+stops working immediately. Then, in the project repository: Settings → Webhooks → Add webhook.
 
 - Payload URL `<BASE_URL>/v1/webhooks/ci`, content type `application/json`;
-- Secret: the instance webhook secret (`WEBHOOK_SECRET`, or
-  `docker compose exec postgres psql -U agentfund -c 'select webhook_secret from instances'`);
+- Secret: the project's secret from the UI;
 - Events: **Workflow runs**, **Check suites**, **Pull requests**, **Pushes**.
 
 `workflow_run`/`check_suite` `completed` → CI result for the head SHA; `pull_request` `closed` →
-merged or closed; `push` to the base branch → re-index. The signature is verified over the raw
-body before anything is parsed.
+merged or closed; `push` to the base branch → re-index.
+
+How a delivery is authenticated: the server reads which repository the (still untrusted)
+payload names, looks up that project, and verifies the HMAC over the raw body with **that
+project's** secret, in constant time. A maintainer therefore cannot sign CI results for anyone
+else's project. Unknown repository, wrong secret and missing signature all get the same
+`401 bad-signature`.
+
+*Operator option.* If you run one organisation-level webhook for many repositories, set
+`WEBHOOK_SECRET` (16+ characters) and use it as that hook's secret: it is accepted for every
+project on the instance, in addition to the per-project secrets. It exists only when you set
+it, is never shown to maintainers and is not returned by any endpoint. Treat it like an admin
+credential.
 
 **Polling.** `CI_POLL=true` makes the instance ask the GitHub REST API itself, for reports that
-are still waiting. Use it when GitHub cannot reach the instance (localhost, VPN). Set
-`GITHUB_TOKEN` to avoid the anonymous rate limit.
+are still waiting. Use it when GitHub cannot reach the instance (localhost, VPN). It needs no
+webhook and no secret at all — the evidence comes straight from GitHub. Set `GITHUB_TOKEN` to
+avoid the anonymous rate limit.
 
-**Other CI systems** (`ci_provider: generic` in `agentfund.yaml`) post a `GenericCiResult`:
+**Other CI systems** (`ci_provider: generic` in `agentfund.yaml`) post a `GenericCiResult`
+signed with the project's secret (`repo_url` is what selects the project):
 
 ```sh
 body='{"provider":"generic","repo_url":"https://git.example/me/proj","branch":"agentfund/0001-x-ab12cd34","head_sha":"<40 hex>","conclusion":"success"}'
-sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
+sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$PROJECT_WEBHOOK_SECRET" | sed 's/^.* //')
 curl -X POST "$BASE_URL/v1/webhooks/ci" -H "X-AgentFund-Signature: sha256=$sig" -H 'content-type: application/json' -d "$body"
 ```
 
@@ -131,8 +147,9 @@ replica its own `DATA_DIR` (clones are a cache) and note that rate limits are pe
 - **Postgres is the only state that matters.** Back it up (`pg_dump`). The `events` table is
   append-only and enforced by a trigger: `UPDATE`, `DELETE` and `TRUNCATE` are rejected.
 - `DATA_DIR/repos` is a cache of bare clones; delete it and the indexer re-clones.
-- The instance's Ed25519 identity and generated webhook secret live in the `instances` row —
-  restoring a dump restores them.
+- The instance's Ed25519 identity (`instances`) and the per-project webhook secrets
+  (`projects.webhook_secret`, stored as-is because they are shared HMAC secrets) live in the
+  database — a dump contains them, so protect dumps accordingly.
 - Upgrades: pull, `docker compose up -d --build`. SQL migrations run automatically at boot,
   under an advisory lock.
 

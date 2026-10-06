@@ -13,7 +13,6 @@ export const instances = pgTable("instances", {
   baseUrl: text("base_url").notNull(),
   pubkey: text("pubkey").notNull(),
   secretKey: text("secret_key").notNull(),
-  webhookSecret: text("webhook_secret").notNull(),
   projectCreation: text("project_creation").notNull().default("open"),
   leaseSeconds: integer("lease_seconds").notNull().default(7200),
   newProjectMaxTokensPerTask: tokens("new_project_max_tokens_per_task").notNull().default(5_000_000),
@@ -103,6 +102,8 @@ export const projects = pgTable(
     lastIndexedAt: ts("last_indexed_at"),
     indexError: text("index_error"),
     indexErrorKey: text("index_error_key"),
+    /** Per-project HMAC secret for /v1/webhooks/ci. Shared secret, so stored as-is; never in public responses. */
+    webhookSecret: text("webhook_secret").notNull(),
   },
   (t) => [
     uniqueIndex("projects_slug_key").on(t.slug),

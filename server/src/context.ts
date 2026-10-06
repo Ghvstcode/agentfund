@@ -18,6 +18,4 @@ export interface AppContext {
   hub: StreamHub;
   /** Outbound HTTP (GitHub OAuth + REST). Injectable so tests run on fixtures. */
   fetch: typeof fetch;
-  /** Effective webhook secret: WEBHOOK_SECRET, else the one generated on first boot. */
-  webhookSecret: string;
 }

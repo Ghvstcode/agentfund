@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sql } from "drizzle-orm";
 import postgres from "postgres";
 import { expect, inject } from "vitest";
 import { createContext, type Runtime } from "../../src/bootstrap.js";
@@ -12,7 +13,14 @@ import { randomId } from "../../src/lib/ids.js";
 import type { OperationId, Schemas } from "../../src/lib/openapi.js";
 import { silentLogger } from "../../src/log.js";
 
+/** An operator-level secret; only instances started with `env: { WEBHOOK_SECRET }` accept it. */
 export const WEBHOOK_SECRET = "test-webhook-secret-0123456789abcdef";
+
+/** The per-project webhook secret for a repo key, read straight from the database. */
+export async function projectSecret(t: { ctx: AppContext }, repoKey: string): Promise<string> {
+  const found = (await t.ctx.db.execute(sql`SELECT webhook_secret FROM projects WHERE repo_key = ${repoKey} AND status <> 'removed'`)) as unknown as { webhook_secret: string }[];
+  return found[0]?.webhook_secret ?? "no-such-project-secret-0000000000";
+}
 
 export interface CallOptions {
   path?: Record<string, string>;
@@ -54,14 +62,18 @@ export interface TestAppOptions {
   env?: Record<string, string>;
   fetch?: typeof fetch;
   start?: string;
+  /** Serve the database named in env.DATABASE_URL instead of creating a fresh one. */
+  reuseDatabase?: boolean;
 }
 
 export async function createTestApp(opts: TestAppOptions = {}): Promise<TestApp> {
   const adminUrl = inject("pgUrl");
   const dbName = `t_${randomId(12)}`;
-  const admin = postgres(adminUrl, { max: 1, onnotice: () => {} });
-  await admin.unsafe(`CREATE DATABASE ${dbName}`);
-  await admin.end();
+  if (!opts.reuseDatabase) {
+    const admin = postgres(adminUrl, { max: 1, onnotice: () => {} });
+    await admin.unsafe(`CREATE DATABASE ${dbName}`);
+    await admin.end();
+  }
   const url = new URL(adminUrl);
   url.pathname = `/${dbName}`;
   const dataDir = mkdtempSync(join(tmpdir(), "af-data-"));
@@ -72,7 +84,6 @@ export async function createTestApp(opts: TestAppOptions = {}): Promise<TestApp>
     ALLOW_FILE_REPOS: "true",
     DATA_DIR: dataDir,
     WEB_DIST: join(dataDir, "no-web-dist"),
-    WEBHOOK_SECRET,
     RATE_LIMIT_PER_MINUTE: "0",
     AUTH_RATE_LIMIT_PER_MINUTE: "0",
     WEB_ORIGINS: "https://ui.example",

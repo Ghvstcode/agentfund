@@ -203,6 +203,37 @@ describe("ledger: pledged → reported → delivered → merged", () => {
     expect((await t.call("releaseClaim", { token: d.key, path: { claim_id: c.claim_id } })).code).toBe("claim-not-active");
   });
 
+  it("pr_url may be file:// only when ALLOW_FILE_REPOS is on", async () => {
+    // On (the test default): the worker's local git host reports file://<repo>#<branch>.
+    const { repo } = await setupProject(t, "localpr", [{ id: "0001-a" }]);
+    const d = await t.donor("local-pr");
+    const c = await claim(t, d.key, "localpr:0001-a");
+    const body = completedBody(c);
+    const prUrl = `${repo.url}#${body.branch}`;
+    expect((await t.call("reportClaim", { token: d.key, path: { claim_id: c.claim_id }, body: { ...body, pr_url: "ftp://x/y" } })).status).toBe(422);
+    expect((await t.call("reportClaim", { token: d.key, path: { claim_id: c.claim_id }, body: { ...body, pr_url: "javascript:alert(1)" } })).status).toBe(422);
+    const ok = await t.call<Schemas["Report"]>("reportClaim", { token: d.key, path: { claim_id: c.claim_id }, body: { ...body, pr_url: prUrl } });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ pr_url: prUrl, delivery: "pending_ci" });
+    await genericCi(t, repo.url, ok.body, { conclusion: "success", merged: true });
+    expect((await getTask(t, "localpr", "0001-a")).state).toBe("merged");
+
+    // Off: only http(s) PR URLs are accepted. (The project is registered while file repos are
+    // still allowed, then the same database is served by an instance with the flag off.)
+    const strict = await createTestApp({ env: { DATABASE_URL: t.config.databaseUrl, ALLOW_FILE_REPOS: "false" }, reuseDatabase: true });
+    try {
+      await setupProject(t, "strictpr", [{ id: "0001-a" }]);
+      const c2 = await claim(strict, d.key, "strictpr:0001-a");
+      const b2 = completedBody(c2);
+      const refused = await strict.call<Schemas["Problem"]>("reportClaim", { token: d.key, path: { claim_id: c2.claim_id }, body: { ...b2, pr_url: `file:///tmp/repo#${b2.branch}` } });
+      expect(refused.status).toBe(422);
+      expect(refused.body.errors).toEqual([{ path: "/pr_url", message: "must be an http(s) URL" }]);
+      expect((await strict.call("reportClaim", { token: d.key, path: { claim_id: c2.claim_id }, body: b2 })).status).toBe(201);
+    } finally {
+      await strict.close();
+    }
+  });
+
   it("release returns the task and records burned tokens as reported only", async () => {
     await setupProject(t, "release", [{ id: "0001-a" }]);
     const d = await t.donor("gina");

@@ -5,7 +5,7 @@ import type { AppContext } from "../context.js";
 import { one, rows, type Tx } from "../db/client.js";
 import { manifests, projects, users } from "../db/schema.js";
 import { parseRepoUrl, RepoUrlError, type RepoRef } from "../lib/git.js";
-import { slugify } from "../lib/ids.js";
+import { newSecret, slugify } from "../lib/ids.js";
 import { fingerprint } from "../lib/minisign.js";
 import type { BodyOf, Schemas } from "../lib/openapi.js";
 import { Problem, validation } from "../lib/problem.js";
@@ -146,6 +146,7 @@ export async function createProject(ctx: AppContext, who: Principal, body: BodyO
           tokenGoal: body.token_goal ?? d.token_goal ?? v.tokenTotal,
           createdAt: now,
           lastIndexedAt: now,
+          webhookSecret: newSecret(),
         })
         .returning();
       if (!row) throw new Problem("internal", "project insert failed");
@@ -195,16 +196,12 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
   let target: string | undefined = opts.commit;
   let verified: VerifiedLock;
   try {
-    try {
-      await ctx.git.fetch(repo);
-    } catch (err) {
-      throw new Error(`could not fetch the repository: ${(err as Error).message}`);
-    }
+    await ctx.git.fetch(repo);
     if (target) {
-      if (!(await ctx.git.hasCommit(repo, target))) throw new Error(`commit ${target} does not exist in the repository's branches`);
+      if (!(await ctx.git.hasCommit(repo, target))) throw new Error(`commit ${target} not found in the repository`);
     } else {
       const head = await ctx.git.resolveBranch(repo, project.baseBranch);
-      if (!head) throw new Error(`base branch "${project.baseBranch}" does not exist`);
+      if (!head) throw new Error(`branch "${project.baseBranch}" not found`);
       target = head;
     }
     if (target === project.pinnedCommit && !project.indexError) {

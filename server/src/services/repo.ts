@@ -49,7 +49,7 @@ function describe(err: unknown): string {
 /** Reads and validates `agentfund.yaml` at a commit. */
 export async function readDescriptor(git: Git, repo: RepoRef, commit: string): Promise<AgentfundDoc> {
   const raw = await git.readBlob(repo, commit, "agentfund.yaml");
-  if (!raw) throw new VerificationError("agentfund.yaml is missing at the repository root", "descriptor");
+  if (!raw) throw new VerificationError("no agentfund.yaml at the repo root", "descriptor");
   try {
     const doc = validateAgentfund(parseStrictYaml(raw.toString("utf8")));
     parsePublicKey(doc.pubkey);
@@ -177,7 +177,7 @@ export async function inspectRepo(git: Git, repo: RepoRef): Promise<Inspection> 
     head = await git.defaultBranch(repo);
     await git.fetch(repo);
   } catch (err) {
-    out.errors.push(`could not fetch the repository: ${describe(err)}`);
+    out.errors.push(describe(err));
     return out;
   }
   const candidates = [...new Set([head, "main", "master"].filter((b): b is string => Boolean(b)))];
@@ -192,7 +192,7 @@ export async function inspectRepo(git: Git, repo: RepoRef): Promise<Inspection> 
     }
   }
   if (!branch || !commit) {
-    out.errors.push("the repository has no branch to index");
+    out.errors.push("the repository has no branches");
     return out;
   }
   try {
@@ -200,7 +200,7 @@ export async function inspectRepo(git: Git, repo: RepoRef): Promise<Inspection> 
     const declared = descriptor.base_branch ?? "main";
     if (declared !== branch) {
       const sha = await git.resolveBranch(repo, declared);
-      if (!sha) throw new VerificationError(`agentfund.yaml names base_branch "${declared}", which does not exist`, "descriptor");
+      if (!sha) throw new VerificationError(`branch "${declared}" not found (named as base_branch in agentfund.yaml)`, "descriptor");
       branch = declared;
       commit = sha;
       descriptor = await readDescriptor(git, repo, commit);

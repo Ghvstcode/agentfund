@@ -20,6 +20,11 @@ export interface CiAdapter {
   readonly name: "github" | "generic";
   readonly signatureHeader: string;
   accepts(headers: Headers): boolean;
+  /**
+   * Which repository an UNVERIFIED payload claims to be about — used only to pick the secret
+   * its signature must verify under. Never throws; null when the payload names none.
+   */
+  claimedRepo(payload: unknown): string | null;
   parse(headers: Headers, payload: unknown): Delivery;
 }
 

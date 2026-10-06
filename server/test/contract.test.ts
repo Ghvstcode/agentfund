@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signBody } from "../src/ci/adapter.js";
 import type { OperationId, Schemas } from "../src/lib/openapi.js";
-import { createTestApp, WEBHOOK_SECRET, type TestApp } from "./helpers/app.js";
+import { createTestApp, projectSecret, type TestApp } from "./helpers/app.js";
 import { TestRepo } from "./helpers/repo.js";
 import { completedBody, DIGEST } from "./helpers/scenario.js";
 
@@ -28,7 +28,7 @@ afterAll(async () => {
 describe("router ↔ OpenAPI parity", () => {
   it("every operation in the document has a handler", () => {
     const documented = [...t.ctx.spec.operations.keys()].sort();
-    expect(documented.length).toBe(37);
+    expect(documented.length).toBe(39);
     expect([...t.app.operations].sort()).toEqual(documented);
   });
 
@@ -150,14 +150,25 @@ describe("every operation, validated against the document", () => {
     await t.call("reportClaim", { token: key.key, path: { claim_id: c3b.claim_id }, body: { status: "failed", tokens_in: 3, tokens_out: 4, cost_estimate: 0.01, log_digest: DIGEST, message: "tests failed" } });
 
     // webhooks
+    const hookCfg = await t.call<Schemas["ProjectWebhook"]>("getProjectWebhook", { token: admin, path: { slug } });
+    expect(hookCfg.status).toBe(200);
+    await t.call("getProjectWebhook", { path: { slug } });
+    await t.call("getProjectWebhook", { token: outsider, path: { slug } });
+    await t.call("getProjectWebhook", { token: admin, path: { slug: "missing" } });
+    const rotated = await t.call<Schemas["ProjectWebhook"]>("rotateProjectWebhook", { token: admin, path: { slug } });
+    expect(rotated.status).toBe(200);
+    await t.call("rotateProjectWebhook", { path: { slug } });
+    await t.call("rotateProjectWebhook", { token: outsider, path: { slug } });
+    await t.call("rotateProjectWebhook", { token: admin, path: { slug: "missing" } });
+    expect(await projectSecret(t, repo.url)).toBe(rotated.body.secret);
     const ci = JSON.stringify({ provider: "generic", repo_url: repo.url, branch: report.branch, head_sha: report.head_sha, conclusion: "success", run_url: "https://ci.example/1", merged: true });
-    const hook = await t.call<{ matched: boolean }>("ciWebhook", { raw: ci, headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, ci) } });
+    expect((await t.call("ciWebhook", { raw: ci, headers: { "x-agentfund-signature": signBody(hookCfg.body.secret, ci) } })).status).toBe(401);
+    const hook = await t.call<{ matched: boolean }>("ciWebhook", { raw: ci, headers: { "x-agentfund-signature": signBody(rotated.body.secret, ci) } });
     expect(hook.status).toBe(202);
     expect(hook.body.matched).toBe(true);
     expect((await t.call("ciWebhook", { raw: ci })).status).toBe(401);
-    expect((await t.call("ciWebhook", { raw: "{}", headers: { "x-agentfund-signature": signBody(WEBHOOK_SECRET, "{}") } })).status).toBe(422);
-    const ping = JSON.stringify({ zen: "x", hook_id: 1 });
-    expect((await t.call("ciWebhook", { raw: ping, headers: { "x-github-event": "ping", "x-hub-signature-256": signBody(WEBHOOK_SECRET, ping) } })).status).toBe(202);
+    const invalid = JSON.stringify({ provider: "generic", repo_url: repo.url });
+    expect((await t.call("ciWebhook", { raw: invalid, headers: { "x-agentfund-signature": signBody(rotated.body.secret, invalid) } })).status).toBe(422);
 
     // public reads, now with every kind of row present
     const projects = (await t.call<{ items: Schemas["Project"][] }>("listProjects", { query: { q: "contract", sort: "delivered", status: "active", needs_donors: true, limit: 10 } })).body.items;

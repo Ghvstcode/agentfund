@@ -3,6 +3,7 @@ import type { AppContext } from "../context.js";
 import { iso, isoOrNull, num, one, rows, tsParam, type Queryable } from "../db/client.js";
 import { projects, users } from "../db/schema.js";
 import { offsetOf, pageByOffset } from "../lib/cursor.js";
+import { newSecret } from "../lib/ids.js";
 import { fingerprint } from "../lib/minisign.js";
 import type { BodyOf, QueryOf, Schemas } from "../lib/openapi.js";
 import { Problem } from "../lib/problem.js";
@@ -248,6 +249,29 @@ export async function moderateProject(ctx: AppContext, who: Principal, slug: str
     });
   }
   return projectById(ctx, project.id);
+}
+
+export function webhookConfig(ctx: AppContext, project: ProjectRow): Schemas["ProjectWebhook"] {
+  const provider = project.ciProvider === "github" ? "github" : "generic";
+  return {
+    url: `${ctx.config.baseUrl}/v1/webhooks/ci`,
+    secret: project.webhookSecret,
+    provider,
+    content_type: "application/json",
+    events: provider === "github" ? ["workflow_run", "check_suite", "pull_request", "push"] : [],
+    ci_poll: ctx.config.ciPoll && provider === "github",
+  };
+}
+
+/** Replaces the project's webhook secret; the old one stops verifying with this commit. */
+export async function rotateWebhookSecret(ctx: AppContext, who: Principal, project: ProjectRow): Promise<Schemas["ProjectWebhook"]> {
+  const secret = newSecret();
+  await ctx.db.transaction(async (tx) => {
+    await tx.update(projects).set({ webhookSecret: secret }).where(eq(projects.id, project.id));
+    // The audit log records that it happened, never the secret.
+    await appendEvent(ctx, tx, { actor: who.user.handle, action: "project.webhook_rotated", projectId: project.id, project: project.slug, payload: {} });
+  });
+  return webhookConfig(ctx, { ...project, webhookSecret: secret });
 }
 
 export async function listAllProjects(ctx: AppContext, opts: { limit: number; cursor?: string }): Promise<{ items: Project[]; next_cursor: string | null }> {

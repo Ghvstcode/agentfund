@@ -23,7 +23,7 @@ const runtime = await createContext(config, { log }).catch((err: unknown) => {
   process.exit(1);
 });
 const { ctx } = runtime;
-if (!config.webhookSecret) log.info("WEBHOOK_SECRET is not set; using the secret generated on first boot (stored in the instances table). Read it with: SELECT webhook_secret FROM instances;");
+if (config.webhookSecret) log.info("WEBHOOK_SECRET is set: the instance-wide webhook secret is accepted for every project, next to each project's own secret.");
 
 const app = createApp(ctx);
 const server = serve({ fetch: app.hono.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {

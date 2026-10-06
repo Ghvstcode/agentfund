@@ -1,6 +1,6 @@
 # `docker compose up` works with no .env at all: Postgres + the app on http://localhost:8787,
-# dev login on (with a loud warning) until GitHub OAuth is configured, webhook secret generated
-# on first boot. Copy .env.example to .env to configure a real instance.
+# dev login on (with a loud warning) until GitHub OAuth is configured, a webhook secret per
+# project. Copy .env.example to .env to configure a real instance.
 name: agentfund
 
 services:

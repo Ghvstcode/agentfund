@@ -165,10 +165,10 @@ export async function evaluateReport(ctx: AppContext, tx: Tx, reportId: number):
 }
 
 /** Projects that CI evidence for `repoKey` may apply to. */
-export async function projectsForRepo(ctx: AppContext, repoKey: string): Promise<{ id: number; slug: string; ciProvider: string; baseBranch: string }[]> {
-  const list = await rows<{ id: string; slug: string; ci_provider: string; base_branch: string }>(
+export async function projectsForRepo(ctx: AppContext, repoKey: string): Promise<{ id: number; slug: string; ciProvider: string; baseBranch: string; webhookSecret: string }[]> {
+  const list = await rows<{ id: string; slug: string; ci_provider: string; base_branch: string; webhook_secret: string }>(
     ctx.db,
-    sql`SELECT id, slug, ci_provider, base_branch FROM projects WHERE repo_key = ${repoKey} AND status <> 'removed'`,
+    sql`SELECT id, slug, ci_provider, base_branch, webhook_secret FROM projects WHERE repo_key = ${repoKey} AND status <> 'removed'`,
   );
-  return list.map((p) => ({ id: Number(p.id), slug: p.slug, ciProvider: p.ci_provider, baseBranch: p.base_branch }));
+  return list.map((p) => ({ id: Number(p.id), slug: p.slug, ciProvider: p.ci_provider, baseBranch: p.base_branch, webhookSecret: p.webhook_secret }));
 }

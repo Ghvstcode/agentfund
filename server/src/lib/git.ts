@@ -11,9 +11,23 @@ import { isIP } from "node:net";
 import { join } from "node:path";
 
 export class GitError extends Error {
+  /** `message` is safe to show to users; the raw git output stays in `stderr` for the server log. */
   constructor(message: string, readonly stderr = "") {
     super(message);
   }
+}
+
+/** Maps git's stderr to a short message that says what the user can do about it. */
+export function friendlyGitMessage(stderr: string, timedOut: boolean): string {
+  const s = stderr.toLowerCase();
+  if (timedOut || /timed out|timeout|transfer closed|low speed/.test(s)) return "timed out";
+  if (/could not resolve host|failed to connect|connection refused|network is unreachable|could not connect|ssl|certificate|unable to look up/.test(s)) return "could not reach host";
+  if (/repository .* not found|not found|does not exist|does not appear to be a git repository|no such file|authentication failed|could not read username|terminal prompts disabled|returned error: 40[134]|access denied|permission denied/.test(s)) {
+    return "repository not found or not public";
+  }
+  if (/redirect/.test(s)) return "repository not found or not public";
+  if (/protocol|transport/.test(s)) return "this kind of repository URL is not allowed";
+  return "could not read the repository";
 }
 export class RepoUrlError extends Error {}
 
@@ -73,6 +87,8 @@ export interface TreeEntry {
 }
 
 export interface GitOptions {
+  /** Receives the raw failure (command + stderr) for the server log. */
+  onError?: (info: { command: string; stderr: string; timedOut: boolean }) => void;
   dataDir: string;
   allowFile: boolean;
   timeoutMs?: number;
@@ -93,7 +109,7 @@ export class Git {
     return join(this.opts.dataDir, "repos", `${createHash("sha256").update(repo.key).digest("hex").slice(0, 32)}.git`);
   }
 
-  private run(args: string[], cwd?: string, maxBuffer = 16 * 1024 * 1024): Promise<Buffer> {
+  private run(args: string[], cwd?: string, maxBuffer = 16 * 1024 * 1024, opts: { report?: boolean } = {}): Promise<Buffer> {
     const hardened = [
       "-c", "core.hooksPath=/dev/null",
       "-c", "core.fsmonitor=false",
@@ -135,8 +151,10 @@ export class Git {
         },
         (err, stdout, stderr) => {
           if (err) {
-            const text = stderr.toString("utf8").trim().split("\n").slice(-3).join(" ").slice(0, 400);
-            reject(new GitError(`git ${args[0]} failed${(err as { killed?: boolean }).killed ? " (timeout)" : ""}${text ? `: ${text}` : ""}`, text));
+            const text = stderr.toString("utf8").trim().slice(-2000);
+            const timedOut = Boolean((err as { killed?: boolean }).killed);
+            if (opts.report !== false) this.opts.onError?.({ command: `git ${args[0]}`, stderr: text, timedOut });
+            reject(new GitError(friendlyGitMessage(text, timedOut), text));
           } else resolve(stdout);
         },
       );
@@ -178,7 +196,7 @@ export class Git {
   async resolveBranch(repo: RepoRef, branch: string): Promise<string | null> {
     if (!BRANCH.test(branch) || branch.includes("..")) return null;
     try {
-      const sha = (await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", `refs/heads/${branch}^{commit}`], this.repoDir(repo))).toString("utf8").trim();
+      const sha = (await this.run(["rev-parse", "--verify", "--quiet", "--end-of-options", `refs/heads/${branch}^{commit}`], this.repoDir(repo), undefined, { report: false })).toString("utf8").trim();
       return COMMIT.test(sha) ? sha : null;
     } catch {
       return null;
@@ -188,7 +206,7 @@ export class Git {
   async hasCommit(repo: RepoRef, commit: string): Promise<boolean> {
     if (!COMMIT.test(commit)) return false;
     try {
-      await this.run(["cat-file", "-e", `${commit}^{commit}`], this.repoDir(repo));
+      await this.run(["cat-file", "-e", `${commit}^{commit}`], this.repoDir(repo), undefined, { report: false });
       return true;
     } catch {
       return false;
@@ -217,7 +235,7 @@ export class Git {
     const spec = `${commit}:${path}`;
     let type: string;
     try {
-      type = (await this.run(["cat-file", "-t", spec], dir)).toString("utf8").trim();
+      type = (await this.run(["cat-file", "-t", spec], dir, undefined, { report: false })).toString("utf8").trim();
     } catch {
       return null;
     }
