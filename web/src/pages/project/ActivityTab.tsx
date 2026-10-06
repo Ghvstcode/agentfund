@@ -13,6 +13,8 @@ import { useProjectContext } from './ProjectPage';
 
 const STAGES: Record<PullRequestStage, string> = {
   awaiting_ci: 'Awaiting CI',
+  ci_failed: 'CI failed · task reopened',
+  closed: 'Closed without merging',
   delivered: 'Delivered · CI passed',
   merged: 'Merged',
 };

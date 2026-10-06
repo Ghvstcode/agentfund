@@ -62,10 +62,15 @@ function Review({ preview }: { preview: ProjectPreview }) {
       )}
 
       <dl className="definitions definitions--wide">
-        <dt>Signature</dt>
-        <dd>
-          <strong>{preview.signature_valid ? 'Valid' : 'Does not verify'}</strong>
-        </dd>
+        {/* Absent when the repository could not be read at all: there was nothing to verify. */}
+        {preview.signature_valid !== undefined && (
+          <>
+            <dt>Signature</dt>
+            <dd>
+              <strong>{preview.signature_valid ? 'Valid' : 'Does not verify'}</strong>
+            </dd>
+          </>
+        )}
         {preview.pubkey_fingerprint && (
           <>
             <dt>Key fingerprint</dt>

@@ -45,6 +45,7 @@ export const queryKeys = {
   projects: (filters: ProjectFilters) => ['projects', filters] as const,
   project: (slug: string) => ['project', slug] as const,
   tasks: (slug: string) => ['project', slug, 'tasks'] as const,
+  task: (slug: string, manifestId: string) => ['project', slug, 'task', manifestId] as const,
   ledger: (slug: string) => ['project', slug, 'ledger'] as const,
   projectEvents: (slug: string) => ['project', slug, 'events'] as const,
   events: ['events'] as const,
@@ -119,6 +120,15 @@ export function useTasks(slug: string) {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
   return query;
+}
+
+/** One task by its `<slug>:<manifest id>` reference; polls while a claim is running on it. */
+export function useTask(slug: string, manifestId: string) {
+  return useQuery({
+    queryKey: queryKeys.task(slug, manifestId),
+    queryFn: () => unwrap(api.GET('/v1/tasks/{task_id}', { params: { path: { task_id: `${slug}:${manifestId}` } } })),
+    refetchInterval: (current) => (current.state.data?.active_claim ? 4000 : false),
+  });
 }
 
 export function useLedger(slug: string) {

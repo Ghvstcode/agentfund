@@ -45,5 +45,6 @@ export const META = {
   base_url: 'https://fund.example',
   protocol_versions: ['v1'],
   spec_versions: [1],
+  links: { install_command: 'curl -fsSL https://get.fund.example/install.sh | sh', source_url: 'https://src.fund.example' },
   capabilities: { github_oauth: true, dev_login: true, sse: true, ci_providers: ['github'], ci_poll: false, federation: false },
 };

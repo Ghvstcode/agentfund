@@ -18,7 +18,7 @@ import { Time } from '../components/Time';
 import { CLI_NAME } from '../config';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSession } from '../hooks/useSession';
-import { loginCommand } from '../lib/commands';
+import { loginCommand, loginFromStdinCommand } from '../lib/commands';
 import { manifestId } from '../lib/events';
 import { formatDate, humanize } from '../lib/format';
 
@@ -76,8 +76,10 @@ function NewKey({ secret, onDismiss }: { secret: string; onDismiss: () => void }
       </span>
       {meta.data && (
         <>
-          <p>Then sign your worker in, and paste the key when it asks:</p>
+          <p>Then sign your worker in. It prompts for the key:</p>
           <CommandLine command={loginCommand(meta.data.base_url)} label="sign the worker in" />
+          <p>Or, in a script, pass it on standard input:</p>
+          <CommandLine command={loginFromStdinCommand(meta.data.base_url)} label="sign the worker in from a script" />
         </>
       )}
       <p className="muted">Only a hash of the key is stored. If you lose it, revoke it and create another.</p>

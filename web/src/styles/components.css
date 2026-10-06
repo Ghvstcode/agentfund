@@ -1250,6 +1250,11 @@
   font-weight: var(--weight-medium);
 }
 
+.command-list__note {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
 .command-list__label::before {
   content: counter(command) '. ';
   font-family: var(--font-mono);

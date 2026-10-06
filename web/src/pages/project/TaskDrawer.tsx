@@ -1,9 +1,11 @@
+import { ApiError } from '../../api/client';
+import { useTask } from '../../api/queries';
 import type { Report, Task } from '../../api/types';
 import { Badge } from '../../components/Badge';
 import { Dialog } from '../../components/Dialog';
 import { Hash } from '../../components/Hash';
 import { Num } from '../../components/Num';
-import { EmptyState, Loading, Notice, SkeletonRows } from '../../components/States';
+import { EmptyState, ErrorState, Loading, Notice, SkeletonRows } from '../../components/States';
 import { Time } from '../../components/Time';
 import { TokenCounter } from '../../components/TokenCounter';
 import { UserLink } from '../../components/UserLink';
@@ -227,34 +229,41 @@ function TaskDetails({ task }: { task: Task }) {
 }
 
 interface TaskDrawerProps {
+  slug: string;
   manifestId: string;
-  tasks: Task[];
-  /** False while more tasks may still arrive. */
-  loaded: boolean;
   onClose: () => void;
 }
 
-export function TaskDrawer({ manifestId, tasks, loaded, onClose }: TaskDrawerProps) {
-  const task = tasks.find((candidate) => candidate.task_id === manifestId);
+export function TaskDrawer({ slug, manifestId, onClose }: TaskDrawerProps) {
+  const task = useTask(slug, manifestId);
+  const missing = task.error instanceof ApiError && task.error.status === 404;
   return (
     <Dialog
       variant="drawer"
-      title={task?.title ?? manifestId}
-      subtitle={<span className="mono">{task?.id ?? manifestId}</span>}
+      title={task.data?.title ?? manifestId}
+      subtitle={<span className="mono">{`${slug}:${manifestId}`}</span>}
       onClose={onClose}
     >
-      {task ? (
-        <TaskDetails task={task} />
-      ) : loaded ? (
-        <EmptyState title="No such task">
-          <p>
-            There is no task <span className="mono">{manifestId}</span> in the lock at the pinned commit.
-          </p>
-        </EmptyState>
+      {task.data ? (
+        <TaskDetails task={task.data} />
+      ) : task.isPending ? (
+        <div className="dialog-section">
+          <Loading label="task">
+            <SkeletonRows rows={6} />
+          </Loading>
+        </div>
       ) : (
-        <Loading label="task">
-          <SkeletonRows rows={6} />
-        </Loading>
+        <div className="dialog-section">
+          {missing ? (
+            <EmptyState title="No such task">
+              <p>
+                There is no task <span className="mono">{manifestId}</span> in the lock at the pinned commit.
+              </p>
+            </EmptyState>
+          ) : (
+            <ErrorState title="Couldn't load this task" error={task.error} onRetry={() => void task.refetch()} />
+          )}
+        </div>
       )}
     </Dialog>
   );

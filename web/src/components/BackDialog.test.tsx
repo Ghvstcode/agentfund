@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Project } from '../api/types';
-import { INSTALL_COMMAND } from '../config';
 import { session } from '../lib/session';
 import { META, mockApi } from '../test/mockApi';
 import { renderApp } from '../test/render';
@@ -45,22 +44,42 @@ describe('BackDialog', () => {
     const { dialog } = await openDialog();
     const commands = await waitFor(() => {
       const found = within(dialog).getAllByText(/^(curl|agentfund) /, { selector: 'pre code' });
-      expect(found).toHaveLength(4);
+      expect(found).toHaveLength(5);
       return found.map((node) => node.textContent);
     });
     expect(commands).toEqual([
-      INSTALL_COMMAND,
+      'curl -fsSL https://get.fund.example/install.sh | sh',
       'agentfund login https://fund.example',
       'agentfund approve https://fund.example/gridrs',
-      'agentfund work https://fund.example/gridrs --budget 200m',
+      'agentfund dry-run https://fund.example/gridrs',
+      'agentfund work https://fund.example/gridrs --budget 200m --schedule "02:00-06:00"',
     ]);
   });
 
   it('copies a command to the clipboard', async () => {
     const { user, dialog } = await openDialog();
     await user.click(await within(dialog).findByRole('button', { name: /Copy the command: Start working/ }));
-    expect(await navigator.clipboard.readText()).toBe('agentfund work https://fund.example/gridrs --budget 200m');
+    expect(await navigator.clipboard.readText()).toBe(
+      'agentfund work https://fund.example/gridrs --budget 200m --schedule "02:00-06:00"',
+    );
     expect(within(dialog).getByText('Copied to clipboard')).toBeInTheDocument();
+  });
+
+  it('falls back to the built-in install line when the instance names none', async () => {
+    mockApi({ 'GET /v1/meta': () => ({ ...META, links: undefined }) });
+    const { dialog } = await openDialog();
+    expect(
+      await within(dialog).findByText(
+        'curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('states what the worker needs and that credentials are not stored', async () => {
+    const { dialog } = await openDialog();
+    expect(within(dialog).getByText(/You need Docker running/)).toHaveTextContent(
+      /CLAUDE_CODE_OAUTH_TOKEN from claude setup-token, or ANTHROPIC_API_KEY\. The worker never stores them\./,
+    );
   });
 
   it('explains what the worker will and will not do, and shows the fingerprint to compare', async () => {

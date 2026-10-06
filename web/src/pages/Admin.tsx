@@ -286,7 +286,7 @@ function InstanceForm({ config }: { config: InstanceConfig }) {
         value={draft.description}
         onChange={(event) => set('description', event.target.value)}
         maxLength={500}
-        hint="One sentence, shown on the home page and in link previews."
+        hint="One sentence, used in link previews and search results."
       />
       <SelectField
         label="Project creation"

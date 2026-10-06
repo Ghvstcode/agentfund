@@ -217,9 +217,10 @@ function seedProject(world, [slug, description, language, tags, goal, progress],
     const streak = i === finished - 2 && index < 6;
     const donor = streak ? handles[0] : handles[between(rnd, 0, handles.length)];
     const at = streak ? now - index * DAY - 30 * 60_000 : created + ((now - created) * (i + 1)) / (finished + 2);
-    if (rnd() < 0.3) {
-      seedReport(world, task, handles[between(rnd, 0, handles.length)], at - DAY / 2, 'failed');
-    }
+    // Earlier attempts that did not stick: a failed run, a PR whose CI failed, a PR closed unmerged.
+    const earlier = rnd();
+    const attempt = earlier < 0.3 ? 'failed' : earlier < 0.42 ? 'ci_failed' : earlier < 0.5 ? 'closed' : null;
+    if (attempt) seedReport(world, task, handles[between(rnd, 0, handles.length)], at - DAY / 2, attempt);
     const outcome =
       i < finished - 2 || (streak && index % 2 === 0) ? 'merged' : i < finished - 1 ? 'delivered' : 'pending_ci';
     seedReport(world, task, donor, at, outcome);
@@ -279,6 +280,20 @@ function seedReport(world, task, donor, at, outcome) {
   if (!completed) return;
   task.state = 'claimed';
   if (outcome === 'pending_ci') return;
+  if (outcome === 'ci_failed') {
+    report.ci = { provider: 'github', conclusion: 'failure', run_url: `https://github.com/example/${task.project}/actions/runs/${between(rnd, 1e9, 9e9)}`, received_at: iso(at + 6 * 60_000) };
+    task.state = 'open';
+    event(world, at + 6 * 60_000, 'ci', 'ci.result', task.project, ref, { conclusion: 'failure', head_sha: report.head_sha });
+    event(world, at + 6 * 60_000 + 1, 'ci', 'task.reopened', task.project, ref, { reason: 'ci_failed' });
+    return;
+  }
+  if (outcome === 'closed') {
+    markDelivered(world, report, task, at + 6 * 60_000);
+    report.delivery = 'closed';
+    task.state = 'open';
+    event(world, at + 3_600_000, 'ci', 'task.reopened', task.project, ref, { reason: 'pr_closed' });
+    return;
+  }
   markDelivered(world, report, task, at + 6 * 60_000);
   if (outcome === 'merged') markMerged(world, report, task, Math.min(world.now - 60_000, at + 5 * 3_600_000));
 }
@@ -400,6 +415,7 @@ function projectView(world, project) {
     ...project,
     maintainer: userRef(project.maintainer),
     lock_url: `${project.repo_url}/blob/${project.pinned_commit}/tasks/MANIFEST.lock`,
+    commit_url: `${project.repo_url}/commit/${project.pinned_commit}`,
     totals: totalsFor(world, inProject),
     tasks: taskCounts(world, project),
     donors: standings(world, inProject).length,
@@ -474,7 +490,7 @@ function ledgerEntries(world, filter) {
       task_title: titleOf(report.task_id), report_status: report.status, pr_url: report.pr_url,
       ci_run_url: report.ci?.run_url ?? null, branch: report.branch, head_sha: report.head_sha,
     };
-    entries.push({ id: `${report.id}_r`, type: 'report', at: report.created_at, ...common, ci_run_url: null });
+    entries.push({ id: `${report.id}_r`, type: 'report', at: report.created_at, ...common, delivery: report.delivery });
     if (report.delivered_at) entries.push({ id: `${report.id}_d`, type: 'delivery', at: report.delivered_at, ...common });
     if (report.merged_at) entries.push({ id: `${report.id}_m`, type: 'merge', at: report.merged_at, ...common });
   }
@@ -806,6 +822,11 @@ route('GET', '/v1/meta', ({ world }) => ({
   spec_versions: [1],
   instance_pubkey: 'RWTmock0000000000000000000000000000000000000000000000000',
   capabilities: { github_oauth: true, dev_login: true, sse: true, ci_providers: ['github', 'generic'], ci_poll: true, federation: false },
+  links: {
+    source_url: 'https://github.com/agentfund/agentfund',
+    install_command: 'curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh',
+    docs_url: 'https://github.com/agentfund/agentfund/tree/main/docs',
+  },
   defaults: { lease_seconds: world.config.lease_seconds, heartbeat_interval_seconds: 60 },
 }));
 
@@ -977,6 +998,14 @@ route('GET', '/v1/projects/:slug/events', ({ world, params, query, req }) => {
 route('GET', '/v1/events', ({ world, query }) => {
   const hidden = new Set(world.projects.filter((p) => !['active', 'paused'].includes(p.status)).map((p) => p.slug));
   return paginate(world.events.filter((e) => !hidden.has(e.project)), query);
+});
+
+route('GET', '/v1/tasks/:task_id', ({ world, params, req }) => {
+  const [slug, manifestId] = params.task_id.split(':');
+  const project = findProject(world, slug, sessionUser(world, req, { required: false }));
+  const task = world.tasks.find((t) => t.project === project.slug && t.task_id === manifestId);
+  if (!task) throw new Problem(404, 'not-found', 'No such task', `There is no task "${params.task_id}".`);
+  return taskView(world, task);
 });
 
 route('GET', '/v1/donors', ({ world, query }) => paginate(standings(world, () => true), query));

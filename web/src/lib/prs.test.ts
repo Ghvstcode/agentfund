@@ -22,6 +22,20 @@ describe('pullRequestsFromLedger', () => {
     expect(rows[0]).toMatchObject({ url, stage: 'merged', at: '2026-10-03T00:00:00Z', ciRunUrl: 'https://ci/run/1' });
   });
 
+  it('takes CI failed and closed from the report entry, which entry types alone cannot show', () => {
+    const failed = 'https://github.com/o/r/pull/3';
+    const closed = 'https://github.com/o/r/pull/4';
+    const rows = pullRequestsFromLedger([
+      entry({ type: 'delivery', pr_url: closed, at: '2026-10-02T00:00:00Z' }),
+      entry({ type: 'report', pr_url: closed, at: '2026-10-01T00:00:00Z', delivery: 'closed' }),
+      entry({ type: 'report', pr_url: failed, at: '2026-09-30T00:00:00Z', delivery: 'ci_failed' }),
+    ]);
+    expect(rows.map((row) => [row.url, row.stage])).toEqual([
+      [closed, 'closed'],
+      [failed, 'ci_failed'],
+    ]);
+  });
+
   it('skips pledges and runs that produced no PR', () => {
     const rows = pullRequestsFromLedger([
       entry({ type: 'pledge' }),

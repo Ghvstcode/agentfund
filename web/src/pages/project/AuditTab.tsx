@@ -94,7 +94,7 @@ export default function AuditTab() {
           <dt>Pinned commit</dt>
           <dd>
             <Hash value={project.pinned_commit} label="pinned commit" length={12} />{' '}
-            <a href={`${project.repo_url}/commit/${project.pinned_commit}`} rel="noreferrer">
+            <a href={project.commit_url ?? `${project.repo_url}/commit/${project.pinned_commit}`} rel="noreferrer">
               View in the repository
             </a>
             <p className="muted">

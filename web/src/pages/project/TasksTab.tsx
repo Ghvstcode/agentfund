@@ -173,9 +173,8 @@ export default function TasksTab() {
       )}
       {taskId && (
         <TaskDrawer
+          slug={project.slug}
           manifestId={taskId}
-          tasks={tasks}
-          loaded={query.isSuccess && !query.hasNextPage}
           onClose={() => void navigate(`/${project.slug}`, { state: KEEP_SCROLL })}
         />
       )}

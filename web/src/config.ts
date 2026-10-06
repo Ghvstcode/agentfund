@@ -7,9 +7,9 @@ export const CLI_NAME = 'agentfund';
 export interface RuntimeConfig {
   /** API origin. Empty string means "same origin as this page". */
   apiBase?: string;
-  /** Shell one-liner that installs the worker CLI. */
+  /** Shell one-liner that installs the worker CLI, used when `meta.links` has none. */
   installCommand?: string;
-  /** Where the source of this software lives. */
+  /** Where the source of this software lives, used when `meta.links` has none. */
   sourceUrl?: string;
 }
 
@@ -26,7 +26,8 @@ interface BuildEnv {
   VITE_SOURCE_URL?: string;
 }
 
-const DEFAULT_INSTALL_COMMAND = 'curl -fsSL https://agentfund.dev/install.sh | sh';
+const DEFAULT_INSTALL_COMMAND =
+  'curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh';
 const DEFAULT_SOURCE_URL = 'https://github.com/agentfund/agentfund';
 
 /**
@@ -42,8 +43,9 @@ const runtime = typeof window === 'undefined' ? undefined : window.__AGENTFUND__
 const env = import.meta.env as BuildEnv;
 
 export const API_BASE = resolveApiBase(runtime, env);
-export const INSTALL_COMMAND = runtime?.installCommand ?? env.VITE_INSTALL_COMMAND ?? DEFAULT_INSTALL_COMMAND;
-export const SOURCE_URL = runtime?.sourceUrl ?? env.VITE_SOURCE_URL ?? DEFAULT_SOURCE_URL;
+/** Fallbacks for when the instance's `meta.links` does not name them. */
+export const FALLBACK_INSTALL_COMMAND = runtime?.installCommand ?? env.VITE_INSTALL_COMMAND ?? DEFAULT_INSTALL_COMMAND;
+export const FALLBACK_SOURCE_URL = runtime?.sourceUrl ?? env.VITE_SOURCE_URL ?? DEFAULT_SOURCE_URL;
 
 /** Absolute URL of an API or server path, for plain links and EventSource. */
 export function apiUrl(path: string): string {

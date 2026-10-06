@@ -3,7 +3,8 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { api } from '../api/client';
 import { useMe, useMeta } from '../api/queries';
-import { APP_NAME, apiUrl, SOURCE_URL } from '../config';
+import { APP_NAME, apiUrl } from '../config';
+import { instanceLinks } from '../lib/commands';
 import { session } from '../lib/session';
 import { ErrorBoundary } from './ErrorBoundary';
 import { SignInDialog } from './SignIn';
@@ -70,6 +71,7 @@ function Header() {
 
 function Footer() {
   const meta = useMeta();
+  const links = instanceLinks(meta.data);
   return (
     <footer className="site-footer">
       <div className="site-footer__inner">
@@ -83,7 +85,9 @@ function Footer() {
             {meta.data && (
               <>
                 {' · '}
-                {meta.data.app} <span className="mono">{meta.data.version}</span>
+                {/* Name the software only when the instance goes by another name. */}
+                {meta.data.app !== meta.data.name && `${meta.data.app} `}
+                <span className="mono">{meta.data.version}</span>
               </>
             )}
           </span>
@@ -96,10 +100,17 @@ function Footer() {
                 <a href={apiUrl('/feed.atom')}>Feed</a>
               </li>
               <li>
-                <a href={SOURCE_URL} rel="noreferrer">
+                <a href={links.sourceUrl} rel="noreferrer">
                   Source
                 </a>
               </li>
+              {links.docsUrl && (
+                <li>
+                  <a href={links.docsUrl} rel="noreferrer">
+                    Docs
+                  </a>
+                </li>
+              )}
               <li>
                 <Link to="/styleguide">Styleguide</Link>
               </li>

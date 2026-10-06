@@ -85,25 +85,30 @@ export function BackDialog({ project, onClose }: BackDialogProps) {
       onClose={onClose}
     >
       <section className="dialog-section" aria-labelledby="back-commands">
-        <h3 id="back-commands">Run these four lines</h3>
+        <h3 id="back-commands">Run these lines</h3>
+        <p className="muted">
+          You need Docker running, and Claude Code credentials in the environment: <code>CLAUDE_CODE_OAUTH_TOKEN</code>{' '}
+          from <code>claude setup-token</code>, or <code>ANTHROPIC_API_KEY</code>. The worker never stores them.
+        </p>
         {meta.isPending ? (
-          <Skeleton height="12rem" />
+          <Skeleton height="16rem" />
         ) : meta.isError ? (
           <Notice tone="strong" role="alert" title="Couldn't build the commands">
             {describeError(meta.error)}
           </Notice>
         ) : (
           <ol className="command-list">
-            {backCommands(meta.data.base_url, project.slug).map((line) => (
+            {backCommands(meta.data, project.slug).map((line) => (
               <li key={line.command}>
                 <p className="command-list__label">{line.label}</p>
                 <CommandLine command={line.command} label={line.label} />
+                {line.note && <p className="command-list__note">{line.note}</p>}
               </li>
             ))}
           </ol>
         )}
         <p className="muted">
-          <code>{CLI_NAME} approve</code> prints the maintainer's key fingerprint. It must match this one:{' '}
+          The fingerprint <code>{CLI_NAME} approve</code> shows must match this one:{' '}
           <Hash value={project.pubkey_fingerprint} label="key fingerprint" length={16} />
         </p>
       </section>
