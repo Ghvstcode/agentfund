@@ -23,3 +23,8 @@ All notable changes to this project are documented here. The format follows
 - **Demo project** — `gridrs`, a std-only terminal spreadsheet in Rust decomposed into signed
   manifests with pre-committed acceptance tests.
 - `docker compose up` self-hosting, GoReleaser packaging, install script, CI.
+- **Codex runner (experimental)** — `runner.name: codex` drives `codex exec --json` in the
+  sandbox with `CODEX_API_KEY`/`OPENAI_API_KEY`; usage is metered at turn end, background
+  features are switched off, and a run stuck waiting for an unreachable API is stopped.
+  `runner.token_command` for any runner. The sandbox image ships Codex next to Claude Code.
+- `make trial` — one task of the sample project with a real agent under the backer's own key.

@@ -58,7 +58,7 @@ release archive, verifies its SHA-256 against the release's checksum file, and i
 | `git` | The worker clones the project on the host to verify it. |
 | `gh`, logged in (`gh auth login`) | The worker forks the project, pushes the branch and opens the PR as **you**. |
 | Two local images: `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | Not published to a registry yet. Build them: `make -C worker images`. |
-| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work` | The agent runs under your credentials. With neither set and no `claude_token_command` in the config, `work` stops before claiming anything. |
+| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work`; with `runner.name: codex`, `CODEX_API_KEY` or `OPENAI_API_KEY` | The agent runs under your credentials. With neither set and no `claude_token_command` in the config, `work` stops before claiming anything. |
 
 Read [Whose credentials, whose bill](#7-whose-credentials-whose-bill) before choosing one.
 
@@ -240,7 +240,8 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |
 | `sandbox.pass_env` | `[]` | Names of extra environment variables passed to the agent (e.g. `ANTHROPIC_BASE_URL`). Their hosts are unreachable unless also allow-listed. |
 | `sandbox.docker` | `"docker"` | Docker CLI binary. |
-| `runner.name`, `runner.model` | `"claude-code"`, `""` | Only `claude-code` exists. `model` is passed as `--model`; empty uses the CLI's default. |
+| `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default. |
+| `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
 
 **Reservation.** A task's full `max_tokens` is reserved against every cap before it starts and
 settled to the real figure afterwards, so caps cannot be overshot. The accounting lives in

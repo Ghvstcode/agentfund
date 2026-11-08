@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +54,23 @@ type Sandbox struct {
 type Runner struct {
 	Name  string `yaml:"name"`
 	Model string `yaml:"model"`
+	// TokenCommand prints the agent's credential when none is in the
+	// environment. For claude-code it falls back to global.claude_token_command.
+	TokenCommand string `yaml:"token_command"`
+}
+
+// Runners are the coding agents the worker can drive. "codex" is experimental.
+var Runners = []string{"claude-code", "codex"}
+
+// AgentTokenCommand is the credential command for the configured runner.
+func (g Global) AgentTokenCommand() string {
+	if g.Runner.TokenCommand != "" {
+		return g.Runner.TokenCommand
+	}
+	if g.Runner.Name == "claude-code" {
+		return g.ClaudeTokenCommand
+	}
+	return ""
 }
 
 // Global holds the donor-wide policy.
@@ -159,8 +177,8 @@ func (c *Config) Validate() error {
 	if g.Sandbox.Image == "" || g.Sandbox.EgressProxyImage == "" {
 		return fmt.Errorf("global.sandbox.image and egress_proxy_image must be set")
 	}
-	if g.Runner.Name != "claude-code" {
-		return fmt.Errorf("global.runner.name %q is not supported (only claude-code)", g.Runner.Name)
+	if !slices.Contains(Runners, g.Runner.Name) {
+		return fmt.Errorf("global.runner.name %q is not supported (one of: %s)", g.Runner.Name, strings.Join(Runners, ", "))
 	}
 	if _, err := g.RetryDelay(); err != nil {
 		return err
@@ -371,12 +389,13 @@ func (c *Config) render() ([]byte, error) {
 	w("    memory: %q\n", g.Sandbox.Memory)
 	w("    # Maximum number of processes in the sandbox (docker --pids-limit).\n")
 	w("    pids: %d\n", g.Sandbox.PIDs)
-	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com).\n")
+	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com,\n")
+	w("    # or api.openai.com for codex).\n")
 	w("    # The sandbox has no .git and no git credentials; turn on only if a project's\n")
 	w("    # verify step must fetch from the git host.\n")
 	w("    allow_git_host: %t\n", g.Sandbox.AllowGitHost)
 	w("    # Extra host[:port] entries the sandbox may reach besides the model API\n")
-	w("    # (api.anthropic.com). Keep this empty unless needed.\n")
+	w("    # (api.anthropic.com, or api.openai.com for codex). Keep this empty unless needed.\n")
 	w("    extra_allow_hosts: %s\n", yamlList(g.Sandbox.ExtraAllowHosts))
 	w("    # Names of additional environment variables to pass from your shell into the\n")
 	w("    # agent process (e.g. ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, AWS_REGION).\n")
@@ -385,10 +404,15 @@ func (c *Config) render() ([]byte, error) {
 	w("    # Docker CLI binary.\n")
 	w("    docker: %q\n", g.Sandbox.Docker)
 	w("  runner:\n")
-	w("    # Coding agent to run. Only \"claude-code\" is implemented.\n")
+	w("    # Coding agent to run: \"claude-code\" (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)\n")
+	w("    # or \"codex\" (EXPERIMENTAL; CODEX_API_KEY or OPENAI_API_KEY). Codex reports usage\n")
+	w("    # only when it finishes, so a Codex run can end above a task's max_tokens.\n")
 	w("    name: %q\n", g.Runner.Name)
 	w("    # Optional model alias or id passed to the agent (--model). \"\" = its default.\n")
 	w("    model: %q\n", g.Runner.Model)
+	w("    # Optional shell command printing the agent's credential on stdout, used when\n")
+	w("    # none is in the environment. \"\" = claude_token_command for claude-code.\n")
+	w("    token_command: %q\n", g.Runner.TokenCommand)
 	w("\n# Approved projects, keyed by <server-url>/<slug>. `pubkey`, `approved_commit` and\n")
 	w("# `approved_lock_sha256` are what you reviewed; the worker trusts nothing else.\n")
 	w("# Optional per-project overrides: tokens_per_day, tokens_per_week,\n")

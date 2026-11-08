@@ -51,12 +51,16 @@ func newWorker(e *env, arg string, needKey bool) (*pipeline.Worker, error) {
 	} else {
 		key, _ = config.APIKey(ref.Server, proj)
 	}
+	agent, err := runner.New(cfg.Global.Runner.Name)
+	if err != nil {
+		return nil, err
+	}
 	return &pipeline.Worker{
 		Cfg: cfg, Ref: ref, Project: proj,
 		API:      api.New(ref.Server, key),
 		Store:    store.Open(config.StorePath()),
 		Engine:   sandbox.CLI{Bin: cfg.Global.Sandbox.Docker},
-		Runner:   runner.NewClaudeCode(),
+		Runner:   agent,
 		HostFor:  githost.For,
 		ReposDir: config.ReposDir(), LogsDir: config.LogsDir(),
 		Out: e.err,
@@ -81,7 +85,9 @@ and releases active claims.
 
 The coding agent runs under YOUR credentials, read from the environment at
 run time: CLAUDE_CODE_OAUTH_TOKEN (from ` + "`claude setup-token`" + `) and/or
-ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. They are passed
+ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. With
+runner.name: codex (experimental) it is CODEX_API_KEY or OPENAI_API_KEY, or
+runner.token_command. They are passed
 to the sandboxed agent process and are never stored or sent anywhere else.
 
 Exit status:

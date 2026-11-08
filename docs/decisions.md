@@ -7,7 +7,7 @@ page lists them, why, and where to change your mind.
 | --- | --- | --- | --- |
 | Name | `AgentFund`, binary `agentfund`. A working name | It had to be called something | `APP_NAME` (server and web), the `AppName` constant and GoReleaser's `project_name` (worker) |
 | Demo project | `gridrs`, a std-only terminal spreadsheet in Rust | No dependencies means a sandbox with no registry access can build it | Any scoped repository with manifests |
-| Coding agent | Claude Code only | One runner done properly; a `Runner` interface exists from day one | Implement `Runner` for another agent |
+| Coding agent | Claude Code by default; Codex experimental | One runner done properly first; the second (Codex) kept opt-in until a real run confirms it ([runners.md](runners.md)) | `runner.name`, or implement `Runner` for another agent |
 | Git host and CI | GitHub only, plus a generic CI adapter that accepts signed JSON | `GitHost` and `CiAdapter` interfaces keep the rest possible | Implement the interfaces |
 | Signature format | minisign: Ed25519, prehashed, detached `MANIFEST.lock.minisig` | Small, audited, and verifiable with a tool we did not write | A spec change (`lock_version`) |
 | Following new commits | Off. A donor re-approves after every merge | The safe default is that nothing unreviewed runs | `approve` offers `follow_unchanged_lock` (accept new commits while the signed task list is byte-identical). `auto_follow_signed_updates` accepts any validly signed list. Both live in the donor's policy file |

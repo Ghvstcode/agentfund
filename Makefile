@@ -2,7 +2,7 @@
 # Each target is a thin wrapper; the command it runs is the documentation.
 
 .DEFAULT_GOAL := help
-.PHONY: help demo demo-manual demo-down dev up build test e2e check assets recording
+.PHONY: help demo demo-manual demo-down trial dev up build test e2e check assets recording
 
 help: ## List targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  make %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -15,6 +15,9 @@ demo-manual: ## Same instance, but you type the worker commands yourself
 
 demo-down: ## Clean up after a demo that was killed rather than Ctrl-C'd
 	@sh scripts/demo.sh down
+
+trial: ## One task with a REAL agent under your own key (ANTHROPIC_API_KEY=… or RUNNER=codex OPENAI_API_KEY=…)
+	@sh scripts/trial.sh
 
 dev: ## Web UI on :5173 against the built-in mock API (no Docker, no Postgres)
 	pnpm install

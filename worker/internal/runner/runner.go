@@ -1,11 +1,11 @@
 // Package runner drives a coding agent inside the sandbox and meters it.
-// Runner is the seam for other agents (Codex, …); only Claude Code is
-// implemented. See CLAUDE_CODE_NOTES.md for the verified CLI facts this
-// package relies on.
+// Runner is the seam between the pipeline and a specific agent CLI: Claude
+// Code (CLAUDE_CODE_NOTES.md) and, experimentally, Codex (CODEX_NOTES.md).
 package runner
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 )
@@ -75,6 +75,17 @@ type Credentials struct {
 	Env []string
 	// Secrets are the values to scrub from anything that is logged or reported.
 	Secrets []string
+}
+
+// New returns the runner with the given config name (see config.Runners).
+func New(name string) (Runner, error) {
+	switch name {
+	case "", "claude-code":
+		return NewClaudeCode(), nil
+	case "codex":
+		return NewCodex(), nil
+	}
+	return nil, fmt.Errorf("unknown runner %q", name)
 }
 
 // Runner is a coding agent.

@@ -11,4 +11,5 @@ worker/bin/
 .e2e/
 *.tsbuildinfo
 .demo/
+.trial/
 docs/assets/.raw/

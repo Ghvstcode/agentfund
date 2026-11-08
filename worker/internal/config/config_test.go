@@ -132,12 +132,41 @@ func TestDefaultsAreConservative(t *testing.T) {
 	}
 }
 
+func TestRunnerSelection(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte("global:\n  claude_token_command: claude-cmd\n  runner: {name: codex}\n"), 0o600)
+	c, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Global.Runner.Name != "codex" || c.Global.AgentTokenCommand() != "" {
+		t.Fatalf("codex must not inherit claude_token_command: %+v", c.Global.Runner)
+	}
+	c.Global.Runner.TokenCommand = "codex-cmd"
+	if c.Global.AgentTokenCommand() != "codex-cmd" {
+		t.Fatal("runner.token_command ignored")
+	}
+	c.Global.Runner = Runner{Name: "claude-code"}
+	if c.Global.AgentTokenCommand() != "claude-cmd" {
+		t.Fatal("claude-code lost claude_token_command")
+	}
+	// Round trip through the commented writer.
+	c.Global.Runner = Runner{Name: "codex", Model: "gpt-5-codex", TokenCommand: "pass show openai"}
+	if err := c.SaveFile(p); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := LoadFile(p)
+	if err != nil || c2.Global.Runner != c.Global.Runner {
+		t.Fatalf("round trip: %+v %v", c2.Global.Runner, err)
+	}
+}
+
 func TestLoadRejectsUnknownAndInvalid(t *testing.T) {
 	for name, body := range map[string]string{
 		"unknown knob":   "global:\n  tokens_per_dya: 5m\n",
 		"bad tokens":     "global:\n  tokens_per_day: lots\n",
 		"bad concurrent": "global:\n  max_concurrent: 0\n",
-		"bad runner":     "global:\n  runner: {name: codex}\n",
+		"bad runner":     "global:\n  runner: {name: aider}\n",
 		"bad pass_env":   "global:\n  sandbox: {pass_env: [\"A=B\"]}\n",
 		"bad allow host": "global:\n  sandbox: {extra_allow_hosts: [\"*.example.com\"]}\n",
 	} {

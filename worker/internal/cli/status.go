@@ -356,8 +356,8 @@ call that reads the token from your keychain).`,
 				}
 				fmt.Fprintf(e.out, "Not started. To enable:\n  systemctl --user daemon-reload\n  systemctl --user enable --now %s\n  journalctl --user -u %s -f\n"+
 					"To keep it running while you are logged out: loginctl enable-linger $USER\n"+
-					"Credentials: put CLAUDE_CODE_OAUTH_TOKEN=… or ANTHROPIC_API_KEY=… (and %s=af_… if you do not use `login`) in\n  %s (chmod 600), or set claude_token_command in %s.\n",
-					unit, unit, config.EnvAPIKey, filepath.Join(config.Dir(), "worker.env"), config.Path())
+					"Credentials: put %s (and %s=af_… if you do not use `login`) in\n  %s (chmod 600), or set %s in %s.\n",
+					unit, unit, agentEnvHint(cfg.Global.Runner.Name), config.EnvAPIKey, filepath.Join(config.Dir(), "worker.env"), tokenCommandKey(cfg.Global.Runner.Name), config.Path())
 			case "darwin":
 				label := "dev." + app.BinaryName + ".worker." + ref.Slug
 				path := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
@@ -390,9 +390,9 @@ call that reads the token from your keychain).`,
 					return nil
 				}
 				fmt.Fprintf(e.out, "Not started. To enable:\n  launchctl load -w %s\n  tail -f %s\n"+
-					"Credentials: launchd does not inherit your shell environment. Set claude_token_command in %s\n"+
+					"Credentials: launchd does not inherit your shell environment. Set %s in %s\n"+
 					"(e.g. `security find-generic-password -s %s-agent-token -w`) and store the server key with `%s login`.\n",
-					path, filepath.Join(logDir, "worker.log"), config.Path(), app.BinaryName, app.BinaryName)
+					path, filepath.Join(logDir, "worker.log"), tokenCommandKey(cfg.Global.Runner.Name), config.Path(), app.BinaryName, app.BinaryName)
 			default:
 				return fmt.Errorf("daemon install supports linux (systemd) and darwin (launchd), not %s", runtime.GOOS)
 			}
@@ -467,4 +467,20 @@ func launchdPlist(label, exe, project, logDir string) string {
 	fmt.Fprintf(&b, "  <key>StandardOutPath</key><string>%s</string>\n  <key>StandardErrorPath</key><string>%s</string>\n</dict>\n</plist>\n",
 		xmlEscape(filepath.Join(logDir, "worker.log")), xmlEscape(filepath.Join(logDir, "worker.log")))
 	return b.String()
+}
+
+// agentEnvHint names the credential variables of the configured runner.
+func agentEnvHint(runnerName string) string {
+	if runnerName == "codex" {
+		return "CODEX_API_KEY=… or OPENAI_API_KEY=…"
+	}
+	return "CLAUDE_CODE_OAUTH_TOKEN=… or ANTHROPIC_API_KEY=…"
+}
+
+// tokenCommandKey is the config key holding the runner's credential command.
+func tokenCommandKey(runnerName string) string {
+	if runnerName == "codex" {
+		return "runner.token_command"
+	}
+	return "claude_token_command"
 }

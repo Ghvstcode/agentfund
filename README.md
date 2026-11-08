@@ -67,6 +67,7 @@ already built it takes about 30 seconds; the first run also builds two container
 | [Donor guide](docs/donors.md) | Approving, the policy file, the sandbox, reading your own logs |
 | [Maintainer guide](docs/maintainers.md) | Decomposing a project, signing, keys, hardening CI |
 | [Self-hosting](docs/self-hosting.md) | Configuring and running an instance |
+| [Coding agents](docs/runners.md) | Claude Code, Codex (experimental), and what another agent needs |
 | [Security](docs/SECURITY.md) · [FAQ](docs/faq.md) · [Decisions](docs/decisions.md) | The threat model, the questions, the defaults |
 
 <details>
@@ -332,18 +333,18 @@ What has and has not been proven, as of 2026-10-06:
 | --- | --- |
 | Full loop against a mock agent: claim → verify → sandbox → branch → CI → delivered → merged | **Proven.** Runs in CI on every push ([`scripts/e2e.sh`](scripts/e2e.sh)) |
 | Real GitHub path: push, PR via `gh`, GitHub Actions, delivery confirmed by polling, merge, re-pin | **Proven once**, by hand, with the mock agent, on a public throwaway repository |
-| A real model inside the sandbox | **Not yet run.** gridrs's `verify` passes offline in the real sandbox image with the reference build |
+| A real model inside the sandbox | **Not yet run.** The real Claude Code and Codex CLIs ran in the sandbox through the egress proxy up to the model API (refused a fake key; released the claim cleanly). `make trial` does the rest with your key |
 | Pull request from a fork (backer does not own the repository) | **Not yet exercised.** The test backer owned the repository |
 | CI results by webhook from GitHub | **Fixtures only.** Live delivery was confirmed by polling |
 | More than one task at a time (`max_concurrent` > 1) | **Not yet exercised** |
-| Coding agents | Claude Code only. A `Runner` interface exists |
+| Coding agents | Claude Code; Codex **experimental** (`runner.name: codex`, never run against the real API). See [runners](docs/runners.md) |
 | Git hosts and CI | GitHub only, plus a generic signed-JSON CI adapter |
 
 Treat a first real run as a test: `--once`, a small `--budget`, and read `agentfund logs` afterwards.
 
 ## Roadmap
 
-- **A real-model run, then a release.** Tagged binaries, published sandbox and proxy images,
+- **A real-model run (`make trial`), then a release.** Tagged binaries, published sandbox and proxy images,
   and the install script pointing at them.
 - **gridrs, funded in public.** The first campaign, on an instance anyone can watch.
 - **Federation.** Instances are independent islands today. Five decisions keep the door open:
@@ -352,8 +353,9 @@ Treat a first real run as a test: `--once`, a small `--budget`, and read `agentf
   Cross-instance discovery, backing a project on another instance and a portable backer
   identity are roadmap, not code.
 - **Harder sandbox edges.** TLS server-name pinning in the egress proxy.
-- **Second implementations.** Another coding agent behind `Runner`, another host behind
-  `GitHost` and `CiAdapter`. The interfaces exist; nothing is promised.
+- **More agents.** Codex is in, experimental, until a real run confirms it; Gemini CLI, Cursor CLI
+  and opencode are the next candidates ([runners](docs/runners.md)). Another host behind
+  `GitHost` and `CiAdapter`: the interfaces exist; nothing is promised.
 
 Not planned: money anywhere in the system, microVM isolation, an agent that writes your
 manifests for you, mobile apps, analytics beyond the ledger. The defaults we picked where the

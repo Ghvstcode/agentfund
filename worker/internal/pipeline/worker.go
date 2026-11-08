@@ -338,7 +338,7 @@ func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
-	creds, err := w.Runner.Credentials(ctx, lookup, w.Cfg.Global.ClaudeTokenCommand, w.Cfg.Global.Sandbox.PassEnv)
+	creds, err := w.Runner.Credentials(ctx, lookup, w.Cfg.Global.AgentTokenCommand(), w.Cfg.Global.Sandbox.PassEnv)
 	if err != nil {
 		return nil, err
 	}
