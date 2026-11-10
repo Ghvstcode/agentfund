@@ -80,14 +80,15 @@ func TestCredentialsAreRenewedForEachRun(t *testing.T) {
 func TestRenewalCredentialProblemStopsTheWorker(t *testing.T) {
 	f := newFixture(t, nil)
 	f.w.Runner = &renewingRunner{ClaudeCode: runner.NewClaudeCode(),
-		renewErr: fmt.Errorf("%w: the Codex ChatGPT sign-in has to be renewed", runner.ErrCredentials)}
+		renewErr: fmt.Errorf("%w: the Codex ChatGPT sign-in has to be renewed; sign in again with: CODEX_HOME=/Users/donor/.config/agentfund/codex codex login", runner.ErrCredentials)}
 	_, err := f.once()
 	var fatal *ErrFatal
 	if !errors.As(err, &fatal) || !strings.Contains(err.Error(), "sign-in") {
 		t.Fatalf("err = %v", err)
 	}
 	o := f.onlyOutcome()
-	if o.Status != "released" || !strings.Contains(o.Release["reason"].(string), "credentials need attention") {
+	// The donor's paths stay on the donor's machine.
+	if reason := o.Release["reason"].(string); o.Status != "released" || !strings.Contains(reason, "credentials need attention") || strings.Contains(reason, "/Users/donor") {
 		t.Fatalf("server saw %+v", o)
 	}
 	f.noBranchPushed()

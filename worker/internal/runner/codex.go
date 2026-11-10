@@ -298,6 +298,10 @@ func (c *Codex) Run(ctx context.Context, spec RunSpec) (Outcome, error) {
 	outW.Close()
 	errW.Close()
 	wg.Wait()
+	// ctx may be cancelled by now (agent stuck offline); the file must go anyway.
+	if rerr := removeHomeFiles(context.WithoutCancel(ctx), spec.Exec, spec.Creds.HomeFiles); rerr != nil && err == nil {
+		err = rerr
+	}
 
 	out := meter.Outcome()
 	out.ExitCode = code

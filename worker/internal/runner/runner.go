@@ -123,6 +123,22 @@ func writeHomeFiles(ctx context.Context, exec ExecFunc, files []HomeFile) error 
 	return nil
 }
 
+// removeHomeFiles deletes what writeHomeFiles created, so that verify, which
+// runs next in the same sandbox, cannot read a credential file.
+func removeHomeFiles(ctx context.Context, exec ExecFunc, files []HomeFile) error {
+	for _, f := range files {
+		var stderr bytes.Buffer
+		code, err := exec(ctx, []string{"sh", "-c", `rm -f "$HOME/$1"`, "sh", f.Path}, nil, nil, nil, io.Discard, &stderr)
+		if err == nil && code != 0 {
+			err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr.String()))
+		}
+		if err != nil {
+			return fmt.Errorf("remove ~/%s from the sandbox: %w", f.Path, err)
+		}
+	}
+	return nil
+}
+
 // New returns the runner with the given config name (see config.Runners).
 func New(name string) (Runner, error) {
 	switch name {

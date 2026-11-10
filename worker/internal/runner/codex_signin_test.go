@@ -145,12 +145,17 @@ func TestCodexCredentialsNoSignInMentionsLogin(t *testing.T) {
 
 // The stripped sign-in is written into the sandbox home through stdin before
 // codex starts, and never appears on a command line.
+// The sign-in is in the sandbox only while the agent runs: verify, run next
+// in the same sandbox, must not find it.
 func TestCodexRunWritesHomeFilesFirst(t *testing.T) {
 	var order []string
 	var written string
 	exec := func(ctx context.Context, cmd, pass, env []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 		switch {
 		case len(cmd) == 2 && cmd[1] == "--version":
+			return 0, nil
+		case cmd[0] == "sh" && strings.Contains(cmd[2], "rm -f"):
+			order = append(order, "remove "+cmd[len(cmd)-1])
 			return 0, nil
 		case cmd[0] == "sh":
 			order = append(order, "write "+cmd[len(cmd)-1])
@@ -169,7 +174,7 @@ func TestCodexRunWritesHomeFilesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(order, ",") != "write .codex/auth.json,codex" || written != `{"secret":"at"}` {
+	if strings.Join(order, ",") != "write .codex/auth.json,codex,remove .codex/auth.json" || written != `{"secret":"at"}` {
 		t.Fatalf("order %v written %q", order, written)
 	}
 
