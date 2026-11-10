@@ -335,7 +335,7 @@ What has and has not been proven, as of 2026-11-10:
 | Real GitHub path: push, PR via `gh`, GitHub Actions, delivery confirmed by polling, merge, re-pin | **Proven once**, by hand, with the mock agent, on a public throwaway repository |
 | A real model inside the sandbox | **Proven 2026-11-10 for the sample project** (`make trial`): Claude Code with Sonnet completed all three `hello-project` tasks, each through verify, scope check, delivery and merge. A bigger repository with a toolchain (gridrs) is not yet run. Codex has only run up to the model API |
 | Pull request from a fork (backer does not own the repository) | **Not yet exercised.** The test backer owned the repository |
-| CI results by webhook from GitHub | **Fixtures only.** Live delivery was confirmed by polling |
+| CI results by webhook from GitHub | **Proven 2026-11-10**: real GitHub deliveries through a tunnel moved a report to delivered (`check_suite`, `workflow_run`) and merged (`pull_request`), and the `push` re-pinned the project. Polling (`CI_POLL=true`) works too |
 | More than one task at a time (`max_concurrent` > 1) | **Not yet exercised** |
 | Coding agents | Claude Code; Codex **experimental** (`runner.name: codex`, never run against the real API). See [runners](docs/runners.md) |
 | Git hosts and CI | GitHub only, plus a generic signed-JSON CI adapter |
