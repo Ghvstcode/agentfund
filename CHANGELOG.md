@@ -43,6 +43,8 @@ All notable changes to this project are documented here. The format follows
   defaults, compose file and docs.
 
 ### Fixed
+- The sample project's CI (`examples/hello-project`) no longer fails on a fresh copy that has
+  no tests yet: `unittest` exits 5 when it finds none, which is now treated as a pass.
 - **Dependent tasks no longer start from a commit without their dependency.** A task became
   claimable the moment its dependency merged, while the project was still pinned to the commit
   before the merge, so the worker built it on stale code (found by the first real-model run:

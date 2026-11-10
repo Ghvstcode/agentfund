@@ -111,9 +111,9 @@ independent; that is on you.
 ### Register the project
 
 1. Sign in to the instance, open **Maintain → Register a project**, and paste the repository
-   URL. The wizard clones it, verifies the lock signature against the key in `agentfund.yaml`,
-   and shows you the key fingerprint, the commit, the lock hash and the manifest list before
-   anything is created.
+   URL. The repository must be public: the instance clones it without credentials. The wizard
+   clones it, verifies the lock signature against the key in `agentfund.yaml`, and shows you the
+   key fingerprint, the commit, the lock hash and the manifest list before anything is created.
 2. Confirm. The key in `agentfund.yaml` at that moment becomes the **registered key**; from
    then on it changes only through a signed [rotation](#rotation). If the instance requires
    approval for new projects, yours starts `pending` until an admin activates it.

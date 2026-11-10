@@ -46,7 +46,7 @@ Update it every time something gets proven.
 | A real model completing a task | **Proven 2026-11-10** for all three `hello-project` tasks (Claude Code, Sonnet). A gridrs task is still open in A1 |
 | Codex runner | Added 2026-11-08, **experimental**, never run against the real API. This is A2 |
 | PR from a fork (backer does not own the repo) | **Not exercised.** This is how every real donation works. This is A3 |
-| CI results by live GitHub webhook | **Fixtures only.** This is A4 |
+| CI results by live GitHub webhook | **Proven 2026-11-10** (A4) |
 | Release workflow, published images, `install.sh` against a real release | **Never run.** This is A6 |
 | `max_concurrent` > 1 | Not exercised. Keep the default at 1 and say so |
 | GitHub OAuth login | Unit-tested with a mocked GitHub; never used live. Part of B1 |
@@ -199,6 +199,16 @@ polling (`CI_POLL=true`). With the instance reachable from GitHub (a tunnel such
 `cloudflared` or `ngrok` is fine), configure the per-project webhook the UI shows and confirm a
 real `check_suite`/`pull_request` delivery moves a report to delivered and merged. If it
 cannot be made reliable for v0.1, make polling the documented default instead and say so.
+
+**Done 2026-11-10.** A public throwaway repository on the maintainer's account (the server
+indexes public repositories only, by design), a local instance behind a `cloudflared` quick
+tunnel, the webhook added exactly as the Maintain page shows it, and one task by the worker with
+the mock agent (no model tokens): GitHub's `ping`, `check_suite` and `workflow_run` deliveries
+moved the report to delivered within seconds of CI passing, merging the PR moved it to merged,
+and the `push` re-pinned the project to the merge commit, which made the dependent task
+claimable. The backer owned the repository, so this pushed to it directly: the fork path is
+still A3. Found: the sample project's CI failed on `main` before any task had merged
+(`unittest` exits 5 with no tests); fixed.
 
 ### A5. The project's GitHub home
 
@@ -378,3 +388,5 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
 - 2026-11-10: A6 prep: released binaries default to their images by digest; `goreleaser check` and a
   local snapshot release pass; rc tags no longer move `latest`. Security contact set (A7). A3
   deferred: no second GitHub account yet (human's call).
+- 2026-11-10: A4 done: live GitHub webhooks (through a tunnel) moved a report to delivered and merged,
+  and re-pinned. Sample CI fixed for a repository with no tests yet.
