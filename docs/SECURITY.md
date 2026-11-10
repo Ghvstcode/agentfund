@@ -47,11 +47,11 @@ public's ability to **verify** every number the system shows.
 | Server shows donors one task and feeds workers another | Signed `MANIFEST.lock` + per-manifest SHA-256, verified by the worker against the donor-pinned key. The server cannot alter work. |
 | Malicious manifest added to the repo after approval | Approval pins a commit. Newer commits need re-approval, unless the donor opted into `follow_unchanged_lock` (byte-identical task set) or `auto_follow_signed_updates` (any validly signed set). Both default off. |
 | Maintainer key swapped in the repo | The worker never reads the key from the repo at run time. The server UI shows the registered key's fingerprint as a second channel; rotation requires a statement signed by the old key. |
-| Prompt injection exfiltrates repo or host data | No host mounts; the sandbox sits on an internal network whose only exit is a CONNECT-only proxy allowing `api.anthropic.com` (nothing else by default — not even the git host). IP literals and private/loopback/link-local/metadata addresses are refused. |
+| Prompt injection exfiltrates repo or host data | No host mounts; the sandbox sits on an internal network whose only exit is a CONNECT-only proxy allowing the model API (`api.anthropic.com`; for Codex `api.openai.com`, or `chatgpt.com` with a ChatGPT credential) and nothing else by default — not even the git host. IP literals and private/loopback/link-local/metadata addresses are refused. |
 | Agent writes outside its lane (backdoor in an unrelated file) | The worker diffs the sandbox against the claimed commit on the host. Any path outside `scope.write`, any symlink or special file, or any change to `agentfund.yaml`, `tasks/**` or `.github/**` discards the whole run. |
 | Budget burned on junk | Per-task `max_tokens` (kill at the cap) + donor daily/weekly caps + a per-task ceiling that refuses oversized manifests + schedule windows. |
 | A backer's extra CA (`sandbox.extra_ca_certs`) widens what the agent trusts | Off by default. The agent trusts that CA for TLS inside the sandbox, so whoever holds its key (the backer's network) can read and alter the agent's model traffic; that is already true of the backer's own machine on that network. Egress is unchanged: the proxy still allows only the same hosts. The worker copies in only `CERTIFICATE` blocks (a private key in the file is refused), into a root-owned directory the agent cannot write. |
-| Credential theft | The Claude Code token is injected as an environment variable at container start only — never in an image layer, argv, log, or report. Git credentials never enter the sandbox: the worker pushes from the host. |
+| Credential theft | The agent's token is injected as an environment variable at container start only — never in an image layer, argv, log, or report. A Codex ChatGPT sign-in is the exception: it is a file, so the worker writes a copy into the sandbox's temporary home through stdin, **without the refresh token**, and keeps the refresh token on the host. Git credentials never enter the sandbox: the worker pushes from the host. Code in the sandbox can still read whichever credential the agent uses; see limitation 6. |
 | Hostile PR content (CI abuse, malware in the diff) | Project side: CI on `pull_request` (never `pull_request_target`), no secrets on fork PRs, read-only token, pinned actions, human review before merge. See the maintainer guide. |
 | A maintainer forges CI results for someone else's project | CI webhook secrets are per project; with polling enabled the server asks the CI provider itself and needs no secret at all. |
 | Donor reports fake token numbers | Tokens count as **delivered** only when the CI provider confirms a passing run on the reported branch + commit. Leaderboards rank by delivered, never reported. |
@@ -76,7 +76,9 @@ public's ability to **verify** every number the system shows.
    side, such as web search: those reach the web from the provider, not from your machine. The
    worker therefore starts Claude Code with an allowlist of local tools only (shell, file
    reads and edits, sub-agents), which also keeps out the CLI's tools that schedule cloud agents
-   on your account. For Codex this has not been verified yet.
+   on your account. For Codex this has not been verified yet. `chatgpt.com`, `api.openai.com` and
+   `auth.openai.com` are served through Cloudflare (checked 2026-11-10), so the domain-fronting
+   gap matters more for Codex with a ChatGPT credential (limitation 6).
 3. **Your subscription's terms are between you and your AI provider.** The worker executes
    prompts under the donor's own login, on the donor's own machine. AgentFund makes no claim on
    any provider's behalf about what their terms permit. The worker runs the unmodified Claude
@@ -88,10 +90,27 @@ public's ability to **verify** every number the system shows.
    [Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
    [Usage Policy](https://www.anthropic.com/legal/aup),
    [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
+   The same holds for Codex (experimental) and OpenAI: AgentFund makes no claim on OpenAI's
+   behalf; whether donating usage fits your ChatGPT plan or workspace agreement is your call,
+   and an API key is the unambiguous option. Read
+   [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/) and
+   [Usage Policies](https://openai.com/policies/usage-policies/). One difference: a Codex
+   ChatGPT sign-in is stored and renewed by the worker, in a directory used only by AgentFund
+   (`runner.codex_home`), never in your own `~/.codex`.
 4. **A passing CI run is not a correctness proof.** `verify` and CI are as good as the tests the
    maintainer wrote. Merging remains a human decision.
 5. **Model output is reviewed by nobody before CI runs it.** Maintainers must treat every
    AgentFund PR as an untrusted fork PR.
+6. **A hostile task can read the agent's credential.** The agent CLI and the commands it runs
+   share one user in the sandbox, so whatever credential the agent uses is readable there. The
+   worker refuses a change set that contains the credential literally, but an encoded copy in a
+   diff, or one sent through the model API, is not detected. How much that matters depends on
+   the credential: a Claude Code token or an API key can run model calls until revoked. A
+   ChatGPT credential for Codex is broader: the sandbox must reach `chatgpt.com`, the proxy
+   filters by host and not by path, and a sign-in's access token acts as your ChatGPT account
+   until it expires (it cannot be renewed from the sandbox, because the refresh token stays on
+   the host). A Business/Enterprise access token is limited to the scope and expiry you chose.
+   See [Codex in the donor guide](donors.md#codex-experimental).
 
 ## Verifying things yourself
 

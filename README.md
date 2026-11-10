@@ -337,7 +337,7 @@ What has and has not been proven, as of 2026-11-10:
 | Pull request from a fork (backer does not own the repository) | **Not yet exercised.** The test backer owned the repository |
 | CI results by webhook from GitHub | **Proven 2026-11-10**: real GitHub deliveries through a tunnel moved a report to delivered (`check_suite`, `workflow_run`) and merged (`pull_request`), and the `push` re-pinned the project. Polling (`CI_POLL=true`) works too |
 | More than one task at a time (`max_concurrent` > 1) | **Not yet exercised** |
-| Coding agents | Claude Code; Codex **experimental** (`runner.name: codex`, never run against the real API). See [runners](docs/runners.md) |
+| Coding agents | Claude Code; Codex **experimental** (`runner.name: codex`; one real run with a ChatGPT sign-in, 2026-11-10). See [runners](docs/runners.md) |
 | Git hosts and CI | GitHub only, plus a generic signed-JSON CI adapter |
 
 Treat a first real run as a test: `--once`, a small `--budget`, and read `agentfund logs` afterwards.
