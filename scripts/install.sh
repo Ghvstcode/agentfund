@@ -1,13 +1,13 @@
 #!/bin/sh
 # AgentFund worker installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
 #
 # Detects OS and architecture, downloads the release archive and its checksum
 # file from GitHub, verifies the SHA-256, and installs the `agentfund` binary.
 #
 # Environment:
-#   AGENTFUND_REPO          GitHub repository to download from   (default: agentfund/agentfund)
+#   AGENTFUND_REPO          GitHub repository to download from   (default: ghvstcode/agentfund)
 #   AGENTFUND_VERSION       version to install, e.g. 0.3.1 or v0.3.1 (default: latest release)
 #   AGENTFUND_INSTALL_DIR   where to put the binary (default: ~/.local/bin, or /usr/local/bin when run as root)
 #   AGENTFUND_BASE_URL      download base URL override (mirrors, tests); the script fetches
@@ -16,7 +16,7 @@
 set -eu
 
 BINARY=agentfund
-REPO="${AGENTFUND_REPO:-agentfund/agentfund}"
+REPO="${AGENTFUND_REPO:-ghvstcode/agentfund}"
 VERSION="${AGENTFUND_VERSION:-}"
 BASE_URL="${AGENTFUND_BASE_URL:-}"
 

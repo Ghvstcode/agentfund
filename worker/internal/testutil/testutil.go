@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
 )
 
 // Repo is a non-bare git repository in a temp dir.

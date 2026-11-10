@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentfund/agentfund/worker/internal/apitest"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/pipeline"
-	"github.com/agentfund/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/apitest"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
 )
 
 const cliSecret = "sk-ant-oat01-CLISECRET-must-never-be-stored-0123456789"

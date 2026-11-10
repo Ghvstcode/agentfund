@@ -4,10 +4,10 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/minisign"
-	"github.com/agentfund/agentfund/worker/internal/spec"
-	"github.com/agentfund/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
 )
 
 // Hello is a fake instance serving a signed file:// copy of examples/hello-project.

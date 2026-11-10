@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 )
 
 // Code names the reason for a refusal.

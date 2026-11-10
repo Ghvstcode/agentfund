@@ -111,7 +111,7 @@ describe("config", () => {
     expect(c.authDevLogin).toBe(true);
     expect(c.warnings.join(" ")).toMatch(/DEV LOGIN IS ENABLED/);
     expect(c.webOrigins).toEqual(["http://localhost:5173"]);
-    expect(c.sourceUrl).toBe("https://github.com/agentfund/agentfund");
+    expect(c.sourceUrl).toBe("https://github.com/ghvstcode/agentfund");
     expect(c.docsUrl).toBeUndefined();
     expect(loadConfig({ ...env, SOURCE_URL: "https://git.example/fork", INSTALL_COMMAND: "brew install x", DOCS_URL: "https://docs.example" })).toMatchObject({ sourceUrl: "https://git.example/fork", installCommand: "brew install x", docsUrl: "https://docs.example" });
     expect(() => loadConfig({ ...env, DOCS_URL: "javascript:alert(1)" })).toThrow(/DOCS_URL/);

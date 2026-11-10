@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/spec"
-	"github.com/agentfund/agentfund/worker/internal/verify"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/verify"
 )
 
 // LoopOptions control Work.

@@ -20,7 +20,7 @@ const (
 	// DescriptorFile is the project descriptor at the repo root.
 	DescriptorFile = "agentfund.yaml"
 	// DefaultReleaseRepo is the placeholder GitHub repo releases are published to.
-	DefaultReleaseRepo = "agentfund/agentfund"
+	DefaultReleaseRepo = "ghvstcode/agentfund"
 )
 
 // Version, Commit and Date are stamped by the linker (see .goreleaser.yaml).

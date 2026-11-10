@@ -200,15 +200,16 @@ polling (`CI_POLL=true`). With the instance reachable from GitHub (a tunnel such
 real `check_suite`/`pull_request` delivery moves a report to delivered and merged. If it
 cannot be made reliable for v0.1, make polling the documented default instead and say so.
 
-### A5. The project's GitHub home (needs the human)
+### A5. The project's GitHub home
 
-Everything points at a placeholder, `github.com/agentfund/agentfund`: the Go module path
-(`worker/go.mod` and every import), [`.goreleaser.yaml`](../../.goreleaser.yaml),
-[`scripts/install.sh`](../../scripts/install.sh) (`AGENTFUND_REPO` default), the docs,
-`server/src/config.ts`, `web/src/config.ts`, `docker-compose.yml`, the issue template config. The
-repository actually lives at `ghvstcode/agentfund`. Ask the human: create the `agentfund` org and
-move the repo there, or rename everything to the real home. Then do it in one commit, with
-`grep -rn "agentfund/agentfund"` coming back empty (except where intended), and all checks green.
+**Done 2026-11-10** (human's choice: rename to the real home). Every reference to the old
+placeholder `github.com/agentfund/agentfund` now points at `ghvstcode/agentfund`: the Go module
+path, GoReleaser, `install.sh`, the server and web defaults, `docker-compose.yml`, the issue
+template config and the docs; gridrs links point at `github.com/Ghvstcode/gridrs`. Lower case
+throughout, because GHCR image names and Go module paths must be. Left as they are: the
+`agentfund.dev` JSON Schema `$id`s (identifiers, never fetched) and the local `agentfund/...`
+image tags. Both repositories are **private**: the install script, `go install` and the
+release downloads only work for the public once they are public (a launch decision).
 
 ### A6. Release rehearsal
 
@@ -337,7 +338,7 @@ Don't start without the human.
 Prepare each with options and a recommendation, then ask:
 
 1. Merge `claude/vibrant-fermat-ig3cvg` into `main` directly, or through a PR? (§2)
-2. The project's GitHub home: create `agentfund` org or rename to `ghvstcode/agentfund`? (A5)
+2. ~~The project's GitHub home (A5)~~: renamed to `ghvstcode/agentfund`, 2026-11-10.
 3. Spending: model credits for A1/A2 (a few dollars), a second GitHub account for A3.
 4. When to tag `v0.1.0-rc1` and `v0.1.0`. (A6)
 5. Does Codex ship as experimental or stay hidden in v0.1? (A2)
@@ -357,4 +358,5 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   completed all three `hello-project` tasks end to end. Found and fixed: dependents were
   claimable before the pin contained the merge (server gate, tests); Claude Code had web search
   and cloud-scheduling tools (now a `--tools` allowlist). `make trial` runs a `TASKS` list.
-  Left in A1: a gridrs task. Branch `claude/a1-real-model-trial`.
+  Left in A1: a gridrs task. PR #1.
+- 2026-11-10: A5 done: renamed from the placeholder `agentfund/agentfund` to `ghvstcode/agentfund`.

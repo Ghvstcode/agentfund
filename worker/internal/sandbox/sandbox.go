@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
 // Fixed properties of the sandbox image (images/sandbox/Dockerfile).

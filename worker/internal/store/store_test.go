@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
 )
 
 func at(s string) time.Time {

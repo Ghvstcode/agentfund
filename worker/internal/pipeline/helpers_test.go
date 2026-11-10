@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
 )
 
 // closedWindow returns a one-hour schedule window that does not contain now.

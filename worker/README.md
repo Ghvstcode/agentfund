@@ -21,7 +21,7 @@ verification chain), `protocol.md` + `openapi.yaml` (wire protocol v1).
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
 # or, from a checkout (Go 1.27+):
 make -C worker build        # → worker/bin/agentfund
 ```

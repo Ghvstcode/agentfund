@@ -21,7 +21,7 @@ services:
     # Not published on the host; the app reaches it on the compose network.
 
   app:
-    image: ghcr.io/agentfund/agentfund:${AGENTFUND_TAG:-latest}
+    image: ghcr.io/ghvstcode/agentfund:${AGENTFUND_TAG:-latest}
     build:
       context: .
       dockerfile: server/Dockerfile

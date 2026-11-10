@@ -70,7 +70,7 @@ describe('BackDialog', () => {
     const { dialog } = await openDialog();
     expect(
       await within(dialog).findByText(
-        'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images',
+        'git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images',
       ),
     ).toBeInTheDocument();
   });
