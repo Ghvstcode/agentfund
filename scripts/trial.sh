@@ -3,6 +3,8 @@
 #
 #   ANTHROPIC_API_KEY=sk-ant-…   sh scripts/trial.sh          # Claude Code (or CLAUDE_CODE_OAUTH_TOKEN)
 #   RUNNER=codex OPENAI_API_KEY=sk-…  sh scripts/trial.sh     # Codex (experimental; or CODEX_API_KEY)
+#   RUNNER=codex CODEX_ACCESS_TOKEN=at-…  sh scripts/trial.sh # Codex, ChatGPT Business/Enterprise access token
+#   RUNNER=codex sh scripts/trial.sh                           # Codex, ChatGPT sign-in in CODEX_SIGNIN_HOME
 #
 # Same local instance and signed sample project as `make demo`, but the sandbox image is the real
 # one (images/sandbox: the unmodified agent CLIs), so the agent really calls the model and the
@@ -16,7 +18,9 @@
 # the same as a one-item TASKS), TRIAL_PORT (default 8788),
 # SANDBOX_IMAGE / EGRESS_PROXY_IMAGE (default agentfund/sandbox:dev, agentfund/egress-proxy:dev;
 # built from images/ when missing), TRIAL_DIR (state directory, default .trial/ in the repo),
-# TRIAL_KEEP=1 (keep the state directory, run logs included, when the trial stops).
+# TRIAL_KEEP=1 (keep the state directory, run logs included, when the trial stops),
+# CODEX_SIGNIN_HOME (Codex ChatGPT sign-in made with `CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login`; default
+# ~/.config/agentfund/codex, the worker's own default; never ~/.codex).
 #
 # Needs: docker (running), node 22 + pnpm, go, git, curl, openssl. Ctrl-C removes everything.
 set -eu
@@ -27,6 +31,7 @@ PORT=${TRIAL_PORT:-8788}
 BASE="http://localhost:$PORT"
 PG="agentfund-trial-pg"
 RUNNER=${RUNNER:-claude-code}
+CODEX_SIGNIN_HOME=${CODEX_SIGNIN_HOME:-$HOME/.config/agentfund/codex}
 MODEL=${MODEL:-}
 TASKS=${TASKS:-${TASK:-0001-slugify}}
 USER_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}   # lib_worker_env overwrites it with the mock's placeholder
@@ -40,7 +45,8 @@ totals() { api GET /v1/projects/hello | json '"  pledged "+v.totals.pledged.toLo
 
 case "$RUNNER" in
   claude-code) [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (from \`claude setup-token\`)." >&2; exit 2; } ;;
-  codex) [ -n "${OPENAI_API_KEY:-}${CODEX_API_KEY:-}" ] || { echo "Set OPENAI_API_KEY or CODEX_API_KEY." >&2; exit 2; } ;;
+  codex) [ -n "${OPENAI_API_KEY:-}${CODEX_API_KEY:-}${CODEX_ACCESS_TOKEN:-}" ] || [ -s "$CODEX_SIGNIN_HOME/auth.json" ] || {
+           echo "Set OPENAI_API_KEY, CODEX_API_KEY or CODEX_ACCESS_TOKEN, or sign in with ChatGPT once: mkdir -p -m 700 $CODEX_SIGNIN_HOME && CODEX_HOME=$CODEX_SIGNIN_HOME npx -y @openai/codex@0.167.0 login" >&2; exit 2; } ;;
   *) echo "RUNNER must be claude-code or codex, not $RUNNER" >&2; exit 2 ;;
 esac
 lib_need docker node pnpm go git curl openssl
@@ -76,7 +82,7 @@ if [ -n "$USER_OAUTH_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$USER_OAUTH_
 # A failed attempt must be retryable at once here, and the runner is the one asked for.
 sed -i.bak "/^global:/a\\
   retry_failed_after: \"0\"\\
-  runner: {name: $RUNNER, model: \"$MODEL\"}" "$AGENTFUND_CONFIG_DIR/config.yaml" && rm "$AGENTFUND_CONFIG_DIR/config.yaml.bak"
+  runner: {name: $RUNNER, model: \"$MODEL\", codex_home: \"$CODEX_SIGNIN_HOME\"}" "$AGENTFUND_CONFIG_DIR/config.yaml" && rm "$AGENTFUND_CONFIG_DIR/config.yaml.bak"
 note "$BASE/hello  (sign in as \"maintainer\" or \"donor\")"
 
 # Tasks run in order on one instance: a task that depends on another only becomes claimable once

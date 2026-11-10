@@ -28,33 +28,52 @@ import (
 const Redacted = "[REDACTED]"
 
 // Scrubber removes secret values from text.
-type Scrubber struct{ r *strings.Replacer }
+type Scrubber struct {
+	mu      sync.RWMutex
+	secrets []string
+	r       *strings.Replacer
+}
 
 // NewScrubber builds a scrubber for the given secret values. Both the raw
 // value and its JSON-escaped form are replaced.
 func NewScrubber(secrets []string) *Scrubber {
+	s := &Scrubber{}
+	s.Add(secrets...)
+	return s
+}
+
+// Add scrubs more values from now on (credentials renewed during a run).
+func (s *Scrubber) Add(secrets ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secrets = append(s.secrets, secrets...)
 	var pairs []string
 	seen := map[string]bool{}
-	sorted := append([]string{}, secrets...)
+	sorted := append([]string{}, s.secrets...)
 	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
-	for _, s := range sorted {
-		if len(s) < 8 || seen[s] {
+	for _, v := range sorted {
+		if len(v) < 8 || seen[v] {
 			continue
 		}
-		seen[s] = true
-		pairs = append(pairs, s, Redacted)
-		if esc, err := json.Marshal(s); err == nil {
-			if inner := string(esc[1 : len(esc)-1]); inner != s {
+		seen[v] = true
+		pairs = append(pairs, v, Redacted)
+		if esc, err := json.Marshal(v); err == nil {
+			if inner := string(esc[1 : len(esc)-1]); inner != v {
 				pairs = append(pairs, inner, Redacted)
 			}
 		}
 	}
-	return &Scrubber{r: strings.NewReplacer(pairs...)}
+	s.r = strings.NewReplacer(pairs...)
 }
 
 // String scrubs s.
 func (s *Scrubber) String(in string) string {
-	if s == nil || s.r == nil {
+	if s == nil {
+		return in
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.r == nil {
 		return in
 	}
 	return s.r.Replace(in)

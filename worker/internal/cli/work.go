@@ -55,6 +55,9 @@ func newWorker(e *env, arg string, needKey bool) (*pipeline.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c, ok := agent.(*runner.Codex); ok {
+		c.Home = cfg.Global.CodexHomeDir()
+	}
 	return &pipeline.Worker{
 		Cfg: cfg, Ref: ref, Project: proj,
 		API:      api.New(ref.Server, key),
