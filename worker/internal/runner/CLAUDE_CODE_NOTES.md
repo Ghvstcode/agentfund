@@ -146,6 +146,7 @@ minutes to give up, a task with `timeout_minutes` under 5 still ends as a
 - The CLI honours `HTTPS_PROXY`/`HTTP_PROXY` (and lowercase forms; first set wins in the order `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY`); no SOCKS. The sandbox sets all four to `http://egress-proxy:3128`.
 - Required host for model requests: `api.anthropic.com`. That is the whole default egress allowlist (`sandbox.allow_git_host` and `sandbox.extra_allow_hosts` add to it).
 - The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". A long-lived `setup-token` token did **not** need it: four real runs on 2026-11-10 under such a token reached only `api.anthropic.com` (egress records). Token refresh near expiry was not tested; if a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
+- Extra CAs: 2.1.289 (a compiled binary, not plain Node) honours `NODE_EXTRA_CA_CERTS`, which *adds* to its roots. Checked on 2026-11-10 against a local TLS server signed by a test CA. Without the variable it fails with `Unable to connect to API: SSL certificate verification failed (UNABLE_TO_VERIFY_LEAF_SIGNATURE)`, and the message itself suggests `NODE_EXTRA_CA_CERTS`. With it, TLS succeeds. `sandbox.extra_ca_certs` sets it to `/etc/agentfund/ca/extra.pem`.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` are set so the CLI does not try telemetry/update hosts that the proxy would refuse anyway.
 
 ## Real runs

@@ -239,6 +239,7 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `sandbox.allow_git_host` | `false` | By default the sandbox reaches only `api.anthropic.com`. `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |
 | `sandbox.pass_env` | `[]` | Names of extra environment variables passed to the agent (e.g. `ANTHROPIC_BASE_URL`). Their hosts are unreachable unless also allow-listed. |
+| `sandbox.extra_ca_certs` | `""` | Path (absolute, or `~/...`) to a PEM file of CA certificates the agent should trust besides the image's own roots: the CA of a TLS-inspecting corporate proxy, or of a private gateway. See [below](#behind-a-tls-inspecting-proxy). |
 | `sandbox.docker` | `"docker"` | Docker CLI binary. |
 | `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default, which for Claude Code 2.1.289 is an Opus model. Budgets count tokens, not dollars, so set a cheaper model if cost matters. |
 | `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
@@ -261,6 +262,35 @@ ceiling can only tighten the global one.
 | `AGENTFUND_CONFIG_DIR` | Config directory. Otherwise `$XDG_CONFIG_HOME/agentfund`, then `~/.config/agentfund`. |
 | `AGENTFUND_DATA_DIR` | State directory. Otherwise `$XDG_DATA_HOME/agentfund`, then `~/.local/share/agentfund`. |
 | `AGENTFUND_SANDBOX_IMAGE`, `AGENTFUND_EGRESS_PROXY_IMAGE` | Image overrides. The `work` flags win over these; these win over the config. |
+
+### Behind a TLS-inspecting proxy
+
+Some corporate networks re-sign all TLS traffic with their own CA. The agent in the sandbox
+does not trust that CA and fails with `SELF_SIGNED_CERT_IN_CHAIN` or
+`UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Export the CA as PEM (your IT department has it; on macOS,
+Keychain Access → File → Export Items, then `openssl x509 -inform der -in ca.cer -out ca.pem`
+if it came out as DER) and point the worker at it:
+
+```yaml
+global:
+  sandbox:
+    extra_ca_certs: "~/corp-ca.pem"
+```
+
+The worker checks the file when it loads the config: it must be readable and hold only
+`CERTIFICATE` blocks. A private key in it is refused, because the agent can read the file.
+For each run the certificates are copied into the sandbox, not bind-mounted, so the path only
+has to exist on your machine (Colima and remote Docker hosts cannot see most host paths). They
+land in a root-owned directory the agent can read but not change. Two variables point at them:
+
+- `NODE_EXTRA_CA_CERTS` points at your certificates alone. Claude Code adds them to its roots.
+- `SSL_CERT_FILE` points at the image's roots plus your certificates. Some clients read it *in
+  place of* their default roots: Codex's WebSocket connection, OpenSSL and Go. That is why it
+  is a combined bundle.
+
+This covers *transparent* interception only. If your network only lets traffic out through an
+explicit proxy (`HTTPS_PROXY` on your machine), the sandbox still cannot reach the model API:
+the egress sidecar connects to it directly.
 
 ### When the project's commit moves
 
@@ -417,6 +447,8 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | --- | --- | --- |
 | `no credentials for the coding agent: set CLAUDE_CODE_OAUTH_TOKEN ...` | Neither variable is set and there is no `claude_token_command`. | Export one in the shell (or env file) that runs `work`. |
 | `the model provider rejected your credentials or account (<why>); fix them and start the worker again` | Expired or revoked token, billing or organisation problem. The worker has stopped. | Fix the credential. If an OAuth token is valid but still rejected, try adding `platform.claude.com` to `sandbox.extra_allow_hosts` (untested; see `CLAUDE_CODE_NOTES.md`). |
+| `API Error: Unable to connect to API: SSL certificate verification failed (SELF_SIGNED_CERT_IN_CHAIN)` (or `UNABLE_TO_VERIFY_LEAF_SIGNATURE`) in the agent output | Your network re-signs TLS with a CA the sandbox does not trust. | Set [`sandbox.extra_ca_certs`](#behind-a-tls-inspecting-proxy). |
+| `global.sandbox.extra_ca_certs: ...` | The CA file is missing, unreadable, not PEM, or holds something other than certificates. | Do what the message says; `""` turns the option off. |
 | `docker is not available: ...` | The daemon is not running or `docker` is not on `PATH`. | Start Docker; under launchd check the unit's `PATH`. |
 | `container image <ref> is not present locally. From a checkout of the repository, build both images with make -C worker images; ...` | Sandbox or proxy image missing. | `make -C worker images`. |
 | `no API key for <server>: run agentfund login ...` | Not logged in to that instance. | `agentfund login <server>`. |

@@ -13,7 +13,8 @@ type fakeEngine struct {
 	mu    sync.Mutex
 	calls [][]string
 	envs  [][]string
-	fail  string // substring of the joined args that should fail
+	stdin []string // what each Stream call was fed ("" when nothing)
+	fail  string   // substring of the joined args that should fail
 	out   map[string]string
 }
 
@@ -35,7 +36,14 @@ func (f *fakeEngine) Output(_ context.Context, args ...string) (string, error) {
 	return f.out[args[0]+" "+args[1]], nil
 }
 
-func (f *fakeEngine) Stream(_ context.Context, _ io.Reader, _, _ io.Writer, env []string, args ...string) (int, error) {
+func (f *fakeEngine) Stream(_ context.Context, in io.Reader, _, _ io.Writer, env []string, args ...string) (int, error) {
+	var fed []byte
+	if in != nil {
+		fed, _ = io.ReadAll(in)
+	}
+	f.mu.Lock()
+	f.stdin = append(f.stdin, string(fed))
+	f.mu.Unlock()
 	return 0, f.record(args, env)
 }
 
@@ -98,6 +106,76 @@ func TestSandboxContainerIsLockedDown(t *testing.T) {
 	}
 	if n := strings.Count(joined, "--network "); n != 1 {
 		t.Errorf("sandbox must be on exactly one network, found %d", n)
+	}
+}
+
+const testCA = "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
+
+func TestNoCACertsByDefault(t *testing.T) {
+	joined := strings.Join(boxArgs(spec()), " ")
+	for _, s := range []string{CADir, "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"} {
+		if strings.Contains(joined, s) {
+			t.Errorf("default sandbox args mention %q: %s", s, joined)
+		}
+	}
+	f := &fakeEngine{}
+	if _, err := Start(context.Background(), f, spec()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if c[0] == "exec" {
+			t.Fatalf("Start ran an exec without extra CA certificates: %v", c)
+		}
+	}
+}
+
+func TestExtraCACertsAreInstalledReadOnly(t *testing.T) {
+	sp := spec()
+	sp.ExtraCACerts = []byte(testCA)
+	args := boxArgs(sp)
+	for _, want := range [][]string{
+		{"--tmpfs", "/etc/agentfund/ca:rw,noexec,nosuid,nodev,size=4m,mode=0755"},
+		{"-e", "NODE_EXTRA_CA_CERTS=/etc/agentfund/ca/extra.pem"},
+		{"-e", "SSL_CERT_FILE=/etc/agentfund/ca/bundle.pem"},
+		{"--user", "10001:10001"},
+	} {
+		if !has(args, want...) {
+			t.Errorf("sandbox args lack %v\n%v", want, args)
+		}
+	}
+	// The tmpfs must not be owned by the agent.
+	if j := strings.Join(args, " "); strings.Contains(j, CADir+":rw,noexec,nosuid,nodev,size=4m,mode=0755,uid") {
+		t.Errorf("CA tmpfs is not root-owned: %s", j)
+	}
+
+	f := &fakeEngine{}
+	if _, err := Start(context.Background(), f, sp); err != nil {
+		t.Fatal(err)
+	}
+	last := f.calls[len(f.calls)-1]
+	if !has(last, "exec", "-i", "-u", "0:0", "agentfund-t-0123abcd-sbx", "sh", "-c") {
+		t.Fatalf("CA install step: %v", last)
+	}
+	script := last[len(last)-1]
+	for _, want := range []string{"cat > /etc/agentfund/ca/extra.pem", "cat /etc/ssl/certs/ca-certificates.crt /etc/agentfund/ca/extra.pem > /etc/agentfund/ca/bundle.pem", "umask 022"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("install script %q lacks %q", script, want)
+		}
+	}
+	if got := f.stdin[len(f.stdin)-1]; got != testCA {
+		t.Fatalf("certificates streamed in: %q", got)
+	}
+	if strings.Contains(strings.Join(f.joined(), " "), "type=bind") {
+		t.Fatal("extra CA certificates must be copied in, not bind-mounted")
+	}
+
+	// A failed install tears the sandbox down.
+	f = &fakeEngine{fail: "exec -i -u 0:0"}
+	if _, err := Start(context.Background(), f, sp); err == nil || !strings.Contains(err.Error(), "extra CA") {
+		t.Fatalf("install failure: %v", err)
+	}
+	if j := strings.Join(f.joined(), "|"); !strings.Contains(j, "rm -f -v agentfund-t-0123abcd-sbx") {
+		t.Fatalf("no cleanup after a failed CA install: %s", j)
 	}
 }
 
@@ -175,6 +253,8 @@ func TestSpecValidation(t *testing.T) {
 		func(s *Spec) { s.AllowHosts = []string{"a.example/path"} },
 		func(s *Spec) { s.AllowHosts = []string{""} },
 		func(s *Spec) { s.AllowHosts = []string{"a b"} },
+		func(s *Spec) { s.ExtraCACerts = []byte("not pem") },
+		func(s *Spec) { s.ExtraCACerts = []byte(testCA + "-----BEGIN PRIVATE KEY-----\n") },
 	}
 	for i, mut := range bad {
 		s := spec()

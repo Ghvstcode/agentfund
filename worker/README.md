@@ -132,6 +132,7 @@ global:
     allow_git_host: false                # true only if verify must fetch from the git host
     extra_allow_hosts: []                # extra host[:port] the sandbox may reach
     pass_env: []                         # extra variable NAMES passed to the agent process
+    extra_ca_certs: ""                   # PEM file of extra CAs the agent trusts (TLS-inspecting proxy)
     docker: "docker"
   runner:
     name: "claude-code"

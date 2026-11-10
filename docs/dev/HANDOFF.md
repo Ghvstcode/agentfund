@@ -86,9 +86,9 @@ or merge it first (ask the human which they prefer), then branch from `main` for
 
 ### Findings from that run that are not fixed yet
 
-- **TLS-inspecting networks break the sandbox.** Behind a corporate proxy that re-signs TLS, the
-  agent fails with `SELF_SIGNED_CERT_IN_CHAIN`, and the worker has no way to add a CA. The cloud
-  session worked around it with a local image carrying `NODE_EXTRA_CA_CERTS`. See A7.
+- ~~**TLS-inspecting networks break the sandbox.**~~ Fixed by `sandbox.extra_ca_certs` (A7).
+  Networks that allow only an explicit upstream proxy still fail: the egress sidecar dials out
+  directly.
 - ~~**"API unreachable" counts as a task failure**~~ (both runners). Fixed 2026-11-10: the
   claim is released and the worker backs off. See A7.
 - Two things that are working as designed but will trip you while testing:
@@ -253,9 +253,11 @@ to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy
 
 ### A7. Small fixes found on 2026-11-08
 
-- **Custom CA for the sandbox**: a `sandbox.extra_ca_certs` (path to a PEM bundle) that the worker
-  mounts read-only into the sandbox and exports as `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`, plus
-  the matching config schema, docs and a test. Needed by backers behind corporate proxies.
+- **Custom CA for the sandbox** (done 2026-11-10): `sandbox.extra_ca_certs` (path to a PEM
+  bundle), validated at load, exported as `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`, with config
+  docs and tests. It is copied into the sandbox rather than bind-mounted, because Colima cannot
+  see most host paths. `SSL_CERT_FILE` is a combined bundle, because Codex's WebSocket client
+  uses it in place of its roots.
 - ~~**Unreachable API should release, not fail.**~~ Done 2026-11-10 (`Outcome.NetworkProblem`,
   see the progress log). When the agent never reached the model API (Codex
   `Unreachable()`, Claude Code "Unable to connect to API"), release the claim with a clear reason
@@ -395,3 +397,7 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   reporting `failed`. Claude Code's unreachable stream recorded live (2.1.289, four ways, fake
   key, no tokens); the Codex release path is tested with recorded and synthetic streams only.
   New e2e scenario `unreachable`. Branch `claude/great-kalam-f5b5f7`.
+- 2026-11-10: A7 custom CA: `sandbox.extra_ca_certs` (validated PEM, copied into a root-owned
+  tmpfs, `NODE_EXTRA_CA_CERTS` + combined `SSL_CERT_FILE`). Verified that Claude Code 2.1.289
+  and Codex 0.167.0 honour these against a local TLS server; Codex's WebSocket
+  client uses `SSL_CERT_FILE` in place of its roots. Egress proxy unchanged (CONNECT-only, no TLS).

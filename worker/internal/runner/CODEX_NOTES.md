@@ -51,6 +51,23 @@ Allowlist: `api.openai.com:443` only. Observed in the sandbox with a fake key:
   still there with the flags above. It did not stop the run from starting;
   *not verified* is whether it changes anything once the model answers.
 
+Extra CAs (`sandbox.extra_ca_certs`), checked on 0.167.0 on 2026-11-10 with a fake key and
+a local TLS server signed by a test CA:
+
+- The HTTP client reads `CODEX_CA_CERTIFICATE`, else `SSL_CERT_FILE` (log line
+  `codex_http_client::custom_ca: ... source_env="SSL_CERT_FILE"`), and with neither uses the
+  system roots.
+- The HTTP client *adds* that file to the public roots. With the test CA alone, under either
+  variable, it still reached the real OpenAI endpoints and got a 401 for the fake key.
+- The Responses WebSocket also honours `SSL_CERT_FILE`, but uses it *in place of* the roots.
+  With the test CA alone it failed at `stage=Tls`. With `CODEX_CA_CERTIFICATE` it behaved as
+  without any variable (`stage=Unknown`, the fake-key rejection).
+- So the worker sets `SSL_CERT_FILE` to the image's roots plus the extra certificates
+  (`/etc/agentfund/ca/bundle.pem`, 149 certificates in that run) and leaves
+  `CODEX_CA_CERTIFICATE` unset. With that bundle the HTTP client got past TLS to the local
+  server. Against the real endpoint the WebSocket was back to the baseline: `stage=Unknown`
+  and three 401s, the same as without the variable.
+
 ## Events (`--json`)
 
 Seen in sandbox runs: `thread.started`, `turn.started`, `error {message}`,

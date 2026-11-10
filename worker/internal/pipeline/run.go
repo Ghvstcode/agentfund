@@ -15,6 +15,7 @@ import (
 
 	"github.com/ghvstcode/agentfund/worker/internal/api"
 	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
 	"github.com/ghvstcode/agentfund/worker/internal/githost"
 	"github.com/ghvstcode/agentfund/worker/internal/gitx"
 	"github.com/ghvstcode/agentfund/worker/internal/logs"
@@ -456,11 +457,19 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	}
 	allow := w.egressAllowlist(claim.RepoURL)
 	sb := w.Cfg.Global.Sandbox
+	var extraCA []byte
+	if sb.ExtraCACerts != "" {
+		// Read again: the file may have changed since the config was loaded.
+		if extraCA, err = config.ReadCACerts(sb.ExtraCACerts); err != nil {
+			return r.release(parent, "cannot read the extra CA certificates: "+err.Error()), nil
+		}
+	}
 	lg.Event("sandbox", map[string]any{"image": sb.Image, "egress_proxy_image": sb.EgressProxyImage, "egress_allowlist": allow,
-		"files": len(plan.Files), "dropped": plan.Dropped, "cpus": sb.CPUs, "memory": sb.Memory, "pids": sb.PIDs})
+		"files": len(plan.Files), "dropped": plan.Dropped, "cpus": sb.CPUs, "memory": sb.Memory, "pids": sb.PIDs,
+		"extra_ca_certs": sb.ExtraCACerts})
 	session, err := sandbox.Start(ctx, w.Engine, sandbox.Spec{
 		RunID: runID(claim.ClaimID), Image: sb.Image, ProxyImage: sb.EgressProxyImage,
-		CPUs: sb.CPUs, Memory: sb.Memory, PIDs: sb.PIDs, AllowHosts: allow,
+		CPUs: sb.CPUs, Memory: sb.Memory, PIDs: sb.PIDs, AllowHosts: allow, ExtraCACerts: extraCA,
 	})
 	if err != nil {
 		if res, stopped := r.interrupted(parent); stopped {
