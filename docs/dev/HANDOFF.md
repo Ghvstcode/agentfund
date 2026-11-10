@@ -223,6 +223,21 @@ to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy
 3. Point the defaults at the published images: `config.DefaultSandboxImage` /
    `DefaultEgressProxyImage` in `worker/internal/config/config.go` are still `:dev` names, and the
    docs tell people to pin by digest; make that concrete.
+   **Done 2026-11-10:** the release workflow builds the images first and GoReleaser stamps their
+   digests into the binary (`-X …/config.DefaultSandboxImage=…@sha256:…`); a saved config stores
+   `""` for them so an upgrade brings the new images; `agentfund version` names them; a missing
+   pinned image gets a `docker pull` hint. Step 1 also passed locally (`goreleaser check`, a
+   snapshot release of all four archives). Not yet run on GitHub: the workflow itself (step 2).
+
+   Traps for step 2 and step 4 with an rc tag:
+   - An rc tag gets only its own image tag (`0.1.0-rc1`; metadata-action drops the `v`), never
+     `latest`, so `docker compose up` needs `AGENTFUND_TAG=0.1.0-rc1`.
+   - GoReleaser publishes a draft, and GitHub's "latest release" skips drafts and pre-releases:
+     install the rc with `AGENTFUND_VERSION=0.1.0-rc1 sh scripts/install.sh` (after publishing the
+     draft as a pre-release).
+   - The repository is private, and so are GHCR packages pushed from it. Each package's
+     visibility is set on its own settings page. Until both repository and packages are public,
+     nobody else can install the binary or pull the images it defaults to.
 4. On a clean macOS machine and a clean Linux machine: `install.sh` → `agentfund --version` →
    `docker compose up` from the published server image → the quickstart, as a newcomer would.
 5. Fix, tag `v0.1.0`, publish the draft release, update the README Status section.
@@ -237,7 +252,7 @@ to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy
   and back off, as for a rate limit, instead of `failed` plus the 24 h lockout. Probably a new
   `Outcome` field (e.g. `NetworkProblem`) handled in `worker/internal/pipeline/run.go` next to
   `CredentialProblem` and `RateLimited`.
-- **`SECURITY.md` names no real contact address.** Get one from the human.
+- ~~**`SECURITY.md` names no real contact address.**~~ Done 2026-11-10: mail@tobiokewole.com.
 
 ### Phase A exit criteria
 
@@ -342,7 +357,7 @@ Prepare each with options and a recommendation, then ask:
 3. Spending: model credits for A1/A2 (a few dollars), a second GitHub account for A3.
 4. When to tag `v0.1.0-rc1` and `v0.1.0`. (A6)
 5. Does Codex ship as experimental or stay hidden in v0.1? (A2)
-6. Security contact address. (A7)
+6. ~~Security contact address (A7)~~: mail@tobiokewole.com, 2026-11-10.
 7. Hosting, domain and on-call for the public instance. (B1)
 8. The subscription-terms stance and whether to contact Anthropic. (B3)
 9. The trending/featured design. (C1)
@@ -360,3 +375,6 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   and cloud-scheduling tools (now a `--tools` allowlist). `make trial` runs a `TASKS` list.
   Left in A1: a gridrs task. PR #1.
 - 2026-11-10: A5 done: renamed from the placeholder `agentfund/agentfund` to `ghvstcode/agentfund`.
+- 2026-11-10: A6 prep: released binaries default to their images by digest; `goreleaser check` and a
+  local snapshot release pass; rc tags no longer move `latest`. Security contact set (A7). A3
+  deferred: no second GitHub account yet (human's call).

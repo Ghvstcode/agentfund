@@ -118,6 +118,40 @@ func TestConfigRoundTripKeepsCommentsAndValues(t *testing.T) {
 	}
 }
 
+// A saved config leaves the default images unnamed, so the next binary runs its own released
+// images instead of the ones the binary that wrote the file happened to have; images chosen by
+// the backer are kept.
+func TestSavedConfigDoesNotPinDefaultImages(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvConfigDir, dir)
+	if err := Default().Save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if !strings.Contains(string(raw), "\n    image: \"\"\n") || !strings.Contains(string(raw), "\n    egress_proxy_image: \"\"\n") ||
+		strings.Contains(string(raw), DefaultSandboxImage) {
+		t.Fatalf("default images written out:\n%s", raw)
+	}
+	defer func(s, e string) { DefaultSandboxImage, DefaultEgressProxyImage = s, e }(DefaultSandboxImage, DefaultEgressProxyImage)
+	DefaultSandboxImage = "ghcr.io/ghvstcode/agentfund-sandbox@sha256:" + strings.Repeat("1", 64) // an upgraded binary
+	DefaultEgressProxyImage = "ghcr.io/ghvstcode/agentfund-egress-proxy@sha256:" + strings.Repeat("2", 64)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Global.Sandbox.Image != DefaultSandboxImage || c.Global.Sandbox.EgressProxyImage != DefaultEgressProxyImage {
+		t.Fatalf("images after upgrade: %q, %q", c.Global.Sandbox.Image, c.Global.Sandbox.EgressProxyImage)
+	}
+	own := "registry.example/sandbox@sha256:" + strings.Repeat("3", 64)
+	c.Global.Sandbox.Image = own
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := Load(); err != nil || back.Global.Sandbox.Image != own || back.Global.Sandbox.EgressProxyImage != DefaultEgressProxyImage {
+		t.Fatalf("own image not kept: %+v, %v", back.Global.Sandbox, err)
+	}
+}
+
 func TestDefaultsAreConservative(t *testing.T) {
 	t.Setenv(EnvConfigDir, t.TempDir())
 	c, err := Load()

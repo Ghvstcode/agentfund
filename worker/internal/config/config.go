@@ -19,20 +19,18 @@ import (
 	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
-// Default image references. These are the names the repository's own
+// Default image references. A build from the checkout uses the names the repository's own
 // Dockerfiles are built under (`make -C worker images`):
 //
 //	images/sandbox       -> agentfund/sandbox:dev
 //	images/egress-proxy  -> agentfund/egress-proxy:dev
 //
-// A tag can be re-pointed by whoever controls the registry (or the local
-// image store); a digest cannot. Once images are published, pin them by
-// digest in config.yaml:
-//
-//	sandbox:
-//	  image: "ghcr.io/<org>/sandbox@sha256:<digest>"
-//	  egress_proxy_image: "ghcr.io/<org>/egress-proxy@sha256:<digest>"
-const (
+// A released binary has the digests of the images published with it stamped in by the linker
+// (.goreleaser.yaml, set by the release workflow), e.g.
+// ghcr.io/ghvstcode/agentfund-sandbox@sha256:<digest>. A tag can be re-pointed by whoever
+// controls the registry (or the local image store); a digest cannot. `agentfund version`
+// prints both.
+var (
 	DefaultSandboxImage     = "agentfund/sandbox:dev"
 	DefaultEgressProxyImage = "agentfund/egress-proxy:dev"
 )
@@ -159,6 +157,13 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if c.Projects == nil {
 		c.Projects = map[string]*Project{}
+	}
+	// "" means this binary's own images, so an upgrade brings the images released with it.
+	if c.Global.Sandbox.Image == "" {
+		c.Global.Sandbox.Image = DefaultSandboxImage
+	}
+	if c.Global.Sandbox.EgressProxyImage == "" {
+		c.Global.Sandbox.EgressProxyImage = DefaultEgressProxyImage
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -379,10 +384,11 @@ func (c *Config) render() ([]byte, error) {
 	w("  # your environment (or this command) at run time and passes them to the sandbox.\n")
 	w("  claude_token_command: %q\n", g.ClaudeTokenCommand)
 	w("  sandbox:\n")
-	w("    # Sandbox image the agent runs in. Prefer a digest pin (name@sha256:...).\n")
-	w("    image: %q\n", g.Sandbox.Image)
+	w("    # Sandbox image the agent runs in. \"\" = the one this binary was released with\n")
+	w("    # (`%s version` names it). Your own: pin it by digest (name@sha256:...).\n", app.BinaryName)
+	w("    image: %q\n", unlessDefault(g.Sandbox.Image, DefaultSandboxImage))
 	w("    # Egress proxy sidecar image; the only route from the sandbox to the network.\n")
-	w("    egress_proxy_image: %q\n", g.Sandbox.EgressProxyImage)
+	w("    egress_proxy_image: %q\n", unlessDefault(g.Sandbox.EgressProxyImage, DefaultEgressProxyImage))
 	w("    # CPU limit of the sandbox container (docker --cpus).\n")
 	w("    cpus: %q\n", g.Sandbox.CPUs)
 	w("    # Memory limit of the sandbox container (docker --memory).\n")
@@ -428,6 +434,15 @@ func (c *Config) render() ([]byte, error) {
 	}
 	b.Write(pj)
 	return []byte(b.String()), nil
+}
+
+// unlessDefault is v, or "" when v is the binary's default: a saved config must not pin the
+// images of the binary that happened to write it.
+func unlessDefault(v, def string) string {
+	if v == def {
+		return ""
+	}
+	return v
 }
 
 // Credentials is credentials.yaml: server API keys (af_…), keyed by server URL.

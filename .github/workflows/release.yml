@@ -7,13 +7,24 @@ permissions:
   packages: write
 
 jobs:
+  # The worker is built after the images: its default sandbox and egress-proxy images are the
+  # digests just pushed (stamped in by .goreleaser.yaml), so a released binary runs exactly the
+  # images released with it and a re-pointed tag cannot change what it runs.
   worker:
+    needs: images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version-file: worker/go.mod, cache-dependency-path: worker/go.sum }
+      - uses: actions/download-artifact@v4
+        with: { pattern: image-ref-*, merge-multiple: true, path: image-refs }
+      - name: Image digests for the binary
+        run: |
+          echo "RELEASE_SANDBOX_IMAGE=$(cat image-refs/agentfund-sandbox)" >> "$GITHUB_ENV"
+          echo "RELEASE_EGRESS_PROXY_IMAGE=$(cat image-refs/agentfund-egress-proxy)" >> "$GITHUB_ENV"
+          cat image-refs/*
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -38,15 +49,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # GHCR names must be lower case; the owner is not.
+      - id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          images: ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.name }}
+          # A pre-release (v0.1.0-rc1) gets only its own tag, never latest or 0.1.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v6
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -56,3 +72,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
+      - name: Record the digest
+        run: |
+          mkdir -p image-ref
+          echo "ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.name }}@${{ steps.build.outputs.digest }}" > "image-ref/${{ matrix.name }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: "image-ref-${{ matrix.name }}", path: image-ref/ }

@@ -57,7 +57,7 @@ release archive, verifies its SHA-256 against the release's checksum file, and i
 | Docker (the `docker` CLI and a running daemon) | The sandbox and its egress proxy are containers. |
 | `git` | The worker clones the project on the host to verify it. |
 | `gh`, logged in (`gh auth login`) | The worker forks the project, pushes the branch and opens the PR as **you**. |
-| Two local images: `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | Not published to a registry yet. Build them: `make -C worker images`. |
+| The sandbox and egress-proxy images | A released binary uses the images published with it, by digest: `agentfund version` names them, `docker pull` each once. A build from source uses `agentfund/sandbox:dev` and `agentfund/egress-proxy:dev`: `make -C worker images`. |
 | `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work`; with `runner.name: codex`, `CODEX_API_KEY` or `OPENAI_API_KEY` | The agent runs under your credentials. With neither set and no `claude_token_command` in the config, `work` stops before claiming anything. |
 
 Read [Whose credentials, whose bill](#7-whose-credentials-whose-bill) before choosing one.
@@ -234,7 +234,7 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `auto_follow_signed_updates` | `false` | See [below](#when-the-projects-commit-moves). |
 | `retry_failed_after` | `"24h"` | After a task failed, timed out, hit its cap or was discarded here, do not claim it again for this long. Stops you paying for the same failure repeatedly. `"0"` retries immediately. |
 | `claude_token_command` | `""` | Shell command printing a Claude Code OAuth token, used only when neither credential variable is set. |
-| `sandbox.image`, `sandbox.egress_proxy_image` | `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | What runs. Pin by digest (`name@sha256:...`) once you use published images: a tag can be re-pointed. |
+| `sandbox.image`, `sandbox.egress_proxy_image` | The images this binary was released with, by digest (`agentfund version`); from source, `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | What runs. If you set your own, pin it by digest (`name@sha256:...`): a tag can be re-pointed. |
 | `sandbox.cpus`, `memory`, `pids` | `"2"`, `"4g"`, `512` | Your machine's resources. |
 | `sandbox.allow_git_host` | `false` | By default the sandbox reaches only `api.anthropic.com`. `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |

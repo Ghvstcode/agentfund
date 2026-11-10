@@ -608,7 +608,10 @@ func TestUsageErrors(t *testing.T) {
 			t.Errorf("work --help lacks %q", want)
 		}
 	}
-	if out := mustRun(t, "", "version"); !strings.HasPrefix(out, "agentfund ") {
+	// The images a released binary runs by default are part of what it is.
+	if out := mustRun(t, "", "version"); !strings.HasPrefix(out, "agentfund ") ||
+		!strings.Contains(out, "default sandbox image       "+config.DefaultSandboxImage+"\n") ||
+		!strings.Contains(out, "default egress-proxy image  "+config.DefaultEgressProxyImage+"\n") {
 		t.Fatalf("version: %q", out)
 	}
 	for _, sub := range []string{"keygen", "sign", "validate", "login", "approve", "work", "dry-run", "status", "logs", "daemon"} {
