@@ -37,8 +37,35 @@ func TestCodexMeterOnRealOfflineStream(t *testing.T) {
 	if out.ResultSeen || out.Final || out.Total() != 0 || out.CredentialProblem != "" || out.RateLimited {
 		t.Fatalf("outcome %+v", out)
 	}
-	if !strings.Contains(out.Message, "unreachable") {
-		t.Fatalf("message %q", out.Message)
+	if !strings.Contains(out.Message, "unreachable") || !strings.HasPrefix(out.NetworkProblem, "Reconnecting... waiting for network") {
+		t.Fatalf("message %q network problem %q", out.Message, out.NetworkProblem)
+	}
+}
+
+// Going offline after the model has answered is not "never reached the API".
+func TestCodexNetworkProblemNeedsNoAnswerAtAll(t *testing.T) {
+	offline := `{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}`
+	cases := []struct {
+		name    string
+		lines   []string
+		network bool
+	}{
+		{"offline from the start", []string{`{"type":"thread.started","thread_id":"t"}`, `{"type":"turn.started"}`,
+			`{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Falling back from WebSockets to HTTPS transport."}}`,
+			offline, offline, offline, offline}, true},
+		{"offline after the agent started working", []string{`{"type":"turn.started"}`,
+			`{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"ls"}}`,
+			offline, offline, offline, offline}, false},
+		{"offline after a completed turn", []string{`{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1}}`,
+			offline, offline, offline, offline}, false},
+		{"not offline for long enough", []string{offline, offline, offline}, false},
+	}
+	for _, c := range cases {
+		m := NewCodexMeter()
+		codexFeed(m, c.lines...)
+		if got := m.Outcome().NetworkProblem; (got != "") != c.network {
+			t.Errorf("%s: NetworkProblem=%q, want set=%v", c.name, got, c.network)
+		}
 	}
 }
 
@@ -202,7 +229,7 @@ func TestCodexRunStopsWhenAPIUnreachable(t *testing.T) {
 	}()
 	select {
 	case out := <-done:
-		if out.ExitCode != 137 || out.ResultSeen || out.Version != "codex" || !strings.Contains(out.Message, "unreachable") {
+		if out.ExitCode != 137 || out.ResultSeen || out.Version != "codex" || !strings.Contains(out.Message, "unreachable") || out.NetworkProblem == "" {
 			t.Fatalf("outcome %+v", out)
 		}
 	case <-time.After(10 * time.Second):

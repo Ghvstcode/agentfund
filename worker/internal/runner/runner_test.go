@@ -372,3 +372,67 @@ func TestRunStreamsPromptOnStdinAndMeters(t *testing.T) {
 		t.Fatalf("outcome %+v", out)
 	}
 }
+
+// Recorded from Claude Code 2.1.289 in the sandbox image with a fake key and no
+// way to reach the API: behind the real egress proxy with no route out (the
+// proxy's DNS lookup fails), and with no network at all. The CLI retries ten
+// times (three to four minutes), then ends with a synthetic assistant message
+// and an error result without an HTTP status.
+func TestMeterOnRealUnreachableStreams(t *testing.T) {
+	for file, want := range map[string]string{
+		"testdata/claude-code-2.1.289-no-dns.jsonl":        "Can't reach the API server",
+		"testdata/claude-code-2.1.289-proxy-offline.jsonl": "ERR_PROXY_TUNNEL",
+	} {
+		t.Run(file, func(t *testing.T) {
+			f, err := os.Open(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			m := NewMeter()
+			sc := bufio.NewScanner(f)
+			sc.Buffer(nil, 1<<20)
+			for sc.Scan() {
+				m.Feed(sc.Bytes())
+			}
+			o := m.Outcome()
+			if !strings.Contains(o.NetworkProblem, want) || o.RateLimited || o.CredentialProblem != "" || !o.IsError || !o.ResultSeen || o.Total() != 0 {
+				t.Fatalf("outcome %+v", o)
+			}
+			if o.Model != "claude-opus-5-5" {
+				t.Fatalf("model %q: the synthetic message must not name the model", o.Model)
+			}
+		})
+	}
+}
+
+// Only "the API never answered" is a network problem; an error after an answer is not.
+func TestMeterNetworkProblemNeedsNoAnswerAtAll(t *testing.T) {
+	offline := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":null,"error":"unknown"}`
+	synthetic := `{"type":"assistant","message":{"id":"x","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"API Error: Connection refused"}]},"error":"server_error","is_api_error_message":true}`
+	failed := `{"type":"result","subtype":"success","is_error":true,"api_error_status":null,"result":"API Error: Connection refused"}`
+	cases := []struct {
+		name    string
+		lines   []string
+		network bool
+	}{
+		{"no answer, then the CLI gives up", []string{offline, offline, synthetic, failed}, true},
+		{"no answer and no result (killed)", []string{offline, offline}, true},
+		{"an error result without any retry", []string{failed}, false},
+		{"connection lost after a model call", []string{start("msg_1", 10, 0, 0, 2, ""), delta(5, ""), offline, synthetic, failed}, false},
+		{"recovered after offline retries", []string{offline, start("msg_1", 10, 0, 0, 2, ""), `{"type":"result","subtype":"success","is_error":false,"result":"ok"}`}, false},
+		{"HTTP 500 retries", []string{`{"type":"system","subtype":"api_retry","attempt":1,"error_status":500,"error":"server_error"}`, failed}, false},
+		{"rate limited", []string{`{"type":"system","subtype":"api_retry","attempt":1,"error":"rate_limit"}`, offline, `{"type":"result","is_error":true,"api_error_status":429}`}, false},
+		{"rejected credentials", []string{offline, `{"type":"result","is_error":true,"api_error_status":401,"result":"Invalid API key"}`}, false},
+		{"usage report", []string{offline, `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1791324000}}`, failed}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := NewMeter()
+			feedAll(t, m, c.lines...)
+			if got := m.Outcome().NetworkProblem; (got != "") != c.network {
+				t.Fatalf("NetworkProblem=%q, want set=%v", got, c.network)
+			}
+		})
+	}
+}

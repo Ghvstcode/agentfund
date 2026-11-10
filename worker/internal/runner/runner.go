@@ -43,6 +43,10 @@ type Outcome struct {
 	// CredentialProblem is set when the provider rejected the donor's
 	// credentials or account; continuing to claim tasks would be pointless.
 	CredentialProblem string
+	// NetworkProblem is set when the agent never got any answer from the model
+	// API (no route, DNS, proxy refusal): the backer's network, not the task.
+	// It is never set once the API has answered, even with an error.
+	NetworkProblem string
 }
 
 // ExecFunc runs a command inside the sandbox as the unprivileged agent user

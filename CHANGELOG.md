@@ -51,6 +51,13 @@ All notable changes to this project are documented here. The format follows
   `0002-truncate` re-created the file `0001-slugify` had added). A dependency now counts only
   once the instance has read the base branch, without error, after the merge was recorded. A
   generic CI must send `merged: true` only once the merge is on the base branch.
+- **An agent that never reaches the model API releases the claim instead of failing it.** No
+  network, DNS or a proxy in the way is the backer's problem, not the task's, but it was
+  reported as `failed`, which put a failure on the ledger and locked the backer out of the task
+  for 24 h. Both runners now recognise "the API never answered" (Claude Code: connection retries
+  without an HTTP status, recorded live with 2.1.289; Codex: stuck "waiting for network"); the
+  worker releases the claim and backs off as for a rate limit. A failure after the API has
+  answered is still a failure.
 
 ### Security
 - **Claude Code runs with an allowlist of local tools** (`--tools`): shell, file reads and

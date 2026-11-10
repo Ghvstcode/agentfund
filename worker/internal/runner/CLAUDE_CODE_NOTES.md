@@ -100,11 +100,46 @@ identical usage, then `message_delta`. Hence:
 | `{"type":"result","is_error":true,"api_error_status":429}` (or 529) | field observed (`null` on success); 429 value **not observed** | rate limited |
 | `{"type":"system","subtype":"api_retry","attempt":n,"error":"rate_limit",…}` | headless docs, "Handle API retries" | the CLI retries by itself; treated as rate limited only after 3 consecutive retries with no successful call in between |
 | `error` ∈ `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `billing_error`, `cloud_credential_error`, or `api_error_status` 401/403 | docs + live (`authentication_failed`) | claim released, worker stops with a clear message |
+| `api_retry` with `"error":"unknown","error_status":null`, and nothing at all from the model API (no `message_start`, no HTTP status, no `rate_limit_event`) before the run ends | live, see below | API unreachable: claim released, backoff as for a rate limit |
 
 Rate limited ⇒ the sandbox is torn down, the claim is **released** with the
 tokens burned so far, an exponential backoff with jitter (5 min doubling to
 4 h, never ending before `resetsAt`) is stored, and no task is claimed until
 it ends.
+
+### API unreachable
+
+Recorded on 2026-11-10 with 2.1.289 in `agentfund/sandbox:dev`, a fake key and
+no way to reach `api.anthropic.com` (no tokens can be spent that way): behind
+the real egress proxy with no route out (the proxy logs `dns_failure`), behind
+the proxy with `api.anthropic.com` off its allowlist (`not_allowlisted`), with
+`--network none`, and with `HTTPS_PROXY` on a closed port. All four look alike:
+
+- ten `system/api_retry` events, `"error":"unknown"`, `"error_status":null`,
+  with doubling delays: the CLI gives up by itself after **3.5 to 4.5 minutes**;
+- an `assistant` message the CLI makes up: `"model":"<synthetic>"`,
+  `"is_api_error_message":true`, `"error":"server_error"`, zero usage, text such
+  as `API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL) …`
+  (proxy), `… Can't reach the API server — check your internet or DNS
+  (EAI_AGAIN)` (no network), `… Connection refused … (ECONNREFUSED)`;
+- `result` with `is_error:true`, `subtype:"success"`, `api_error_status:null`,
+  `terminal_reason:"api_error"`, zero usage, exit code 1.
+
+The text differs from version to version (the HANDOFF quoted "Unable to connect
+to API"), so the meter keys on the structure, not the text: at least one
+`api_retry` without an HTTP status and no sign that the API ever answered. A
+synthetic message is not an answer. Once anything came back from the API (a
+message, any HTTP status, a usage report), a later failure is an ordinary
+failure: losing the connection mid-run does not count. The recordings are
+`testdata/claude-code-2.1.289-proxy-offline.jsonl` and `…-no-dns.jsonl`
+(`TestMeterOnRealUnreachableStreams`).
+
+The worker releases the claim with `the model API was unreachable from the
+sandbox: <CLI text>` and backs off (the same backoff as for a rate limit, shown
+as `after the model API was unreachable`). Nothing is reported, so the 24 h
+`retry_failed_after` cooldown does not start. Because the CLI takes about four
+minutes to give up, a task with `timeout_minutes` under 5 still ends as a
+`timeout` report; the runner does not stop Claude Code early (unlike Codex).
 
 ## Network
 

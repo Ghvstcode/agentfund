@@ -190,9 +190,9 @@ to your fork, open the PR → report. `worker/README.md` describes each step in 
 agentfund status            # --json, --recent 20
 ```
 
-Tokens today and this week against your caps, any rate-limit backoff, running tasks with
-phase and lease expiry, recent runs with their outcome (10 by default), and your active
-claims as each server sees them.
+Tokens today and this week against your caps, any backoff (rate limit or unreachable API),
+running tasks with phase and lease expiry, recent runs with their outcome (10 by default), and
+your active claims as each server sees them.
 
 ### daemon install
 
@@ -397,9 +397,12 @@ on the instance (`<server-url>/v1/tasks/<slug>:<task-id>`), where `log_digest` i
 **Your model provider.** When the CLI signals a rate limit or overload, the worker tears the
 sandbox down, releases the claim with the tokens burned so far, and backs off: 5 minutes,
 doubling per consecutive hit up to 4 hours, with jitter, never ending before the reset time
-the provider gave. Nothing is claimed until it ends. `agentfund status` shows
-`Rate-limit backoff until ...`. One clean agent run clears it. If the provider rejects your
-credentials or account, the claim is released and the worker **stops**.
+the provider gave. Nothing is claimed until it ends. The same happens when the agent never
+reaches the model API at all (your network, DNS or a firewall): the claim is released, not
+failed, so the task does not count against you. `agentfund status` shows
+`Backing off until ... after a rate limit` (or `after the model API was unreachable`). One
+clean agent run clears it. If the provider rejects your credentials or account, the claim is
+released and the worker **stops**.
 
 **The instance.** Servers limit requests per IP and per key (reference default 600 a minute)
 and answer `429`. The worker's polling stays far below that; a refused request shows up as an
@@ -439,6 +442,7 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | outcome `failed`: `could not publish the branch: gh is not logged in to github.com ...` | `gh` has no session. Tokens were spent; the work is lost. | `gh auth login`, and check `gh auth status` before long sessions. |
 | `the server did not accept the report (...); it is kept in <file>.report.json` | Network or server error after the run. | The report is on disk; the claim will expire server-side. |
 | outcome `released`: `rate limited by the model provider: <msg>`, then `backing off until <time> after a rate limit` | Provider rate limit. | Wait; see [section 10](#10-rate-limits-and-backoff). |
+| outcome `released`: `the model API was unreachable from the sandbox: <msg>`, then `backing off until <time> after the model API was unreachable` | The agent never got an answer from the model API: no network, DNS, or a firewall or TLS-inspecting proxy in the way. | Check your connection; the worker retries after the backoff. See [section 10](#10-rate-limits-and-backoff). |
 | `removed <n> orphaned sandbox resource(s) from an earlier run` | Cleanup after a crash or power loss. | Nothing. |
 
 ## 12. Uninstalling
