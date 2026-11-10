@@ -908,7 +908,7 @@ export interface components {
             commit: string;
             manifest: components["schemas"]["Manifest"];
             depends_on: string[];
-            /** @description Dependencies not yet merged */
+            /** @description Dependencies not yet merged, or merged since the base branch was last indexed */
             blocked_by: string[];
             claimable: boolean;
             burn: {
@@ -1151,7 +1151,7 @@ export interface components {
             /** @enum {string} */
             conclusion: "success" | "failure" | "cancelled";
             run_url?: string;
-            /** @description True when the PR for this branch has merged */
+            /** @description True when the PR for this branch has merged. Send it only once the merge is on the base branch: dependents open on the next index after it. */
             merged?: boolean;
             /** @description True when the PR was closed without merging */
             closed?: boolean;

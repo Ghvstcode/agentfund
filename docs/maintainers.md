@@ -144,7 +144,7 @@ the base branch, on a timer (default every 60 s), and when you press **Re-pin**:
 | Dashboard control | Effect |
 | --- | --- |
 | **Follow `main`** (on by default) | The pin advances to each validly signed head. Needed so tasks with dependencies are claimed against a commit that contains the merged work. |
-| **Re-pin** | Index now. Empty pins the branch head; a 40-hex commit pins that commit. |
+| **Re-pin** | Index now. Empty pins the branch head; a 40-hex commit pins that commit. Pinning a commit older than a merge also reopens that merge's dependents, against the older commit. |
 | **Pause / Resume** | A paused project refuses new claims (`project-not-active`). Running claims continue. |
 | **Token goal** | The number the progress bar is measured against. |
 
@@ -195,7 +195,9 @@ scope:
 ### Wide, not deep
 
 `depends_on` means **merged**, not "PR open": a dependent task is not claimable until you
-have reviewed and merged its dependencies. A chain of twenty tasks is twenty review cycles.
+have reviewed and merged its dependencies, and the instance has read the branch since then (the
+push webhook, the timer or **Re-pin**), so the dependent is claimed against a commit that contains
+the merged work. A chain of twenty tasks is twenty review cycles.
 gridrs has 23 tasks in 6 layers, 18 of them in the first two:
 
 ```
@@ -614,7 +616,7 @@ curl -X POST "$BASE_URL/v1/webhooks/ci" \
 | `branch`, `head_sha` | yes | The PR's branch and its 40-hex head commit. They must equal what the worker reported. |
 | `conclusion` | yes | `success`, `failure` or `cancelled`. |
 | `run_url` | no | Shown in the ledger as the evidence link. |
-| `merged` / `closed` | no | `true` when the PR merged / was closed unmerged. |
+| `merged` / `closed` | no | `true` when the PR merged / was closed unmerged. Send `merged` only once the merge is on the base branch: dependents open on the next index after it. |
 
 Before choosing it:
 

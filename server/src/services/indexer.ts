@@ -146,6 +146,7 @@ export async function createProject(ctx: AppContext, who: Principal, body: BodyO
           tokenGoal: body.token_goal ?? d.token_goal ?? v.tokenTotal,
           createdAt: now,
           lastIndexedAt: now,
+          branchReadAt: now,
           webhookSecret: newSecret(),
         })
         .returning();
@@ -195,6 +196,9 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
 
   let target: string | undefined = opts.commit;
   let verified: VerifiedLock;
+  // Taken before the fetch, so branchReadAt never claims a read later than the one that happened:
+  // the dependency gate (ledger DEP_LANDED) compares merges against it.
+  const checkedAt = ctx.clock.now();
   try {
     await ctx.git.fetch(repo);
     if (target) {
@@ -205,7 +209,7 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
       target = head;
     }
     if (target === project.pinnedCommit && !project.indexError) {
-      await ctx.db.update(projects).set({ lastIndexedAt: ctx.clock.now() }).where(eq(projects.id, project.id));
+      await ctx.db.update(projects).set({ lastIndexedAt: checkedAt, branchReadAt: checkedAt }).where(eq(projects.id, project.id));
       return { ok: true, changed: false, commit: target };
     }
     verified = await verifyCommit(ctx.git, repo, target, project.pubkey);
@@ -221,7 +225,6 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
   const changed = await ctx.db.transaction(async (tx) => {
     const [locked] = await tx.select().from(projects).where(eq(projects.id, project.id)).for("no key update");
     if (!locked || locked.status === "removed") return false;
-    const now = ctx.clock.now();
     const moved = locked.pinnedCommit !== commit;
     const rotated = verified.signingKey !== locked.pubkey;
     await tx
@@ -230,7 +233,8 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
         pinnedCommit: commit,
         lockSha256: verified.lockSha256,
         pubkey: verified.signingKey,
-        lastIndexedAt: now,
+        lastIndexedAt: checkedAt,
+        branchReadAt: checkedAt,
         indexError: null,
         indexErrorKey: null,
         ...(descriptor ? { description: descriptor.description, homepage: descriptor.homepage ?? null, language: descriptor.language ? descriptor.language.toLowerCase() : null, tags: descriptor.tags ?? [] } : {}),

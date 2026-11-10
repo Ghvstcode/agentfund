@@ -134,7 +134,10 @@ ok "merged=$TOKENS"
 HEAD1=$(git -C "$REPO" rev-parse HEAD)
 pinned() { [ "$(api GET /v1/projects/hello | json 'v.pinned_commit')" = "$HEAD1" ]; }
 wait_for "indexer to follow the branch to $HEAD1" pinned
-[ "$(api GET '/v1/projects/hello/tasks?claimable=true' | json 'v.items.map(t=>t.task_id).join(",")')" = "0002-truncate" ] || fail "0002 should now be claimable"
+# The dependent opens on the first good read of the branch after the merge was recorded; the read
+# that moved the pin may have started just before it.
+claimable_0002() { [ "$(api GET '/v1/projects/hello/tasks?claimable=true' | json 'v.items.map(t=>t.task_id).join(",")')" = "0002-truncate" ]; }
+wait_for "0002-truncate to become claimable" claimable_0002
 ok "indexer followed the signed head; 0002-truncate is now claimable"
 
 say "approval pin: the worker refuses the new commit until re-approved"

@@ -100,6 +100,11 @@ export const projects = pgTable(
     tokenGoal: tokens("token_goal").notNull(),
     createdAt: ts("created_at").notNull(),
     lastIndexedAt: ts("last_indexed_at"),
+    /**
+     * When the base branch was last read and verified without error (taken before the fetch). The
+     * dependency gate compares merges with it; lastIndexedAt also counts failed attempts.
+     */
+    branchReadAt: ts("branch_read_at"),
     indexError: text("index_error"),
     indexErrorKey: text("index_error_key"),
     /** Per-project HMAC secret for /v1/webhooks/ci. Shared secret, so stored as-is; never in public responses. */

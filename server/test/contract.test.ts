@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signBody } from "../src/ci/adapter.js";
 import type { OperationId, Schemas } from "../src/lib/openapi.js";
+import { indexAll } from "../src/services/indexer.js";
 import { createTestApp, projectSecret, type TestApp } from "./helpers/app.js";
 import { TestRepo } from "./helpers/repo.js";
 import { completedBody, DIGEST } from "./helpers/scenario.js";
@@ -189,6 +190,11 @@ describe("every operation, validated against the document", () => {
     expect((await t.call("getTask", { path: { task_id: `${slug}:0009-missing` } })).status).toBe(404);
     expect((await t.call("getTask", { path: { task_id: "missing:0001-a" } })).status).toBe(404);
     expect((await t.call("getTask", { path: { task_id: "not-a-task-id" } })).status).toBe(404);
+    // The dependent opens once the branch, which now holds the merge, has been read again.
+    repo.write("src/a.py", "# 0001-a\n");
+    repo.commit("Merge 0001-a");
+    t.clock.advance(1);
+    await indexAll(t.ctx);
     const c2 = (await t.call<Schemas["Claim"]>("claimTask", { token: key.key, path: { task_id: `${slug}:0002-b` } })).body;
     await t.call("heartbeatClaim", { token: key.key, path: { claim_id: c2.claim_id }, body: { tokens_in: 1, tokens_out: 1, phase: "sandbox" } });
     const withClaim = (await t.call<{ items: Schemas["Task"][] }>("listTasks", { path: { slug }, query: { state: "claimed" } })).body.items;
