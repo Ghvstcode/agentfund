@@ -58,6 +58,28 @@ type Runner struct {
 	// TokenCommand prints the agent's credential when none is in the
 	// environment. For claude-code it falls back to global.claude_token_command.
 	TokenCommand string `yaml:"token_command"`
+	// CodexHome is the AgentFund-only CODEX_HOME holding a ChatGPT sign-in
+	// for runner codex ("" = <config dir>/codex). It must not be the backer's
+	// own ~/.codex: both would rotate the same refresh token.
+	CodexHome string `yaml:"codex_home"`
+}
+
+// CodexHomeDir is the directory of the dedicated Codex ChatGPT sign-in.
+func (g Global) CodexHomeDir() string {
+	if g.Runner.CodexHome != "" {
+		return expandHome(g.Runner.CodexHome)
+	}
+	return filepath.Join(Dir(), "codex")
+}
+
+func expandHome(p string) string {
+	if p == "~" {
+		return home()
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home(), p[2:])
+	}
+	return p
 }
 
 // Runners are the coding agents the worker can drive. "codex" is experimental.
@@ -190,6 +212,15 @@ func (c *Config) Validate() error {
 	}
 	if _, err := g.RetryDelay(); err != nil {
 		return err
+	}
+	if g.Runner.CodexHome != "" {
+		d := filepath.Clean(g.CodexHomeDir())
+		if !filepath.IsAbs(d) {
+			return fmt.Errorf("global.runner.codex_home must be an absolute path (or start with ~/)")
+		}
+		if d == filepath.Join(home(), ".codex") {
+			return fmt.Errorf("global.runner.codex_home must not be ~/.codex: give AgentFund its own sign-in (the default, %s), so it never rotates the tokens your own Codex uses", filepath.Join(Dir(), "codex"))
+		}
 	}
 	for _, n := range g.Sandbox.PassEnv {
 		if !envNameRE.MatchString(n) {
@@ -403,13 +434,13 @@ func (c *Config) render() ([]byte, error) {
 	w("    memory: %q\n", g.Sandbox.Memory)
 	w("    # Maximum number of processes in the sandbox (docker --pids-limit).\n")
 	w("    pids: %d\n", g.Sandbox.PIDs)
-	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com,\n")
-	w("    # or api.openai.com for codex).\n")
+	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com;\n")
+	w("    # for codex api.openai.com, or chatgpt.com with a ChatGPT sign-in).\n")
 	w("    # The sandbox has no .git and no git credentials; turn on only if a project's\n")
 	w("    # verify step must fetch from the git host.\n")
 	w("    allow_git_host: %t\n", g.Sandbox.AllowGitHost)
 	w("    # Extra host[:port] entries the sandbox may reach besides the model API\n")
-	w("    # (api.anthropic.com, or api.openai.com for codex). Keep this empty unless needed.\n")
+	w("    # (see allow_git_host). Keep this empty unless needed.\n")
 	w("    extra_allow_hosts: %s\n", yamlList(g.Sandbox.ExtraAllowHosts))
 	w("    # Names of additional environment variables to pass from your shell into the\n")
 	w("    # agent process (e.g. ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, AWS_REGION).\n")
@@ -423,7 +454,8 @@ func (c *Config) render() ([]byte, error) {
 	w("    docker: %q\n", g.Sandbox.Docker)
 	w("  runner:\n")
 	w("    # Coding agent to run: \"claude-code\" (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)\n")
-	w("    # or \"codex\" (EXPERIMENTAL; CODEX_API_KEY or OPENAI_API_KEY). Codex reports usage\n")
+	w("    # or \"codex\" (EXPERIMENTAL; CODEX_API_KEY, OPENAI_API_KEY, CODEX_ACCESS_TOKEN or a\n")
+	w("    # ChatGPT sign-in in codex_home). Codex reports usage\n")
 	w("    # only when it finishes, so a Codex run can end above a task's max_tokens.\n")
 	w("    name: %q\n", g.Runner.Name)
 	w("    # Optional model alias or id passed to the agent (--model). \"\" = its default.\n")
@@ -431,6 +463,11 @@ func (c *Config) render() ([]byte, error) {
 	w("    # Optional shell command printing the agent's credential on stdout, used when\n")
 	w("    # none is in the environment. \"\" = claude_token_command for claude-code.\n")
 	w("    token_command: %q\n", g.Runner.TokenCommand)
+	w("    # codex only: directory of a ChatGPT sign-in used only by AgentFund, created with\n")
+	w("    #   CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login\n")
+	w("    # Used when no API key or CODEX_ACCESS_TOKEN is set. The worker refreshes it here;\n")
+	w("    # the sandbox gets the access token only. \"\" = <config dir>/codex. Never ~/.codex.\n")
+	w("    codex_home: %q\n", g.Runner.CodexHome)
 	w("\n# Approved projects, keyed by <server-url>/<slug>. `pubkey`, `approved_commit` and\n")
 	w("# `approved_lock_sha256` are what you reviewed; the worker trusts nothing else.\n")
 	w("# Optional per-project overrides: tokens_per_day, tokens_per_week,\n")

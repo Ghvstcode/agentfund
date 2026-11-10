@@ -4,9 +4,12 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -79,6 +82,45 @@ type Credentials struct {
 	Env []string
 	// Secrets are the values to scrub from anything that is logged or reported.
 	Secrets []string
+	// Hosts, when set, replace the runner's APIHosts in the egress allowlist:
+	// the hosts depend on the kind of credential (Codex with a ChatGPT
+	// sign-in talks to chatgpt.com, with an API key to api.openai.com).
+	Hosts []string
+	// HomeFiles are written into the agent's home directory in the sandbox
+	// before the agent starts (through exec stdin: never an argv, an image
+	// layer or a host mount).
+	HomeFiles []HomeFile
+	// Renew, when set, returns credentials valid for at least validFor. The
+	// pipeline calls it before every run; credentials that do not expire
+	// leave it nil. An error wrapping ErrCredentials means the donor has to
+	// act (sign in again); any other error is transient.
+	Renew func(ctx context.Context, validFor time.Duration) (Credentials, error)
+}
+
+// HomeFile is a file in the agent's home directory, mode 0600.
+type HomeFile struct {
+	Path string // relative to $HOME
+	Data []byte
+}
+
+// ErrCredentials marks a credential problem only the donor can fix.
+var ErrCredentials = errors.New("the agent credentials need attention")
+
+// writeHomeFiles creates files in the agent's home inside the sandbox. The
+// content goes through stdin so that it never appears in a process listing.
+func writeHomeFiles(ctx context.Context, exec ExecFunc, files []HomeFile) error {
+	for _, f := range files {
+		var stderr bytes.Buffer
+		cmd := []string{"sh", "-c", `umask 077 && mkdir -p "$(dirname "$HOME/$1")" && cat > "$HOME/$1"`, "sh", f.Path}
+		code, err := exec(ctx, cmd, nil, nil, bytes.NewReader(f.Data), io.Discard, &stderr)
+		if err != nil {
+			return fmt.Errorf("write ~/%s in the sandbox: %w", f.Path, err)
+		}
+		if code != 0 {
+			return fmt.Errorf("write ~/%s in the sandbox: exit %d: %s", f.Path, code, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return nil
 }
 
 // New returns the runner with the given config name (see config.Runners).

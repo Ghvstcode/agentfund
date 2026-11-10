@@ -12,16 +12,45 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/ghvstcode/agentfund/worker/internal/codexauth"
 )
 
-// Credential variable names the Codex CLI reads for API-key auth.
+// Credential variable names the Codex CLI reads. The first two are API keys;
+// CODEX_ACCESS_TOKEN holds a ChatGPT Business/Enterprise personal access
+// token ("at-...").
 const (
-	EnvCodexAPIKey  = "CODEX_API_KEY"
-	EnvOpenAIAPIKey = "OPENAI_API_KEY"
+	EnvCodexAPIKey      = "CODEX_API_KEY"
+	EnvOpenAIAPIKey     = "OPENAI_API_KEY"
+	EnvCodexAccessToken = "CODEX_ACCESS_TOKEN"
 )
 
-// CodexAPIHost is the only host Codex needs with API-key auth.
-const CodexAPIHost = "api.openai.com"
+// Hosts Codex needs. With an API key only the API; with any ChatGPT
+// credential the model calls go to chatgpt.com/backend-api/codex, and a
+// personal access token is checked once at auth.openai.com. With the
+// dedicated sign-in the worker refreshes on the host, so the sandbox does
+// not get auth.openai.com.
+const (
+	CodexAPIHost     = "api.openai.com"
+	CodexChatGPTHost = "chatgpt.com"
+	CodexAuthHost    = "auth.openai.com"
+)
+
+// CodexCLIVersion is the Codex version in the sandbox image (CODEX_VERSION in
+// images/sandbox/Dockerfile). The sign-in is made with the same version, so
+// that the auth.json layout is the one this package was checked against.
+const CodexCLIVersion = "0.167.0"
+
+// CodexLoginCommand is the command that creates the AgentFund-only sign-in.
+// Codex refuses a CODEX_HOME that does not exist yet, hence the mkdir.
+func CodexLoginCommand(home string) string {
+	return "mkdir -p -m 700 " + home + " && CODEX_HOME=" + home + " npx -y @openai/codex@" + CodexCLIVersion + " login"
+}
+
+// codexAuthFile is where Codex in the sandbox looks for its sign-in
+// ($CODEX_HOME defaults to ~/.codex).
+const codexAuthFile = ".codex/auth.json"
 
 // Codex runs the unmodified OpenAI Codex CLI (`codex exec`) in headless mode.
 //
@@ -33,6 +62,13 @@ const CodexAPIHost = "api.openai.com"
 type Codex struct {
 	// Binary is the executable name inside the sandbox image.
 	Binary string
+	// Home is the AgentFund-only CODEX_HOME on the host holding the backer's
+	// ChatGPT sign-in (runner.codex_home). Never the backer's own ~/.codex.
+	Home string
+	// TokenURL overrides the refresh endpoint (tests).
+	TokenURL string
+	// Now is the clock (tests).
+	Now func() time.Time
 }
 
 // NewCodex returns the runner with defaults.
@@ -80,10 +116,16 @@ func (c *Codex) Args(model string) []string {
 	return append(args, "-")
 }
 
-// Credentials implements Runner: CODEX_API_KEY and/or OPENAI_API_KEY from the
-// environment, donor-listed pass_env variables, or the output of the token
-// command (forwarded as CODEX_API_KEY). ChatGPT-plan sign-in (~/.codex/auth.json)
-// is not supported: the worker forwards environment variables, never files.
+// Credentials implements Runner. In order:
+//
+//  1. CODEX_API_KEY and/or OPENAI_API_KEY from the environment;
+//  2. CODEX_ACCESS_TOKEN (a ChatGPT personal access token) from the environment;
+//  3. the output of the token command: forwarded as CODEX_ACCESS_TOKEN when it
+//     is a personal access token ("at-..."), otherwise as CODEX_API_KEY;
+//  4. the ChatGPT sign-in in Home, refreshed on the host. The sandbox gets
+//     a copy without the refresh token (docs/dev/codex-chatgpt-signin.md).
+//
+// Donor-listed pass_env variables are forwarded with any of them.
 func (c *Codex) Credentials(ctx context.Context, lookupEnv func(string) (string, bool), tokenCommand string, passEnv []string) (Credentials, error) {
 	var creds Credentials
 	add := func(name, value string) {
@@ -94,32 +136,96 @@ func (c *Codex) Credentials(ctx context.Context, lookupEnv func(string) (string,
 			creds.Secrets = append(creds.Secrets, value)
 		}
 	}
-	have := false
+	addPass := func() {
+		for _, name := range passEnv {
+			if v, ok := lookupEnv(name); ok && v != "" {
+				add(name, v)
+			}
+		}
+	}
+	chatGPT := []string{CodexChatGPTHost, CodexAuthHost}
 	for _, name := range []string{EnvCodexAPIKey, EnvOpenAIAPIKey} {
 		if v, ok := lookupEnv(name); ok && strings.TrimSpace(v) != "" {
 			add(name, v)
-			have = true
 		}
 	}
-	for _, name := range passEnv {
-		if v, ok := lookupEnv(name); ok && v != "" {
-			add(name, v)
-		}
+	if len(creds.PassEnv) > 0 {
+		addPass()
+		return creds, nil
 	}
-	if !have && strings.TrimSpace(tokenCommand) != "" {
+	if v, ok := lookupEnv(EnvCodexAccessToken); ok && strings.TrimSpace(v) != "" {
+		add(EnvCodexAccessToken, v)
+		creds.Hosts = chatGPT
+		addPass()
+		return creds, nil
+	}
+	if strings.TrimSpace(tokenCommand) != "" {
 		tok, err := runTokenCommand(ctx, tokenCommand)
 		if err != nil {
 			return Credentials{}, err
 		}
-		creds.Env = append(creds.Env, EnvCodexAPIKey+"="+tok)
-		add(EnvCodexAPIKey, tok)
-		have = true
+		name := EnvCodexAPIKey
+		if strings.HasPrefix(tok, "at-") {
+			name = EnvCodexAccessToken
+			creds.Hosts = chatGPT
+		}
+		creds.Env = append(creds.Env, name+"="+tok)
+		add(name, tok)
+		addPass()
+		return creds, nil
 	}
-	if !have {
-		return Credentials{}, errors.New("no credentials for the coding agent: set " + EnvCodexAPIKey + " or " + EnvOpenAIAPIKey +
-			" in the environment, or configure runner.token_command")
+	if c.Home != "" && codexauth.Exists(c.Home) {
+		creds.Hosts = []string{CodexChatGPTHost}
+		addPass()
+		base := creds
+		renew := func(ctx context.Context, validFor time.Duration) (Credentials, error) {
+			return c.signIn(ctx, base, validFor)
+		}
+		// Fail now rather than on the first claim if the sign-in is unusable.
+		out, err := renew(ctx, 10*time.Minute)
+		if err != nil {
+			return Credentials{}, err
+		}
+		out.Renew = renew
+		return out, nil
 	}
-	return creds, nil
+	hint := ""
+	if c.Home != "" {
+		hint = ", or sign in with ChatGPT once: " + CodexLoginCommand(c.Home)
+	}
+	return Credentials{}, errors.New("no credentials for the coding agent: set " + EnvCodexAPIKey + " or " + EnvOpenAIAPIKey +
+		" (API key) or " + EnvCodexAccessToken + " (ChatGPT personal access token) in the environment, or configure runner.token_command" + hint)
+}
+
+// signIn refreshes the dedicated sign-in if needed and returns credentials
+// whose only file is the stripped auth.json.
+func (c *Codex) signIn(ctx context.Context, base Credentials, validFor time.Duration) (Credentials, error) {
+	now := time.Now
+	if c.Now != nil {
+		now = c.Now
+	}
+	ref := &codexauth.Refresher{Home: c.Home, TokenURL: c.TokenURL, Now: now}
+	tok, err := ref.Fresh(ctx, validFor)
+	if err != nil {
+		switch {
+		case errors.Is(err, codexauth.ErrLogin) || errors.Is(err, codexauth.ErrNoLogin):
+			return Credentials{}, fmt.Errorf("%w: %v; sign in again with: %s", ErrCredentials, err, CodexLoginCommand(c.Home))
+		case errors.Is(err, codexauth.ErrTooShort):
+			// Stop rather than release and re-claim: every retry would rotate
+			// the refresh token and fail the same way.
+			return Credentials{}, fmt.Errorf("%w: %v; tasks this long need an API key or a ChatGPT access token", ErrCredentials, err)
+		}
+		return Credentials{}, err
+	}
+	data, err := codexauth.SandboxAuthJSON(tok, now())
+	if err != nil {
+		return Credentials{}, err
+	}
+	out := base
+	out.PassEnv = slices.Clone(base.PassEnv)
+	out.Secrets = append(slices.Clone(base.Secrets), tok.AccessToken, tok.IDToken, tok.RefreshToken)
+	out.HomeFiles = []HomeFile{{Path: codexAuthFile, Data: data}}
+	return out, nil
 }
 
 // codexDisabledFeatures are turned off for every run (names from
@@ -140,6 +246,10 @@ func (c *Codex) Run(ctx context.Context, spec RunSpec) (Outcome, error) {
 		if m := codexVersionRE.FindString(vout.String()); m != "" {
 			version = c.Name() + "/" + m
 		}
+	}
+
+	if err := writeHomeFiles(ctx, spec.Exec, spec.Creds.HomeFiles); err != nil {
+		return Outcome{Version: version}, err
 	}
 
 	meter := NewCodexMeter()
@@ -295,7 +405,9 @@ func (m *CodexMeter) Unreachable() bool { return m.offline >= codexOfflineLimit 
 func (m *CodexMeter) FeedStderr(line []byte) { m.classify(string(line)) }
 
 var (
-	codexCredentialRE = regexp.MustCompile(`(?i)401 Unauthorized|invalid_api_key|incorrect api key|invalid api key|missing bearer|account_deactivated|403 Forbidden`)
+	// "unauthorized (401)", "invalid_jwt" and "signing in again" are what a
+	// rejected ChatGPT access token produced (testdata/*-chatgpt-bad-token.*).
+	codexCredentialRE = regexp.MustCompile(`(?i)401 Unauthorized|unauthorized \(401\)|invalid_jwt|try signing in again|invalid_api_key|incorrect api key|invalid api key|missing bearer|account_deactivated|403 Forbidden`)
 	codexBillingRE    = regexp.MustCompile(`(?i)insufficient_quota|exceeded your current quota|billing`)
 	codexRateLimitRE  = regexp.MustCompile(`(?i)usage_limit_reached|429 Too Many Requests|rate limit|rate_limit_exceeded`)
 )

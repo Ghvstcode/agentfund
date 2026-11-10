@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // maxCABundleBytes caps sandbox.extra_ca_certs. A corporate bundle is a few
@@ -16,28 +15,13 @@ const maxCABundleBytes = 1 << 20
 
 const caKey = "global.sandbox.extra_ca_certs"
 
-// expandHome resolves a leading "~/" against the user's home directory.
-func expandHome(path string) (string, error) {
-	if !strings.HasPrefix(path, "~/") {
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, path[2:]), nil
-}
-
 // ReadCACerts reads sandbox.extra_ca_certs: a PEM file of CA certificates the
 // agent should trust in addition to the image's own roots (a TLS-inspecting
 // corporate proxy's CA, say). It returns only the certificates, re-encoded,
 // and refuses anything else, above all a private key, which would otherwise
 // end up readable by the agent.
 func ReadCACerts(path string) ([]byte, error) {
-	p, err := expandHome(path)
-	if err != nil {
-		return nil, fmt.Errorf("%s: cannot expand %q: %w", caKey, path, err)
-	}
+	p := expandHome(path)
 	if !filepath.IsAbs(p) {
 		return nil, fmt.Errorf("%s: %q is not an absolute path; use /full/path/ca.pem or ~/path/ca.pem", caKey, path)
 	}

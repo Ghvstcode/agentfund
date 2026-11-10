@@ -373,7 +373,7 @@ func (w *Worker) repoLock(dir string) *sync.Mutex {
 	return m.(*sync.Mutex)
 }
 
-// egressAllowlist is the model API plus whatever the donor explicitly added
+// egressAllowlist is the model API (for the credential in use) plus whatever the donor explicitly added
 // (extra_allow_hosts; the project's git host only with allow_git_host).
 // Nothing from the claim or the repository can widen it.
 func (w *Worker) egressAllowlist(repoURL string) []string {
@@ -386,7 +386,11 @@ func (w *Worker) egressAllowlist(repoURL string) []string {
 			out = append(out, h)
 		}
 	}
-	for _, h := range w.Runner.APIHosts() {
+	hosts := w.creds.Hosts
+	if len(hosts) == 0 {
+		hosts = w.Runner.APIHosts()
+	}
+	for _, h := range hosts {
 		add(h)
 	}
 	if w.Cfg.Global.Sandbox.AllowGitHost {

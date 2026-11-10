@@ -42,6 +42,8 @@ type run struct {
 	claim  *api.Claim
 	taskID string // manifest id
 	log    *logs.Run
+	scrub  *logs.Scrubber
+	creds  runner.Credentials // renewed for this run (Credentials.Renew)
 	start  time.Time
 
 	tokensIn, tokensOut atomic.Int64
@@ -175,7 +177,7 @@ func (w *Worker) RunTask(ctx context.Context, task api.Task, proj *api.Project) 
 	defer lg.Close()
 	res.LogFile = lg.Path()
 
-	r := &run{w: w, claim: claim, taskID: task.TaskID, log: lg, start: w.now(), hbDone: make(chan struct{})}
+	r := &run{w: w, claim: claim, taskID: task.TaskID, log: lg, scrub: scrub, creds: w.creds, start: w.now(), hbDone: make(chan struct{})}
 	r.cost.Store(float64(0))
 	r.phase.Store(api.PhaseVerifying)
 	lg.Event("claim", map[string]any{
@@ -427,6 +429,20 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	lg.Event("manifest", map[string]any{"raw": string(vres.ManifestRaw), "parsed": m})
 	lg.Event("prompt", map[string]any{"prompt": m.Prompt})
 
+	// Credentials that expire (a ChatGPT sign-in) must last the whole run.
+	if renew := r.creds.Renew; renew != nil {
+		creds, cerr := renew(ctx, time.Duration(m.TimeoutMinutes)*time.Minute+10*time.Minute)
+		if cerr != nil {
+			if errors.Is(cerr, runner.ErrCredentials) {
+				res := r.release(parent, "the agent credentials need attention: "+cerr.Error())
+				return res, &ErrFatal{Err: cerr}
+			}
+			return r.release(parent, "cannot renew the agent credentials: "+cerr.Error()), nil
+		}
+		r.scrub.Add(creds.Secrets...)
+		r.creds = creds
+	}
+
 	// ── Step 5: donor policy against the *verified* manifest; reserve max_tokens atomically.
 	trust := trustOf(proj)
 	rerr := w.Store.Reserve(store.Run{Claim: claim.ClaimID, Project: w.Ref.Key(), Task: r.taskID, Reserved: m.MaxTokens, PID: os.Getpid(), Phase: api.PhaseVerifying, LogFile: lg.Path()},
@@ -503,7 +519,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	r.setPhase(api.PhaseAgent)
 	w.say("%s: running %s in the sandbox (max %s tokens, %d min)", r.taskID, w.Runner.Name(), tokfmt.Format(m.MaxTokens), m.TimeoutMinutes)
 	out, runErr := w.Runner.Run(ctx, runner.RunSpec{
-		Prompt: m.Prompt, Model: w.Cfg.Global.Runner.Model, Creds: w.creds,
+		Prompt: m.Prompt, Model: w.Cfg.Global.Runner.Model, Creds: r.creds,
 		Exec: func(ctx context.Context, cmd, pass, env []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 			return session.Exec(ctx, sandbox.ExecSpec{Cmd: cmd, PassEnv: pass, Env: env, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 		},
@@ -601,7 +617,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	}
 	// A change set that carries the donor's credential must never be published.
 	for _, c := range changes {
-		for _, secret := range w.creds.Secrets {
+		for _, secret := range r.creds.Secrets {
 			if secret != "" && (bytes.Contains(c.Content, []byte(secret)) || strings.Contains(c.Path, secret)) {
 				lg.Event("scope", map[string]any{"ok": false, "violation": "credential found in " + c.Path})
 				return r.finish(parent, api.StatusVerificationFailed, "DISCARDED — the change set contains the donor's agent credential ("+c.Path+")", &code, nil), nil

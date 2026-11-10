@@ -69,6 +69,70 @@ func TestCodexNetworkProblemNeedsNoAnswerAtAll(t *testing.T) {
 	}
 }
 
+// Recorded from codex-cli 0.167.0 with a real ChatGPT Plus sign-in (the
+// stripped auth.json the worker writes), task 0001-slugify of hello-project,
+// 2026-11-10. The stream holds no account data; it is copied verbatim.
+func TestCodexMeterOnRealChatGPTStream(t *testing.T) {
+	f, err := os.Open("testdata/codex-0.167.0-chatgpt-task.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	m := NewCodexMeter()
+	changed := 0
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if m.Feed(sc.Bytes()) {
+			changed++
+		}
+	}
+	out := m.Outcome()
+	// turn.completed: input_tokens 73048 (cached_input_tokens 61824 is part of
+	// it), output_tokens 750, reasoning_output_tokens 0.
+	if out.TokensIn != 73048 || out.TokensOut != 750 || changed != 1 {
+		t.Fatalf("usage %+v after %d changes", out.Usage, changed)
+	}
+	if !out.ResultSeen || !out.Final || out.IsError || out.RateLimited || out.CredentialProblem != "" || out.Message != "" || m.Unreachable() {
+		t.Fatalf("outcome %+v", out)
+	}
+}
+
+// Recorded from codex-cli 0.167.0 with a ChatGPT sign-in whose access token
+// had a corrupted signature (2026-11-10): 401 from chatgpt.com, ten
+// reconnects, then turn.failed. It used no tokens.
+func TestCodexMeterOnRealRejectedChatGPTToken(t *testing.T) {
+	feed := func(m *CodexMeter, name string, stderr bool) {
+		f, err := os.Open("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			if stderr {
+				m.FeedStderr(sc.Bytes())
+			} else {
+				m.Feed(sc.Bytes())
+			}
+		}
+	}
+	// stdout alone must be enough: stderr wording is not an interface.
+	m := NewCodexMeter()
+	feed(m, "codex-0.167.0-chatgpt-bad-token.jsonl", false)
+	out := m.Outcome()
+	if out.CredentialProblem != "authentication_failed" || !out.IsError || !out.ResultSeen || out.Total() != 0 || out.RateLimited {
+		t.Fatalf("stdout only: %+v", out)
+	}
+	if out.Message != "workspace routing discovery unauthorized (401)" {
+		t.Fatalf("message %q", out.Message)
+	}
+	m = NewCodexMeter()
+	feed(m, "codex-0.167.0-chatgpt-bad-token.stderr", true)
+	if m.Outcome().CredentialProblem != "authentication_failed" {
+		t.Fatalf("stderr only: %+v", m.Outcome())
+	}
+}
+
 func TestCodexMeterAccounting(t *testing.T) {
 	m := NewCodexMeter()
 	codexFeed(m,
