@@ -434,7 +434,8 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		creds, cerr := renew(ctx, time.Duration(m.TimeoutMinutes)*time.Minute+10*time.Minute)
 		if cerr != nil {
 			if errors.Is(cerr, runner.ErrCredentials) {
-				res := r.release(parent, "the agent credentials need attention: "+cerr.Error())
+				// The details name the donor's local paths: they stay here.
+				res := r.release(parent, "the agent credentials need attention; the backer has to sign in again")
 				return res, &ErrFatal{Err: cerr}
 			}
 			return r.release(parent, "cannot renew the agent credentials: "+cerr.Error()), nil
