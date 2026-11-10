@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { flatItems, useTasks } from '@/api/queries';
 import type { Task } from '@/api/types';
 import { HandleAvatar } from '@/components/HandleAvatar';
+import { TokenDot, type TokenState } from '@/components/Mark';
 import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, Skeleton } from '@/components/States';
 import { KEEP_SCROLL } from '@/components/Tabs';
@@ -13,10 +14,18 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
 import { useProjectContext } from './ProjectPage';
 import { TaskDrawer } from './TaskDrawer';
-import { BOARD_STATES, STATE_HINTS, STATE_ICONS, STATE_LABELS, taskStatus } from './taskStates';
+import { BOARD_STATES, STATE_HINTS, STATE_LABELS, taskStatus } from './taskStates';
 
 type View = 'board' | 'table';
 const VIEW_KEY = 'agentfund.tasks.view';
+
+/** Each column wears the token state its tasks are in. */
+const COLUMN_DOTS: Record<(typeof BOARD_STATES)[number], TokenState> = {
+  open: 'pledged',
+  claimed: 'running',
+  delivered: 'delivered',
+  merged: 'merged',
+};
 
 function storedView(): View | null {
   try {
@@ -43,7 +52,7 @@ function ClaimLine({ task }: { task: Task }) {
 
 function Chip({ icon: Icon, children, strong }: { icon: typeof Gauge; children: React.ReactNode; strong?: boolean }) {
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.6875rem]', strong ? 'border-foreground/25 text-foreground' : 'text-muted-foreground')}>
+    <span className={cn('num inline-flex items-center gap-1 px-1.5 py-0.5 text-[0.6875rem]', strong ? 'border border-foreground/40 text-foreground' : 'bg-muted text-muted-foreground')}>
       <Icon className="size-3" strokeWidth={1.5} aria-hidden="true" />
       {children}
     </span>
@@ -55,8 +64,8 @@ function TaskCard({ task, slug }: { task: Task; slug: string }) {
   return (
     <li
       className={cn(
-        'relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border bg-card p-3 shadow-card transition duration-200 ease-out focus-within:border-foreground/25 hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-raised',
-        status.live && 'border-live/35 shadow-[0_0_0_1px_color-mix(in_oklab,var(--live)_12%,transparent),0_8px_28px_-12px_color-mix(in_oklab,var(--live)_45%,transparent)]',
+        'relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2.5 border bg-card px-4 py-3.5 transition-colors duration-200 focus-within:border-foreground/40 hover:border-foreground/40',
+        status.live && 'border-pass bg-pass-tint hover:border-pass',
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -66,8 +75,8 @@ function TaskCard({ task, slug }: { task: Task; slug: string }) {
           {status.label}
         </span>
       </div>
-      <h4 className="text-sm leading-snug font-medium text-pretty">
-        <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL} className="after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none">
+      <h4 className="text-[0.9375rem] leading-snug font-semibold tracking-[-0.01em] text-pretty">
+        <Link to={`/${slug}/tasks/${task.task_id}`} state={KEEP_SCROLL} className="after:absolute after:inset-0 focus-visible:outline-none">
           {task.title}
         </Link>
       </h4>
@@ -98,14 +107,13 @@ function TaskCard({ task, slug }: { task: Task; slug: string }) {
 
 function Board({ tasks, slug }: { tasks: Task[]; slug: string }) {
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-x-4 gap-y-8 xl:grid-cols-4">
       {BOARD_STATES.map((state) => {
         const column = tasks.filter((task) => task.state === state);
-        const Icon = STATE_ICONS[state];
         return (
-          <section key={state} aria-labelledby={`column-${state}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2 rounded-xl border bg-muted/40 p-2">
-            <header className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 pt-1 pb-0.5">
-              <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+          <section key={state} aria-labelledby={`column-${state}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2.5">
+            <header className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-b-foreground pb-2.5">
+              <TokenDot state={COLUMN_DOTS[state]} />
               <h3 id={`column-${state}`} className="text-sm font-semibold tracking-tight">
                 {STATE_LABELS[state]}
               </h3>
@@ -114,7 +122,7 @@ function Board({ tasks, slug }: { tasks: Task[]; slug: string }) {
               <span className="ml-auto text-xs text-muted-foreground">{STATE_HINTS[state]}</span>
             </header>
             {column.length === 0 ? (
-              <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">Nothing here</p>
+              <p className="border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">Nothing here</p>
             ) : (
               <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                 {column.map((task) => (
@@ -187,14 +195,14 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (view: View) => 
     ['table', 'Table', Rows3],
   ] as const;
   return (
-    <div role="group" aria-label="Task layout" className="inline-flex rounded-lg border bg-muted/50 p-0.5">
+    <div role="group" aria-label="Task layout" className="inline-flex border">
       {options.map(([value, label, Icon]) => (
         <button
           key={value}
           type="button"
           aria-pressed={view === value}
           onClick={() => onChange(value)}
-          className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-card"
+          className="flex h-7 items-center gap-1.5 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:bg-foreground aria-pressed:text-background"
         >
           <Icon className="size-3.5" strokeWidth={1.5} aria-hidden="true" />
           {label}
@@ -250,7 +258,7 @@ export default function TasksTab() {
       {query.isPending ? (
         <Loading label="tasks" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-56 rounded-xl" />
+            <Skeleton key={index} className="h-56 rounded-none" />
           ))}
         </Loading>
       ) : query.isError ? (

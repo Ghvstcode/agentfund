@@ -30,7 +30,7 @@ async function openDialog() {
   const user = userEvent.setup();
   renderApp(<Harness />);
   await user.click(screen.getByRole('button', { name: 'Back with tokens' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Back gridrs with tokens' });
+  const dialog = await screen.findByRole('dialog', { name: 'Lend your agent to gridrs.' });
   return { user, dialog };
 }
 
@@ -54,6 +54,14 @@ describe('BackDialog', () => {
       'agentfund dry-run https://fund.example/gridrs',
       'agentfund work https://fund.example/gridrs --budget 200m --schedule "02:00-06:00"',
     ]);
+  });
+
+  it('rewrites the work command from the chosen caps', async () => {
+    const { user, dialog } = await openDialog();
+    await user.click(await within(dialog).findByRole('button', { name: '1B' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Any time' }));
+    expect(within(dialog).getByText('agentfund work https://fund.example/gridrs --budget 1b --schedule ""')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '1B' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('copies a command to the clipboard', async () => {

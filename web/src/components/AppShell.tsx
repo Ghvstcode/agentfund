@@ -1,12 +1,13 @@
-import { Search, Zap } from 'lucide-react';
+import { ArrowUpRight, Search } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { useMe, useMeta } from '@/api/queries';
 import { APP_NAME, apiUrl } from '@/config';
-import { instanceLinks } from '@/lib/commands';
+import { docLinks, instanceLinks } from '@/lib/commands';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
 import { ErrorBoundary } from './ErrorBoundary';
+import { Mark } from './Mark';
 import { UserPill } from './UserPill';
 import { Loading, SkeletonRows } from './States';
 import { ThemeToggle } from './ThemeToggle';
@@ -23,10 +24,30 @@ function NavItem({ to, end, children }: { to: string; end?: boolean; children: s
     <NavLink
       to={to}
       end={end}
-      className="flex h-8 items-center rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground"
+      className={cn(NAV_LINK, 'aria-[current=page]:bg-muted aria-[current=page]:text-foreground')}
     >
       {children}
     </NavLink>
+  );
+}
+
+const NAV_LINK =
+  'flex h-8 items-center rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground';
+
+/** The primary sections, plus the docs, which live outside the app. */
+function NavItems({ docsUrl }: { docsUrl: string }) {
+  return (
+    <>
+      <NavItem to="/" end>
+        Projects
+      </NavItem>
+      <NavItem to="/donors">Leaderboard</NavItem>
+      <NavItem to="/maintain">For maintainers</NavItem>
+      <a href={docsUrl} className={cn(NAV_LINK, 'gap-0.5 text-foreground')}>
+        Docs
+        <ArrowUpRight className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+      </a>
+    </>
   );
 }
 
@@ -34,22 +55,17 @@ function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const meta = useMeta();
   const me = useMe();
   const [signingIn, setSigningIn] = useState(false);
+  const docsUrl = docLinks(meta.data).home;
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
       <div className="container-page flex h-14 items-center gap-2">
-        <Link to="/" className="mr-2 flex items-center gap-2 rounded-md text-[0.9375rem] font-semibold tracking-tight">
-          <span className="flex size-6 items-center justify-center rounded-md bg-foreground text-background shadow-card">
-            <Zap className="size-3.5 fill-current" strokeWidth={0} aria-hidden="true" />
-          </span>
+        <Link to="/" className="mr-4 flex items-center gap-2 rounded-md text-[1.0625rem] font-semibold tracking-[-0.04em]">
+          <Mark className="size-[1.375rem]" />
           <span className="max-w-40 truncate lg:max-w-none">{meta.data?.name ?? APP_NAME}</span>
         </Link>
         <nav aria-label="Main" className="hidden items-center gap-0.5 md:flex">
-          <NavItem to="/" end>
-            Discover
-          </NavItem>
-          <NavItem to="/donors">Donors</NavItem>
-          <NavItem to="/maintain">Maintain</NavItem>
+          <NavItems docsUrl={docsUrl} />
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
           <button
@@ -76,11 +92,7 @@ function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         </div>
       </div>
       <nav aria-label="Main, compact" className="container-page flex gap-0.5 overflow-x-auto border-t py-1.5 [scrollbar-width:none] md:hidden">
-        <NavItem to="/" end>
-          Discover
-        </NavItem>
-        <NavItem to="/donors">Donors</NavItem>
-        <NavItem to="/maintain">Maintain</NavItem>
+        <NavItems docsUrl={docsUrl} />
       </nav>
       {signingIn && (
         <Suspense fallback={null}>
@@ -95,16 +107,19 @@ function Footer() {
   const meta = useMeta();
   const links = instanceLinks(meta.data);
   const items = [
+    { href: docLinks(meta.data).home, label: 'Docs' },
     { href: apiUrl('/v1/meta'), label: 'API' },
     { href: apiUrl('/feed.atom'), label: 'Feed' },
     { href: links.sourceUrl, label: 'Source' },
-    ...(links.docsUrl ? [{ href: links.docsUrl, label: 'Docs' }] : []),
   ];
   return (
     <footer className="mt-24 border-t">
       <div className="container-page grid gap-6 py-10 text-sm text-muted-foreground md:grid-cols-[1fr_auto] md:items-end">
         <div className="grid gap-2">
-          <p className="font-medium text-foreground">Trust the artifacts, not the operator.</p>
+          <p className="flex items-center gap-2 font-medium text-foreground">
+            <Mark className="size-4" />
+            Trust the artifacts, not the operator.
+          </p>
           <p className="max-w-xl text-pretty">
             Every task is signed by its maintainer, every token is metered from a real run, and every state change is
             in a public log.
