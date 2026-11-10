@@ -55,7 +55,9 @@ listed in instance config, or the first user when none are configured). Banned u
   exactly one concurrent caller wins, the rest get `409 task-not-open`.
 - A claim is refused with `409` and problem code:
   - `task-not-open` — state is not `open`;
-  - `dependencies-unmet` — some `depends_on` task is not `merged`;
+  - `dependencies-unmet` — some `depends_on` task is not `merged`, or the instance has not
+    read the base branch without error since that merge was recorded (claims start from the
+    pinned commit, which must contain the merged work);
   - `project-not-active` — project is `pending`, `paused` or `removed`;
   - `claim-limit` — the donor already holds the instance's maximum of active claims;
   - `project-task-cap` / `project-daily-cap` — new-project trust caps (§7).

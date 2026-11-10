@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Schemas } from "../src/lib/openapi.js";
 import { sweepLeases } from "../src/services/claims.js";
+import { indexAll } from "../src/services/indexer.js";
 import { createTestApp, type TestApp } from "./helpers/app.js";
 import { claim, completedBody, DIGEST, genericCi, getProject, getTask, reportCompleted, setupProject } from "./helpers/scenario.js";
 
@@ -64,16 +65,29 @@ describe("ledger: pledged → reported → delivered → merged", () => {
     expect((await getTask(t, "happy", "0002-b")).blocked_by).toEqual(["0001-a"]);
     expect((await t.call("claimTask", { token: alice.key, path: { task_id: "happy:0002-b" } })).code).toBe("dependencies-unmet");
 
-    // PR merges → merged, and the dependency gate opens.
+    // PR merges → merged. The merge is on the branch, but the pin predates it: a claim now would hand
+    // the worker a commit without 0001-a's work (the first real-model run did exactly that).
+    repo.write("src/a.py", "# 0001-a\n");
+    const merged = repo.commit("Merge 0001-a");
+    t.clock.advance(1);
     expect((await genericCi(t, repo.url, report, { conclusion: "success", merged: true })).body.matched).toBe(true);
     p = await getProject(t, "happy");
     expect(p.totals).toMatchObject({ pledged: 500_000, reported: 100_000, delivered: 100_000, merged: 100_000 });
-    expect(p.tasks).toMatchObject({ merged: 1, open: 2, claimable: 1 });
+    expect(p.tasks).toMatchObject({ merged: 1, open: 2, claimable: 0 });
     expect(p.trust.merged_tasks).toBe(1);
+    expect(await getTask(t, "happy", "0002-b")).toMatchObject({ claimable: false, blocked_by: ["0001-a"] });
+    expect((await t.call("claimTask", { token: alice.key, path: { task_id: "happy:0002-b" } })).code).toBe("dependencies-unmet");
+
+    // The indexer follows the branch: the gate opens, and the claim starts from the merge.
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    p = await getProject(t, "happy");
+    expect(p.pinned_commit).toBe(merged);
+    expect(p.tasks).toMatchObject({ merged: 1, open: 2, claimable: 1 });
     task = await getTask(t, "happy", "0002-b");
     expect(task).toMatchObject({ claimable: true, blocked_by: [] });
     expect((await getTask(t, "happy", "0003-c")).blocked_by).toEqual(["0002-b"]);
-    await claim(t, alice.key, "happy:0002-b");
+    expect((await claim(t, alice.key, "happy:0002-b")).commit).toBe(merged);
 
     const ledger = (await t.call<Ledger>("getLedger", { path: { slug: "happy" } })).body;
     expect(ledger.totals).toEqual(p.totals);
@@ -82,6 +96,68 @@ describe("ledger: pledged → reported → delivered → merged", () => {
 
     const actions = (await t.call<Schemas["EventPage"]>("listProjectEvents", { path: { slug: "happy" }, query: { limit: 100 } })).body.items.map((e) => e.action);
     for (const a of ["project.created", "manifest.added", "pledge.created", "task.claimed", "report.received", "ci.result", "task.delivered", "task.merged"]) expect(actions).toContain(a);
+  });
+
+  it("a dependency unlocks once the branch was read after its merge, whichever came first", async () => {
+    const { repo } = await setupProject(t, "landing", three);
+    const alice = await t.donor("lander");
+    const c = await claim(t, alice.key, "landing:0001-a");
+    const report = await reportCompleted(t, alice.key, c);
+    await genericCi(t, repo.url, report, { conclusion: "success" });
+
+    // The push is indexed before the merge is reported (webhooks race; e2e and `make trial` merge first).
+    repo.write("src/a.py", "# 0001-a\n");
+    const merged = repo.commit("Merge 0001-a");
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    expect((await getProject(t, "landing")).pinned_commit).toBe(merged);
+    t.clock.advance(1);
+    await genericCi(t, repo.url, report, { conclusion: "success", merged: true });
+    expect((await getTask(t, "landing", "0002-b")).blocked_by).toEqual(["0001-a"]);
+    // The next read finds the same head. It already contains the merge, so the pin need not move.
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    expect((await getProject(t, "landing")).pinned_commit).toBe(merged);
+    expect((await getTask(t, "landing", "0002-b")).claimable).toBe(true);
+    expect((await claim(t, alice.key, "landing:0002-b")).commit).toBe(merged);
+  });
+
+  it("a dependency stays blocked while the branch cannot be indexed", async () => {
+    const { repo } = await setupProject(t, "broken", three);
+    const alice = await t.donor("breaker");
+    const c = await claim(t, alice.key, "broken:0001-a");
+    const report = await reportCompleted(t, alice.key, c);
+    repo.write("src/a.py", "# 0001-a\n");
+    repo.write("tasks/0002-b.yaml", "tampered: true\n"); // no longer matches the signed lock
+    repo.commit("Merge 0001-a, with a broken task set");
+    t.clock.advance(1);
+    await genericCi(t, repo.url, report, { conclusion: "success", merged: true });
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    expect((await getProject(t, "broken")).pinned_commit).not.toBe(repo.head());
+    expect(await getTask(t, "broken", "0002-b")).toMatchObject({ claimable: false, blocked_by: ["0001-a"] });
+  });
+
+  it("a dependency that landed stays landed when a later push cannot be indexed", async () => {
+    const { repo } = await setupProject(t, "laterbreak", three);
+    const alice = await t.donor("laterbreaker");
+    const c = await claim(t, alice.key, "laterbreak:0001-a");
+    const report = await reportCompleted(t, alice.key, c);
+    repo.write("src/a.py", "# 0001-a\n");
+    const merged = repo.commit("Merge 0001-a");
+    t.clock.advance(1);
+    await genericCi(t, repo.url, report, { conclusion: "success", merged: true });
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    expect((await getTask(t, "laterbreak", "0002-b")).claimable).toBe(true);
+    // An edit that breaks the signed lock: donors keep working from the last good pin.
+    repo.write("tasks/0003-c.yaml", "tampered: true\n");
+    repo.commit("Unsigned edit");
+    t.clock.advance(1);
+    await indexAll(t.ctx);
+    expect((await getProject(t, "laterbreak")).pinned_commit).toBe(merged);
+    expect((await getTask(t, "laterbreak", "0002-b")).claimable).toBe(true);
+    expect((await claim(t, alice.key, "laterbreak:0002-b")).commit).toBe(merged);
   });
 
   it("failed runs are visible as reported-not-delivered and reopen the task", async () => {

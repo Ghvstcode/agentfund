@@ -1160,7 +1160,7 @@ components:
         commit: { type: string, description: Pinned commit the manifest was read from }
         manifest: { $ref: "#/components/schemas/Manifest" }
         depends_on: { type: array, items: { type: string } }
-        blocked_by: { type: array, items: { type: string }, description: Dependencies not yet merged }
+        blocked_by: { type: array, items: { type: string }, description: "Dependencies not yet merged, or merged since the base branch was last indexed" }
         claimable: { type: boolean }
         burn:
           type: object
@@ -1421,7 +1421,7 @@ components:
         head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
         conclusion: { type: string, enum: [success, failure, cancelled] }
         run_url: { type: string }
-        merged: { type: boolean, description: True when the PR for this branch has merged }
+        merged: { type: boolean, description: "True when the PR for this branch has merged. Send it only once the merge is on the base branch: dependents open on the next index after it." }
         closed: { type: boolean, description: True when the PR was closed without merging }
 
     InstanceConfig:
