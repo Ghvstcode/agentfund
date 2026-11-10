@@ -13,8 +13,10 @@ the questions in the [FAQ](faq.md). This is the full text.
 Please report privately, not in a public issue:
 
 - GitHub: **Security → Report a vulnerability** on this repository (private advisory), or
-- email the address in the repository's `SECURITY` contact / the instance operator for
-  instance-specific problems.
+- email **mail@tobiokewole.com**.
+
+A problem specific to one hosted instance (its configuration, not the software) goes to that
+instance's operator.
 
 Include what you found, how to reproduce it, and what an attacker gains. You will get an
 acknowledgement within 3 working days and a fix-or-plan within 14. We credit reporters unless
