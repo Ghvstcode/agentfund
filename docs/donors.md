@@ -24,7 +24,8 @@ agentfund logs                                 # what was actually run
 > [!IMPORTANT]
 > This is pre-release software. The full loop is proven against a mock agent, and the GitHub
 > path (push, pull request, Actions, delivery, merge) has been proven once by hand. A real
-> model inside the sandbox has not been run yet, and neither has a pull request from a fork.
+> model (Claude Code with Sonnet) has completed the sample project's tasks in the sandbox; a
+> larger project and a pull request from a fork have not been run yet.
 > The [Status section of the README](../README.md#status) is kept current. Treat a first run
 > as a test: `--once`, a small budget, and read the log afterwards.
 
@@ -240,7 +241,7 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |
 | `sandbox.pass_env` | `[]` | Names of extra environment variables passed to the agent (e.g. `ANTHROPIC_BASE_URL`). Their hosts are unreachable unless also allow-listed. |
 | `sandbox.docker` | `"docker"` | Docker CLI binary. |
-| `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default. |
+| `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default, which for Claude Code 2.1.289 is an Opus model. Budgets count tokens, not dollars, so set a cheaper model if cost matters. |
 | `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
 
 **Reservation.** A task's full `max_tokens` is reserved against every cap before it starts and
