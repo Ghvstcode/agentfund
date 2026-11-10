@@ -327,13 +327,13 @@ More, including "what if the task fails" and "why is it called that": [docs/faq.
 ## Status
 
 Pre-release. No tagged version, no published binaries or images; you build from source.
-What has and has not been proven, as of 2026-10-06:
+What has and has not been proven, as of 2026-11-10:
 
 | | State |
 | --- | --- |
 | Full loop against a mock agent: claim → verify → sandbox → branch → CI → delivered → merged | **Proven.** Runs in CI on every push ([`scripts/e2e.sh`](scripts/e2e.sh)) |
 | Real GitHub path: push, PR via `gh`, GitHub Actions, delivery confirmed by polling, merge, re-pin | **Proven once**, by hand, with the mock agent, on a public throwaway repository |
-| A real model inside the sandbox | **Not yet run.** The real Claude Code and Codex CLIs ran in the sandbox through the egress proxy up to the model API (refused a fake key; released the claim cleanly). `make trial` does the rest with your key |
+| A real model inside the sandbox | **Proven 2026-11-10 for the sample project** (`make trial`): Claude Code with Sonnet completed all three `hello-project` tasks, each through verify, scope check, delivery and merge. A bigger repository with a toolchain (gridrs) is not yet run. Codex has only run up to the model API |
 | Pull request from a fork (backer does not own the repository) | **Not yet exercised.** The test backer owned the repository |
 | CI results by webhook from GitHub | **Fixtures only.** Live delivery was confirmed by polling |
 | More than one task at a time (`max_concurrent` > 1) | **Not yet exercised** |

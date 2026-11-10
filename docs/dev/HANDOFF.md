@@ -43,7 +43,7 @@ Update it every time something gets proven.
 | Full loop with the mock agent (claim, verify, sandbox, branch, CI, delivered, merged) | Proven, in CI on every push (`scripts/e2e.sh`) |
 | Real GitHub path (push, PR via `gh`, Actions, delivery by polling, merge), mock agent, backer owns the repo | Proven once, by hand |
 | Real Claude Code CLI in the real sandbox, through the egress proxy, up to the model API | **Proven 2026-11-08** (fake key refused; claim released cleanly; worker stopped). See §2 |
-| A real model completing a task | **Not yet.** This is A1 |
+| A real model completing a task | **Proven 2026-11-10** for all three `hello-project` tasks (Claude Code, Sonnet). A gridrs task is still open in A1 |
 | Codex runner | Added 2026-11-08, **experimental**, never run against the real API. This is A2 |
 | PR from a fork (backer does not own the repo) | **Not exercised.** This is how every real donation works. This is A3 |
 | CI results by live GitHub webhook | **Fixtures only.** This is A4 |
@@ -352,3 +352,9 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
 
 - 2026-11-08: real Claude Code CLI ran in the sandbox up to the model API; Codex runner
   (experimental), `make trial`, runners guide. `e01a6ce`.
+- 2026-11-10: `claude/vibrant-fermat-ig3cvg` fast-forwarded into `main` (human's choice: direct).
+- 2026-11-10: A1 in part. A real model (Claude Code 2.1.289, Sonnet, `setup-token` OAuth token)
+  completed all three `hello-project` tasks end to end. Found and fixed: dependents were
+  claimable before the pin contained the merge (server gate, tests); Claude Code had web search
+  and cloud-scheduling tools (now a `--tools` allowlist). `make trial` runs a `TASKS` list.
+  Left in A1: a gridrs task. Branch `claude/a1-real-model-trial`.

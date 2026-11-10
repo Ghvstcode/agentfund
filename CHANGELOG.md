@@ -27,4 +27,20 @@ All notable changes to this project are documented here. The format follows
   sandbox with `CODEX_API_KEY`/`OPENAI_API_KEY`; usage is metered at turn end, background
   features are switched off, and a run stuck waiting for an unreachable API is stopped.
   `runner.token_command` for any runner. The sandbox image ships Codex next to Claude Code.
-- `make trial` — one task of the sample project with a real agent under the backer's own key.
+- `make trial` — tasks of the sample project with a real agent under the backer's own key;
+  `TASKS="0001-slugify 0002-truncate 0003-cli"` runs the whole project in order, and
+  `TRIAL_KEEP=1` keeps its state and run logs.
+
+### Fixed
+- **Dependent tasks no longer start from a commit without their dependency.** A task became
+  claimable the moment its dependency merged, while the project was still pinned to the commit
+  before the merge, so the worker built it on stale code (found by the first real-model run:
+  `0002-truncate` re-created the file `0001-slugify` had added). A dependency now counts only
+  once the instance has read the base branch, without error, after the merge was recorded. A
+  generic CI must send `merged: true` only once the merge is on the base branch.
+
+### Security
+- **Claude Code runs with an allowlist of local tools** (`--tools`): shell, file reads and
+  edits, search, sub-agents. Its default set includes web search, which the model provider runs
+  outside the egress proxy, and tools that create scheduled cloud agents on the backer's
+  account.
