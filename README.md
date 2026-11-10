@@ -110,13 +110,15 @@ already built it takes about 30 seconds; the first run also builds two container
 
 ## Quickstart
 
-Three ways in, after the demo. No release is published yet, so each starts from a checkout.
+Three ways in, after the demo. Released binaries are for macOS and Linux (amd64, arm64); the
+images are on GHCR.
 
 ### Back a project
 
 ```sh
-make -C worker build images                    # the CLI (worker/bin/agentfund) + sandbox and proxy images
-export PATH="$PWD/worker/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
+agentfund version                              # names the sandbox and proxy images, by digest
+docker pull <each image agentfund version names>
 export CLAUDE_CODE_OAUTH_TOKEN=...             # from `claude setup-token`; or ANTHROPIC_API_KEY
 
 agentfund login   https://fund.example         # paste an API key minted under Settings
@@ -146,7 +148,7 @@ afternoon. Writing tasks an agent can finish without asking you anything is the 
 ### Run an instance
 
 ```sh
-docker compose up --build        # API + UI + Postgres on http://localhost:8787
+docker compose up                # API + UI + Postgres on http://localhost:8787 (--build: from this checkout)
 ```
 
 With no configuration you get dev login and a loud warning. Add GitHub OAuth and a public URL
@@ -326,7 +328,7 @@ More, including "what if the task fails" and "why is it called that": [docs/faq.
 
 ## Status
 
-Pre-release. No tagged version, no published binaries or images; you build from source.
+`v0.1.0`, the first release: binaries on GitHub Releases, images on GHCR. Early software.
 What has and has not been proven, as of 2026-11-10:
 
 | | State |
@@ -339,13 +341,12 @@ What has and has not been proven, as of 2026-11-10:
 | More than one task at a time (`max_concurrent` > 1) | **Not yet exercised** |
 | Coding agents | Claude Code; Codex **experimental** (`runner.name: codex`; one real run with a ChatGPT sign-in, 2026-11-10). See [runners](docs/runners.md) |
 | Git hosts and CI | GitHub only, plus a generic signed-JSON CI adapter |
+| Release | **Proven 2026-11-10** with `v0.1.0-rc2`: the release workflow published the binaries and the three multi-arch images; `install.sh` installed the binary on macOS; the published server image served the UI; a real task ran through the published sandbox and proxy images to merge. Not yet tried on a clean Linux machine |
 
 Treat a first real run as a test: `--once`, a small `--budget`, and read `agentfund logs` afterwards.
 
 ## Roadmap
 
-- **A real-model run (`make trial`), then a release.** Tagged binaries, published sandbox and proxy images,
-  and the install script pointing at them.
 - **gridrs, funded in public.** The first campaign, on an instance anyone can watch.
 - **Federation.** Instances are independent islands today. Five decisions keep the door open:
   global ids (`<instance>/<slug>`), a keypair per instance, ledgers computed from evidence
