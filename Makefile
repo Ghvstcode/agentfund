@@ -16,7 +16,7 @@ demo-manual: ## Same instance, but you type the worker commands yourself
 demo-down: ## Clean up after a demo that was killed rather than Ctrl-C'd
 	@sh scripts/demo.sh down
 
-trial: ## One task with a REAL agent under your own key (ANTHROPIC_API_KEY=… or RUNNER=codex OPENAI_API_KEY=…)
+trial: ## Sample-project tasks with a REAL agent under your own key (ANTHROPIC_API_KEY=… or RUNNER=codex OPENAI_API_KEY=…; TASKS=…)
 	@sh scripts/trial.sh
 
 dev: ## Web UI on :5173 against the built-in mock API (no Docker, no Postgres)
