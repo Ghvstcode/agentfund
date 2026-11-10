@@ -213,6 +213,9 @@ type CodexMeter struct {
 	out       Outcome
 	offline   int // consecutive "waiting for network" errors
 	lastError string
+	// answered is set once anything shows the model API responded: an item
+	// other than a CLI-side error, or the end of a turn.
+	answered bool
 }
 
 // codexOfflineLimit is how many consecutive "waiting for network" errors end
@@ -233,6 +236,9 @@ type codexEvent struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	Item *struct {
+		Type string `json:"type"`
+	} `json:"item"`
 }
 
 // Feed consumes one stdout line and reports whether usage changed.
@@ -242,7 +248,12 @@ func (m *CodexMeter) Feed(line []byte) bool {
 		return false
 	}
 	switch ev.Type {
+	case "item.started", "item.updated", "item.completed":
+		if ev.Item != nil && ev.Item.Type != "error" {
+			m.answered = true
+		}
 	case "turn.completed":
+		m.answered = true
 		m.turns++
 		m.out.ResultSeen = true
 		if u := ev.Usage; u != nil {
@@ -319,6 +330,9 @@ func (m *CodexMeter) Outcome() Outcome {
 	o.Final = m.turns > 0
 	if !o.ResultSeen && o.Message == "" {
 		o.Message = truncate(firstNonEmpty(m.lastError, ""), 500)
+	}
+	if m.Unreachable() && !m.answered && o.Total() == 0 && o.CredentialProblem == "" && !o.RateLimited {
+		o.NetworkProblem = truncate(m.lastError, 300) // the CLI's own words; the pipeline says "unreachable"
 	}
 	return o
 }

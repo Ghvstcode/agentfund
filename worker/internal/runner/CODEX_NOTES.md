@@ -74,7 +74,7 @@ is listed as "under development" and is about compaction, so it is not used.
 
 | Condition | How it shows | Worker outcome |
 | --- | --- | --- |
-| API unreachable | `error` "Reconnecting... waiting for network" every 20 to 60 s, **forever**: the CLI never gives up on its own (seen: 200 s and counting). | The runner stops the agent after 4 in a row; the attempt fails with "the model API is unreachable from the sandbox" (65 s in the sandbox run, instead of the 20-minute timeout). |
+| API unreachable | `error` "Reconnecting... waiting for network" every 20 to 60 s, **forever**: the CLI never gives up on its own (seen: 200 s and counting). | The runner stops the agent after 4 in a row (65 s in the sandbox run, instead of the 20-minute timeout). If no item other than a CLI-side `error` item and no completed turn was seen, the model API never answered: the claim is **released** ("the model API was unreachable from the sandbox") and the worker backs off as for a rate limit; nothing is reported, so no 24 h retry cooldown. Going offline after the agent started working is an ordinary failure. Recorded stream: `testdata/codex-0.167.0-no-network.jsonl`; the release path is tested with the Claude Code mock (`unreachable` e2e image), *not run with the real Codex CLI*. |
 | Bad key | Matched on `401 Unauthorized`, `invalid_api_key`, `Incorrect API key`. *Not verified by execution.* | Released; the worker stops (credential problem). |
 | No quota | `insufficient_quota`, "exceeded your current quota". *Not verified.* | Released; the worker stops (billing). |
 | Rate or usage limit | `usage_limit_reached`, `429`, "rate limit". *Not verified.* | Released; backoff. |

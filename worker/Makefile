@@ -3,7 +3,7 @@ BIN        ?= bin/agentfund
 IMAGES_DIR := ../images
 DOCKER     ?= docker
 DOCKER_ARCH = $(shell $(DOCKER) version --format '{{.Server.Arch}}')
-E2E_SCENARIOS := happy scope verifyfail budget hang ratelimit autherror leak nochange
+E2E_SCENARIOS := happy scope verifyfail budget hang ratelimit autherror unreachable leak nochange
 
 .PHONY: build test test-short test-integration vet fmt sync-spec images sandbox-image egress-image e2e-images snapshot clean
 

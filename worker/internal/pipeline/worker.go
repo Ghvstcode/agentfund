@@ -161,7 +161,7 @@ func (w *Worker) decide(maxTokens int64, repoURL string, trust policy.Trust, g, 
 	}
 	d := policy.Evaluate(policy.Input{
 		Now: w.now(), Global: lim, Project: pl, GlobalUsage: g, ProjectUsage: p, Active: active,
-		BackoffUntil: backoff.Until, Trust: trust, MaxTokens: maxTokens, RepoURL: repoURL,
+		BackoffUntil: backoff.Until, BackoffCause: backoff.Cause, Trust: trust, MaxTokens: maxTokens, RepoURL: repoURL,
 	})
 	if d.Allow && w.SessionBudget > 0 && w.sessionUsed.Load()+maxTokens > w.SessionBudget {
 		return policy.Decision{Code: "session-budget", Reason: fmt.Sprintf("reserving %s tokens would exceed this run's --budget (%s used of %s)",

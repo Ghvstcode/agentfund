@@ -515,7 +515,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	r.phaseMeta.Store(runnerMeta{version: out.Version, model: out.Model})
 	lg.Event("agent_exit", map[string]any{"exit_code": out.ExitCode, "result_seen": out.ResultSeen, "is_error": out.IsError, "final_usage": out.Final,
 		"tokens_in": out.TokensIn, "tokens_out": out.TokensOut, "cost_estimate": out.CostUSD, "model": out.Model, "runner": out.Version,
-		"rate_limited": out.RateLimited, "message": out.Message})
+		"rate_limited": out.RateLimited, "network_problem": out.NetworkProblem, "message": out.Message})
 	r.proxyLog(session)
 
 	if out.Total() > m.MaxTokens {
@@ -529,15 +529,14 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		res := r.release(parent, "the model provider rejected the donor's credentials or account ("+out.CredentialProblem+")")
 		return res, &ErrFatal{Err: fmt.Errorf("the model provider rejected your credentials or account (%s); fix them and start the worker again", out.CredentialProblem)}
 	case out.RateLimited:
-		st, _ := w.Store.Snapshot()
-		var prev policy.BackoffState
-		if st != nil {
-			prev = st.Backoff
-		}
-		next := policy.NextBackoff(prev, w.now(), out.ResetAt, policy.Jitter())
-		_ = w.Store.SetBackoff(next)
-		w.say("%s: backing off until %s after a rate limit", r.taskID, next.Until.Format("15:04:05"))
+		w.backOff(r.taskID, out.ResetAt, policy.CauseRateLimit)
 		return r.release(parent, "rate limited by the model provider: "+out.Message), nil
+	case out.NetworkProblem != "":
+		// The backer's network, not the task: no failed report and no retry
+		// cooldown. Before runErr, because a runner that stops an agent stuck
+		// offline may leave the exec with a context error.
+		w.backOff(r.taskID, time.Time{}, policy.CauseUnreachable)
+		return r.release(parent, "the model API was unreachable from the sandbox: "+out.NetworkProblem), nil
 	case runErr != nil:
 		return r.finish(parent, api.StatusFailed, "sandbox error while running the agent: "+runErr.Error(), nil, nil), nil
 	case out.IsError || out.ExitCode != 0 || !out.ResultSeen:
@@ -709,4 +708,18 @@ func (w *Worker) deliver(ctx context.Context, send func() error) error {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// backOff extends the shared backoff after a rate limit or an unreachable
+// model API; no task is claimed until it ends.
+func (w *Worker) backOff(taskID string, resetAt time.Time, cause string) {
+	st, _ := w.Store.Snapshot()
+	var prev policy.BackoffState
+	if st != nil {
+		prev = st.Backoff
+	}
+	next := policy.NextBackoff(prev, w.now(), resetAt, policy.Jitter())
+	next.Cause = cause
+	_ = w.Store.SetBackoff(next)
+	w.say("%s: backing off until %s after %s", taskID, next.Until.Format("15:04:05"), cause)
 }

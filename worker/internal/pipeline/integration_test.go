@@ -25,6 +25,7 @@ import (
 	"github.com/ghvstcode/agentfund/worker/internal/gitx"
 	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
 	"github.com/ghvstcode/agentfund/worker/internal/logs"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
 	"github.com/ghvstcode/agentfund/worker/internal/runner"
 	"github.com/ghvstcode/agentfund/worker/internal/sandbox"
 	"github.com/ghvstcode/agentfund/worker/internal/scope"
@@ -499,6 +500,48 @@ func TestIntegrationRateLimitReleasesAndBacksOff(t *testing.T) {
 	}
 	if n := len(f.srv.Outcomes()); n != 1 {
 		t.Fatalf("%d claims; the worker must not claim during backoff", n)
+	}
+	f.noBranchPushed()
+	assertSecretNowhere(t, f, res[0])
+}
+
+// An agent that never reaches the model API is the backer's network, not the
+// task: the claim is released (no failed report, no retry cooldown) and the
+// worker backs off as for a rate limit.
+func TestIntegrationUnreachableAPIReleasesAndBacksOff(t *testing.T) {
+	f := integration(t, "unreachable", nil)
+	before := time.Now()
+	res, err := f.once()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := f.onlyOutcome()
+	if len(res) != 1 || res[0].Outcome != OutcomeReleased || o.Status != "released" || o.Report != nil {
+		t.Fatalf("results %+v outcome %+v", res, o)
+	}
+	if reason := o.Release["reason"].(string); !strings.Contains(reason, "unreachable") || !strings.Contains(reason, "ERR_PROXY_TUNNEL") {
+		t.Fatalf("release reason: %q", reason)
+	}
+	st, _ := f.w.Store.Snapshot()
+	if st.Backoff.Attempts != 1 || st.Backoff.Cause != policy.CauseUnreachable || st.Backoff.Until.Before(before.Add(policy.BackoffBase*8/10)) {
+		t.Fatalf("backoff state: %+v", st.Backoff)
+	}
+	if _, err := f.once(); !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), "unreachable") {
+		t.Fatalf("second pass: %v", err)
+	}
+	if n := len(f.srv.Outcomes()); n != 1 {
+		t.Fatalf("%d claims; the worker must not claim during backoff", n)
+	}
+	// Once the backoff is over the same task is claimed again: no 24 h
+	// retry_failed_after lockout as after a failed attempt.
+	if err := f.w.Store.SetBackoff(policy.BackoffState{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.once(); err != nil {
+		t.Fatalf("third pass: %v", err)
+	}
+	if out := f.srv.Outcomes(); len(out) != 2 || out[1].Status != "released" {
+		t.Fatalf("outcomes after the backoff: %+v", out)
 	}
 	f.noBranchPushed()
 	assertSecretNowhere(t, f, res[0])

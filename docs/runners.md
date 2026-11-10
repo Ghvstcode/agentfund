@@ -36,7 +36,8 @@ the details and for what has and has not been verified. In short:
 - **API keys only.** ChatGPT-plan sign-in keeps its tokens in a file (`~/.codex/auth.json`);
   the worker passes environment variables into the sandbox, never files.
 - **It never gives up on an unreachable API by itself.** The runner stops it after a few
-  minutes of "waiting for network" instead of letting it run to the task's timeout.
+  minutes of "waiting for network" instead of letting it run to the task's timeout. If the API
+  never answered, the claim is released (not failed) and the worker backs off.
 - **It tries to reach `chatgpt.com`** even with an API key. The egress proxy refuses that; the
   allowlist is `api.openai.com` only. Background features (plugins, apps, updates, browser and
   computer use, analytics, feedback) are switched off for every run.

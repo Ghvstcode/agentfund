@@ -15,6 +15,8 @@
 //	hang        emit the init event, then do nothing forever
 //	ratelimit   emit a rate-limit refusal and exit non-zero
 //	autherror   emit an authentication failure and exit non-zero
+//	unreachable never reach the model API: connection retries, then an error result
+//	            without an HTTP status (the shape Claude Code 2.1.289 emits with no route)
 //	leak        like happy, but write the credential it was given into an in-scope file
 //	nochange    succeed without touching any file
 //
@@ -308,6 +310,21 @@ func main() {
 		emit(map[string]any{"type": "assistant", "session_id": session, "parent_tool_use_id": nil, "error": "authentication_failed",
 			"message": map[string]any{"id": "msg_mock_err", "model": model, "role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Invalid API key"}}}})
 		result(true, "success", "Invalid API key · Please run /login", 401)
+		os.Exit(1)
+	case "unreachable":
+		const msg = "API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL) — the proxy refused the tunnel: check its credentials and that it allows this host"
+		for i := 1; i <= 3; i++ {
+			emit(map[string]any{"type": "system", "subtype": "api_retry", "attempt": i, "max_retries": 10, "retry_delay_ms": 500,
+				"error_status": nil, "error": "unknown", "session_id": session})
+		}
+		emit(map[string]any{"type": "assistant", "session_id": session, "parent_tool_use_id": nil, "error": "server_error", "is_api_error_message": true,
+			"message": map[string]any{"id": "00000000-0000-4000-8000-000000000002", "model": "<synthetic>", "role": "assistant",
+				"usage":   map[string]any{"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+				"content": []any{map[string]any{"type": "text", "text": msg}}}})
+		emit(map[string]any{"type": "result", "subtype": "success", "is_error": true, "result": msg, "session_id": session, "num_turns": 1,
+			"total_cost_usd": 0, "api_error_status": nil, "terminal_reason": "api_error",
+			"usage":      map[string]any{"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0},
+			"modelUsage": map[string]any{}})
 		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "mock-agent: unknown MOCK_AGENT_SCENARIO %q\n", scenario)

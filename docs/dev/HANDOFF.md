@@ -89,9 +89,8 @@ or merge it first (ask the human which they prefer), then branch from `main` for
 - **TLS-inspecting networks break the sandbox.** Behind a corporate proxy that re-signs TLS, the
   agent fails with `SELF_SIGNED_CERT_IN_CHAIN`, and the worker has no way to add a CA. The cloud
   session worked around it with a local image carrying `NODE_EXTRA_CA_CERTS`. See A7.
-- **"API unreachable" counts as a task failure** (both runners), which triggers the 24 h
-  `retry_failed_after` lockout and puts a `failed` report on the ledger, although it is the
-  backer's network and not the task. See A7.
+- ~~**"API unreachable" counts as a task failure**~~ (both runners). Fixed 2026-11-10: the
+  claim is released and the worker backs off. See A7.
 - Two things that are working as designed but will trip you while testing:
   - `--budget` below a task's `max_tokens` refuses the task, because the whole `max_tokens` is
     reserved up front. `hello-project` tasks are 1M, so use `--budget 1M`.
@@ -257,7 +256,8 @@ to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy
 - **Custom CA for the sandbox**: a `sandbox.extra_ca_certs` (path to a PEM bundle) that the worker
   mounts read-only into the sandbox and exports as `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`, plus
   the matching config schema, docs and a test. Needed by backers behind corporate proxies.
-- **Unreachable API should release, not fail.** When the agent never reached the model API (Codex
+- ~~**Unreachable API should release, not fail.**~~ Done 2026-11-10 (`Outcome.NetworkProblem`,
+  see the progress log). When the agent never reached the model API (Codex
   `Unreachable()`, Claude Code "Unable to connect to API"), release the claim with a clear reason
   and back off, as for a rate limit, instead of `failed` plus the 24 h lockout. Probably a new
   `Outcome` field (e.g. `NetworkProblem`) handled in `worker/internal/pipeline/run.go` next to
@@ -390,3 +390,8 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   deferred: no second GitHub account yet (human's call).
 - 2026-11-10: A4 done: live GitHub webhooks (through a tunnel) moved a report to delivered and merged,
   and re-pinned. Sample CI fixed for a repository with no tests yet.
+- 2026-11-10: A7 "unreachable API" done. `Outcome.NetworkProblem` from both meters; the worker
+  releases the claim and backs off (shared with rate limits, `BackoffState.Cause`) instead of
+  reporting `failed`. Claude Code's unreachable stream recorded live (2.1.289, four ways, fake
+  key, no tokens); the Codex release path is tested with recorded and synthetic streams only.
+  New e2e scenario `unreachable`. Branch `claude/great-kalam-f5b5f7`.

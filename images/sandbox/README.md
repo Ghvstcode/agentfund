@@ -52,5 +52,6 @@ in the worker, so the worker under test is the worker that ships.
 | `budget` | burns tokens without end | the run is killed at the cap |
 | `hang` | does nothing forever | the timeout |
 | `ratelimit`, `autherror` | exits with a provider error | the claim is released; a rate limit also backs the worker off |
+| `unreachable` | never reaches the model API (connection retries, then an error result without an HTTP status) | the claim is released, not failed, and the worker backs off |
 | `leak` | writes the credential it was given into an in-scope file | a diff containing the credential is discarded and nothing is pushed |
 | `nochange` | succeeds without touching a file | an empty diff is not a result |

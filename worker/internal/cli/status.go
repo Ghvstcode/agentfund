@@ -23,6 +23,7 @@ import (
 	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
 	"github.com/ghvstcode/agentfund/worker/internal/logs"
 	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
 	"github.com/ghvstcode/agentfund/worker/internal/store"
 	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 	"github.com/ghvstcode/agentfund/worker/internal/verify"
@@ -110,7 +111,11 @@ func statusCmd(e *env) *cobra.Command {
 			fmt.Fprintf(e.out, "Tokens today:     %s\nTokens this week: %s\n", capText(global.Day, cfg.Global.TokensPerDay), capText(global.Week, cfg.Global.TokensPerWeek))
 			fmt.Fprintf(e.out, "(running tasks count at their full max_tokens reservation until they finish)\n")
 			if st.Backoff.Until.After(now) {
-				fmt.Fprintf(e.out, "Rate-limit backoff until %s (%d consecutive)\n", st.Backoff.Until.Format("Mon 15:04:05"), st.Backoff.Attempts)
+				cause := st.Backoff.Cause
+				if cause == "" {
+					cause = policy.CauseRateLimit
+				}
+				fmt.Fprintf(e.out, "Backing off until %s after %s (%d consecutive)\n", st.Backoff.Until.Format("Mon 15:04:05"), cause, st.Backoff.Attempts)
 			}
 			for _, k := range keys {
 				p := cfg.Projects[k]
