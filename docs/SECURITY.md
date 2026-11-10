@@ -69,7 +69,11 @@ public's ability to **verify** every number the system shows.
    is in the sandbox, so there is nothing private to send unless you put it there. The proxy
    pins the IP an allow-listed name resolved to but does not check the TLS server name inside
    the tunnel, so domain fronting through a shared CDN edge is not ruled out; SNI pinning is a
-   planned hardening.
+   planned hardening. The proxy also cannot see tools that the model provider runs on its own
+   side, such as web search: those reach the web from the provider, not from your machine. The
+   worker therefore starts Claude Code with an allowlist of local tools only (shell, file
+   reads and edits, sub-agents), which also keeps out the CLI's tools that schedule cloud agents
+   on your account. For Codex this has not been verified yet.
 3. **Your subscription's terms are between you and your AI provider.** The worker executes
    prompts under the donor's own login, on the donor's own machine. AgentFund makes no claim on
    any provider's behalf about what their terms permit. The worker runs the unmodified Claude

@@ -20,7 +20,8 @@ Sources:
 ```
 claude -p --output-format stream-json --verbose --include-partial-messages \
        --dangerously-skip-permissions --setting-sources user \
-       --strict-mcp-config --no-session-persistence [--model M]      < prompt
+       --strict-mcp-config --no-session-persistence \
+       --tools Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Task [--model M]   < prompt
 ```
 
 | Flag | Why | Verified by |
@@ -33,6 +34,7 @@ claude -p --output-format stream-json --verbose --include-partial-messages \
 | `--setting-sources user` | Do not load `project`/`local` settings files from the repository being worked on. | `--help` (flag exists and is accepted); effect not separately tested |
 | `--strict-mcp-config` | Ignore MCP server definitions other than `--mcp-config` (none), e.g. a repo's `.mcp.json`. | `--help`; accepted in live run |
 | `--no-session-persistence` | Nothing to resume; the container is discarded. Print-mode only. | `--help`; accepted in live run |
+| `--tools` allowlist | Without it, 2.1.289's `system/init` lists `WebSearch`, `WebFetch`, `RemoteTrigger`, `CronCreate`/`CronDelete`/`CronList`, `ScheduleWakeup`, `Workflow`, `SendMessage`, `Skill` and more, all usable under `bypassPermissions`. Web search runs on Anthropic's side (the result's `usage.server_tool_use` counts `web_search_requests` and `web_fetch_requests`), so it reaches the web without passing the egress proxy; the scheduling tools create cloud agents on the donor's account that outlive the run. An allowlist, not `--disallowedTools`, so tools added by later versions stay off. Names the CLI does not know are dropped silently (2.1.289 has no `TodoWrite`). **Not verified:** that a `Task` sub-agent is held to the same set (no run has used one). | live run: `system/init` reports exactly `Task, Bash, Edit, Glob, Grep, NotebookEdit, Read, Write`; a real task completed with them |
 | **not** `--bare` | Bare mode never reads `CLAUDE_CODE_OAUTH_TOKEN` (docs: "Bare mode does not read `CLAUDE_CODE_OAUTH_TOKEN`"), which would remove an authentication method. | docs |
 
 Not verified by execution: the CLI refusing `--dangerously-skip-permissions`
@@ -108,12 +110,20 @@ it ends.
 
 - The CLI honours `HTTPS_PROXY`/`HTTP_PROXY` (and lowercase forms; first set wins in the order `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY`); no SOCKS. The sandbox sets all four to `http://egress-proxy:3128`.
 - Required host for model requests: `api.anthropic.com`. That is the whole default egress allowlist (`sandbox.allow_git_host` and `sandbox.extra_allow_hosts` add to it).
-- The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". Whether a long-lived `setup-token` token ever needs it at run time was **not tested** (it would need a real token and real usage). If a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
+- The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". A long-lived `setup-token` token did **not** need it: four real runs on 2026-11-10 under such a token reached only `api.anthropic.com` (egress records). Token refresh near expiry was not tested; if a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` are set so the CLI does not try telemetry/update hosts that the proxy would refuse anyway.
 
-## Not done
+## Real runs
 
-No task has been run end-to-end against the real model API from inside the
-sandbox (that needs the donor's token and spends their tokens). Everything
-after "the CLI starts in the sandbox and reports `authentication_failed`" is
-covered by the mock agent (`cmd/mock-agent`), which emits the shapes above.
+2026-11-10, `make trial` with `MODEL=sonnet` (`claude-sonnet-5-5`) under a `setup-token` OAuth
+token, Claude Code 2.1.289 in `agentfund/sandbox:dev`: all three `examples/hello-project` tasks
+completed, passed `verify` in the sandbox, stayed inside `scope.write`, and went reported →
+delivered → merged. Each took 14–20 s and about 63–82k input tokens (almost all cache reads of
+the CLI's own system prompt) and 1–1.8k output tokens, $0.03–0.05 by the CLI's estimate. The
+meter's in-flight count equalled the CLI's final `result` usage exactly. With the `--tools`
+allowlist the same task took 38k input tokens (fewer tool definitions in the prompt), reported
+`web_search_requests: 0`, and still completed. One run is recorded in
+`testdata/real-2.1.289-sonnet-task.jsonl` (`TestMeterOnRealTaskStream`).
+
+Not yet run for real: a larger repository with a toolchain (a gridrs task), `max_tokens` or
+`timeout_minutes` actually being hit, and a rate limit or exhausted quota.
