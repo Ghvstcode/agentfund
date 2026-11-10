@@ -224,6 +224,7 @@ func main() {
 		"mock": map[string]any{
 			"scenario": scenario, "uid": os.Getuid(), "prompt_bytes": len(prompt), "prompt_head": firstLine(prompt),
 			"has_oauth_token": token != "", "has_api_key": apiKey != "", "https_proxy": os.Getenv("HTTPS_PROXY"),
+			"ssl_cert_file": os.Getenv("SSL_CERT_FILE"), "node_extra_ca_certs": os.Getenv("NODE_EXTRA_CA_CERTS"),
 			"has_git_dir": gitErr == nil, "args": args,
 		},
 	})

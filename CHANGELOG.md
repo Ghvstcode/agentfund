@@ -30,6 +30,11 @@ All notable changes to this project are documented here. The format follows
 - `make trial` — tasks of the sample project with a real agent under the backer's own key;
   `TASKS="0001-slugify 0002-truncate 0003-cli"` runs the whole project in order, and
   `TRIAL_KEEP=1` keeps its state and run logs.
+- `sandbox.extra_ca_certs` — a PEM file of extra CA certificates (a TLS-inspecting corporate
+  proxy's, say) that the agent trusts inside the sandbox. Validated at config load (readable,
+  certificates only, no private key), copied into a root-owned tmpfs at sandbox start and
+  exported as `NODE_EXTRA_CA_CERTS` (Claude Code) and `SSL_CERT_FILE` (a combined bundle with
+  the image's roots, for Codex and OpenSSL tools).
 
 ### Changed
 - A released `agentfund` defaults to the sandbox and egress-proxy images published with it, by

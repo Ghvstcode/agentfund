@@ -45,7 +45,10 @@ type Sandbox struct {
 	AllowGitHost     bool     `yaml:"allow_git_host"`
 	ExtraAllowHosts  []string `yaml:"extra_allow_hosts"`
 	PassEnv          []string `yaml:"pass_env"`
-	Docker           string   `yaml:"docker"`
+	// ExtraCACerts is a PEM file of CA certificates the agent trusts besides
+	// the image's roots ("" = none). See ReadCACerts.
+	ExtraCACerts string `yaml:"extra_ca_certs"`
+	Docker       string `yaml:"docker"`
 }
 
 // Runner configures the coding agent.
@@ -196,6 +199,11 @@ func (c *Config) Validate() error {
 	for _, h := range g.Sandbox.ExtraAllowHosts {
 		if h == "" || strings.ContainsAny(h, " ,/*") {
 			return fmt.Errorf("global.sandbox.extra_allow_hosts: %q is not host[:port]", h)
+		}
+	}
+	if g.Sandbox.ExtraCACerts != "" {
+		if _, err := ReadCACerts(g.Sandbox.ExtraCACerts); err != nil {
+			return err
 		}
 	}
 	for key, p := range c.Projects {
@@ -407,6 +415,10 @@ func (c *Config) render() ([]byte, error) {
 	w("    # agent process (e.g. ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, AWS_REGION).\n")
 	w("    # Their hosts are NOT reachable unless you also list them in extra_allow_hosts.\n")
 	w("    pass_env: %s\n", yamlList(g.Sandbox.PassEnv))
+	w("    # Optional PEM file of extra CA certificates the agent should trust, e.g. the CA\n")
+	w("    # of a TLS-inspecting corporate proxy (absolute path or ~/...). Only CERTIFICATE\n")
+	w("    # blocks are allowed. Copied into the sandbox at start and added to its roots.\n")
+	w("    extra_ca_certs: %q\n", g.Sandbox.ExtraCACerts)
 	w("    # Docker CLI binary.\n")
 	w("    docker: %q\n", g.Sandbox.Docker)
 	w("  runner:\n")
