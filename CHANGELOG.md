@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-10
+
 ### Added
 - **Spec v1** — task manifest, `agentfund.yaml` and `MANIFEST.lock` JSON Schemas; minisign
   (Ed25519, prehashed) detached lock signature with a key-rotation chain; the five-step worker
@@ -75,3 +77,6 @@ All notable changes to this project are documented here. The format follows
   edits, search, sub-agents. Its default set includes web search, which the model provider runs
   outside the egress proxy, and tools that create scheduled cloud agents on the backer's
   account.
+
+[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ghvstcode/agentfund/releases/tag/v0.1.0
