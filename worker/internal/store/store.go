@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
 )
 
 // Run statuses beyond the wire report statuses.

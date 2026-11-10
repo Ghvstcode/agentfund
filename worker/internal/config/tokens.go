@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 )
 
 // Tokens is a token quantity that reads "200m", "5M", "750k", "1.5m" or a plain integer.

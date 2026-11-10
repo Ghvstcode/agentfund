@@ -196,8 +196,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: e.TRUST_PROXY,
     dbPoolMax: e.DB_POOL_MAX,
     logLevel: e.LOG_LEVEL,
-    sourceUrl: e.SOURCE_URL ?? "https://github.com/agentfund/agentfund",
-    installCommand: e.INSTALL_COMMAND ?? "git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images",
+    sourceUrl: e.SOURCE_URL ?? "https://github.com/ghvstcode/agentfund",
+    installCommand: e.INSTALL_COMMAND ?? "git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images",
     docsUrl: e.DOCS_URL,
     warnings,
   };

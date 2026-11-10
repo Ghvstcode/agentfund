@@ -826,9 +826,9 @@ route('GET', '/v1/meta', ({ world }) => ({
   instance_pubkey: 'RWTmock0000000000000000000000000000000000000000000000000',
   capabilities: { github_oauth: true, dev_login: true, sse: true, ci_providers: ['github', 'generic'], ci_poll: true, federation: false },
   links: {
-    source_url: 'https://github.com/agentfund/agentfund',
-    install_command: 'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images',
-    docs_url: 'https://github.com/agentfund/agentfund/tree/main/docs',
+    source_url: 'https://github.com/ghvstcode/agentfund',
+    install_command: 'git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images',
+    docs_url: 'https://github.com/ghvstcode/agentfund/tree/main/docs',
   },
   defaults: { lease_seconds: world.config.lease_seconds, heartbeat_interval_seconds: 60 },
 }));

@@ -16,7 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
 // Default image references. These are the names the repository's own

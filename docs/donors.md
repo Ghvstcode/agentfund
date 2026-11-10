@@ -10,7 +10,7 @@ protect you from, and how to check all of it yourself.
 ## The short version
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh   # the CLI
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh   # the CLI
 make -C worker images                          # sandbox + proxy images, from a checkout
 export CLAUDE_CODE_OAUTH_TOKEN=...             # or ANTHROPIC_API_KEY; the bill is yours
 agentfund login https://fund.example           # store the instance's API key (af_...)
@@ -39,12 +39,11 @@ agentfund logs                                 # what was actually run
 ## 1. Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
 ```
 
-No release is published yet, and `agentfund/agentfund` is a placeholder organisation name
-until launch. Until then, build from a checkout (Go 1.27+): `cd worker && make build` writes
-`worker/bin/agentfund`.
+No release is published yet. Until there is one, build from a checkout (Go 1.27+):
+`cd worker && make build` writes `worker/bin/agentfund`.
 
 The installer detects OS and architecture (Linux and macOS, amd64 and arm64), downloads the
 release archive, verifies its SHA-256 against the release's checksum file, and installs to

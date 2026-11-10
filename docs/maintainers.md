@@ -23,7 +23,7 @@ agentfund work <slug> --once --task <task-id>      # one task, in the real sandb
 That part takes an afternoon. The hard part is **decomposition**: turning a project into
 tasks that an agent which cannot ask you anything can finish, in parallel with other agents
 it will never meet, judged by a test it cannot edit. Most of this guide is about that. The
-running example is [gridrs](https://github.com/agentfund/gridrs), a terminal spreadsheet in
+running example is [gridrs](https://github.com/Ghvstcode/gridrs), a terminal spreadsheet in
 Rust split into 23 manifests (the `agentfund` organisation name is a placeholder until launch).
 
 > [!IMPORTANT]
@@ -549,7 +549,7 @@ The worker's scope check limits *where* the change is, not what it does.
   script and acceptance tests are ordinary files: make sure no manifest's `scope.write`
   covers them. gridrs's CI also fails any PR that removes or edits a `ci/done/` marker.
 
-[`gridrs/.github/workflows/ci.yml`](https://github.com/agentfund/gridrs/blob/main/.github/workflows/ci.yml)
+[`gridrs/.github/workflows/ci.yml`](https://github.com/Ghvstcode/gridrs/blob/main/.github/workflows/ci.yml)
 and [`examples/hello-project/.github/workflows/ci.yml`](../examples/hello-project/.github/workflows/ci.yml)
 implement the workflow-file items.
 

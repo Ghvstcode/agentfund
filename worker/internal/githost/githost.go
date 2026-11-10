@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
 )
 
 // Request is everything needed to publish one run.

@@ -1,4 +1,4 @@
-module github.com/agentfund/agentfund/worker
+module github.com/ghvstcode/agentfund/worker
 
 go 1.27.1
 

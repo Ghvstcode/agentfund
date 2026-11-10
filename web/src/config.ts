@@ -27,8 +27,8 @@ interface BuildEnv {
 }
 
 // Build from source: it works before any release exists. Instances override it in meta.links.
-const DEFAULT_INSTALL_COMMAND = 'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images';
-const DEFAULT_SOURCE_URL = 'https://github.com/agentfund/agentfund';
+const DEFAULT_INSTALL_COMMAND = 'git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images';
+const DEFAULT_SOURCE_URL = 'https://github.com/ghvstcode/agentfund';
 
 /**
  * Resolve the API base URL: runtime override first (an empty string is a valid override and

@@ -11,7 +11,7 @@ import (
 
 	upstream "aead.dev/minisign"
 
-	"github.com/agentfund/agentfund/worker/internal/testenv"
+	"github.com/ghvstcode/agentfund/worker/internal/testenv"
 )
 
 func mustKey(t *testing.T) PrivateKey {

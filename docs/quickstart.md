@@ -17,7 +17,7 @@ takes about 30 seconds once built. Then the same loop for real.
 ### Run it
 
 ```sh
-git clone https://github.com/agentfund/agentfund && cd agentfund
+git clone https://github.com/ghvstcode/agentfund && cd agentfund
 make demo
 ```
 

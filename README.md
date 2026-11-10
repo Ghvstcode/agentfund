@@ -45,7 +45,7 @@ scripted mock, so the numbers are small and nobody was billed. Everything else i
 ## Try it: zero tokens, one command
 
 ```sh
-git clone https://github.com/agentfund/agentfund && cd agentfund
+git clone https://github.com/ghvstcode/agentfund && cd agentfund
 make demo
 ```
 
@@ -381,4 +381,4 @@ The spec leads the code: change the schema or OpenAPI first, then the implementa
 <!-- The public organisation is not final. The repository slug lives here and in the `git clone` line. -->
 [ci]: https://github.com/Ghvstcode/agentfund/actions/workflows/ci.yml
 [ci-badge]: https://github.com/Ghvstcode/agentfund/actions/workflows/ci.yml/badge.svg
-[gridrs]: https://github.com/agentfund/gridrs
+[gridrs]: https://github.com/Ghvstcode/gridrs

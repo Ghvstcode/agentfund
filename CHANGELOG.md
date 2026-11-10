@@ -31,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   `TASKS="0001-slugify 0002-truncate 0003-cli"` runs the whole project in order, and
   `TRIAL_KEEP=1` keeps its state and run logs.
 
+### Changed
+- The project's home is `github.com/ghvstcode/agentfund` (was the placeholder
+  `agentfund/agentfund`): Go module path, install script, release config, server and web
+  defaults, compose file and docs.
+
 ### Fixed
 - **Dependent tasks no longer start from a commit without their dependency.** A task became
   claimable the moment its dependency merged, while the project was still pinned to the commit

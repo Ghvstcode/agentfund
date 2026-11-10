@@ -19,9 +19,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/agentfund/agentfund/worker/internal/app.Version={{ .Version }}
-      - -X github.com/agentfund/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
-      - -X github.com/agentfund/agentfund/worker/internal/app.Date={{ .CommitDate }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Version={{ .Version }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Date={{ .CommitDate }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -46,10 +46,10 @@ changelog:
   disable: true
 
 release:
-  # Placeholder repository; scripts/install.sh downloads from the same one
+  # scripts/install.sh downloads from the same repository
   # (override there with AGENTFUND_REPO).
   github:
-    owner: agentfund
+    owner: ghvstcode
     name: agentfund
   draft: true
   prerelease: auto
