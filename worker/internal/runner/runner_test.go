@@ -72,6 +72,37 @@ func TestMeterOnRealStream(t *testing.T) {
 	}
 }
 
+// A whole task (0001-slugify of examples/hello-project) by claude-sonnet-5-5 through Claude Code
+// 2.1.289 in the real sandbox, from the first real-model run: several turns with tool use and
+// prompt caching. Plan details in rate_limit_event are neutralised; the run predates --tools.
+func TestMeterOnRealTaskStream(t *testing.T) {
+	f, err := os.Open("testdata/real-2.1.289-sonnet-task.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	m := NewMeter()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 1<<20)
+	var beforeResult Usage
+	for sc.Scan() {
+		if strings.Contains(sc.Text(), `"type":"result"`) {
+			beforeResult = m.Usage()
+		}
+		m.Feed(sc.Bytes())
+	}
+	// The CLI's own total: input 8 + cache writes 1,115 + cache reads 62,081; output 1,029.
+	o := m.Outcome()
+	if o.TokensIn != 63204 || o.TokensOut != 1029 || !o.Final || !o.ResultSeen || o.IsError || o.RateLimited ||
+		o.Model != "claude-sonnet-5-5" || o.Version != "claude-code/2.1.289" || o.CostUSD < 0.027 || o.CostUSD > 0.0273 || o.CredentialProblem != "" {
+		t.Fatalf("outcome %+v", o)
+	}
+	// What max_tokens is enforced against while the run is going is already exact.
+	if beforeResult.TokensIn != o.TokensIn || beforeResult.TokensOut != o.TokensOut {
+		t.Errorf("in-flight usage %+v, want the final in=%d out=%d", beforeResult, o.TokensIn, o.TokensOut)
+	}
+}
+
 func TestMeterAccounting(t *testing.T) {
 	t.Run("input side sums input + cache creation + cache read", func(t *testing.T) {
 		m := NewMeter()
