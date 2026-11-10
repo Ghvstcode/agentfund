@@ -58,7 +58,7 @@ release archive, verifies its SHA-256 against the release's checksum file, and i
 | `git` | The worker clones the project on the host to verify it. |
 | `gh`, logged in (`gh auth login`) | The worker forks the project, pushes the branch and opens the PR as **you**. |
 | The sandbox and egress-proxy images | A released binary uses the images published with it, by digest: `agentfund version` names them, `docker pull` each once. A build from source uses `agentfund/sandbox:dev` and `agentfund/egress-proxy:dev`: `make -C worker images`. |
-| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work`; with `runner.name: codex`, `CODEX_API_KEY` or `OPENAI_API_KEY` | The agent runs under your credentials. With neither set and no `claude_token_command` in the config, `work` stops before claiming anything. |
+| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work`; with `runner.name: codex`, `CODEX_API_KEY` or `OPENAI_API_KEY`, a ChatGPT Business/Enterprise access token in `CODEX_ACCESS_TOKEN`, or a ChatGPT sign-in made for AgentFund only (see [§7](#7-whose-credentials-whose-bill)) | The agent runs under your credentials. With none of them and no token command in the config, `work` stops before claiming anything. |
 
 Read [Whose credentials, whose bill](#7-whose-credentials-whose-bill) before choosing one.
 
@@ -236,13 +236,14 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `claude_token_command` | `""` | Shell command printing a Claude Code OAuth token, used only when neither credential variable is set. |
 | `sandbox.image`, `sandbox.egress_proxy_image` | The images this binary was released with, by digest (`agentfund version`); from source, `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | What runs. If you set your own, pin it by digest (`name@sha256:...`): a tag can be re-pointed. |
 | `sandbox.cpus`, `memory`, `pids` | `"2"`, `"4g"`, `512` | Your machine's resources. |
-| `sandbox.allow_git_host` | `false` | By default the sandbox reaches only `api.anthropic.com`. `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
+| `sandbox.allow_git_host` | `false` | By default the sandbox reaches only the model API: `api.anthropic.com`; for `codex`, `api.openai.com` with an API key or `chatgpt.com` with a ChatGPT credential (plus `auth.openai.com` for an access token). `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |
 | `sandbox.pass_env` | `[]` | Names of extra environment variables passed to the agent (e.g. `ANTHROPIC_BASE_URL`). Their hosts are unreachable unless also allow-listed. |
 | `sandbox.extra_ca_certs` | `""` | Path (absolute, or `~/...`) to a PEM file of CA certificates the agent should trust besides the image's own roots: the CA of a TLS-inspecting corporate proxy, or of a private gateway. See [below](#behind-a-tls-inspecting-proxy). |
 | `sandbox.docker` | `"docker"` | Docker CLI binary. |
 | `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default, which for Claude Code 2.1.289 is an Opus model. Budgets count tokens, not dollars, so set a cheaper model if cost matters. |
-| `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
+| `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_ACCESS_TOKEN` when it starts with `at-` (a ChatGPT access token), otherwise as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
+| `runner.codex_home` | `""` (`~/.config/agentfund/codex`) | `codex` only: the directory of a ChatGPT sign-in used only by AgentFund (`CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login`). Used when no API key or access token is set. Must not be `~/.codex`. See [§7](#7-whose-credentials-whose-bill). |
 
 **Reservation.** A task's full `max_tokens` is reserved against every cap before it starts and
 settled to the real figure afterwards, so caps cannot be overshot. The accounting lives in
@@ -369,6 +370,58 @@ Full threat model: [SECURITY.md](SECURITY.md).
   An API key (`ANTHROPIC_API_KEY`, pay-as-you-go under Anthropic's Commercial Terms) is the
   unambiguous option. See also limitation 3 in [SECURITY.md](SECURITY.md).
 
+### Codex (experimental)
+
+With `runner.name: codex` the worker runs the unmodified Codex CLI, published by OpenAI. It
+looks for a credential in this order:
+
+1. **An API key**, `CODEX_API_KEY` or `OPENAI_API_KEY`. Handled like Anthropic credentials
+   above. The sandbox reaches `api.openai.com`.
+2. **A ChatGPT access token**, `CODEX_ACCESS_TOKEN` (`at-…`). These exist for ChatGPT Business
+   and Enterprise workspaces whose admin allows them, and are created at
+   `chatgpt.com/admin/access-tokens`. Create one for AgentFund only, with the Codex scope and
+   the shortest expiry you will put up with; revoke it there at any time. It is handled like an
+   API key: read from your environment, never stored. The sandbox reaches `chatgpt.com` and
+   `auth.openai.com`.
+3. **A ChatGPT sign-in made for AgentFund only** (Plus, Pro and other plans). Run once:
+
+   ```sh
+   mkdir -p -m 700 ~/.config/agentfund/codex
+   CODEX_HOME=~/.config/agentfund/codex npx -y @openai/codex@0.167.0 login
+   ```
+
+   (`npx` runs the Codex version that is in the sandbox image, `0.167.0`, so the sign-in file
+   has the layout the worker was checked against; it needs Node.js. Codex refuses a `CODEX_HOME`
+   that does not exist, hence the `mkdir`.)
+
+   This is a second sign-in, separate from the one your own Codex uses in `~/.codex`, which
+   the worker never reads; your everyday sign-in keeps working through it and through its
+   refreshes (checked 2026-11-10). Unlike every other credential here, **the worker stores and renews
+   this one**: before each run it refreshes the sign-in in that directory if the access token
+   would expire during the run (it talks to `auth.openai.com` from your machine for that, never
+   from the sandbox). The sandbox gets a copy with the access token and without the refresh
+   token, written into its temporary home directory. The sandbox reaches `chatgpt.com` only.
+   `codex logout` with the same `CODEX_HOME` ends it.
+
+What a hostile task could take is different from an Anthropic key, and you should know it
+before choosing 2 or 3:
+
+- With a ChatGPT credential the sandbox must reach `chatgpt.com`, and the egress proxy decides
+  by host, not by path. Code in the sandbox can read the credential Codex uses (it runs as the
+  same user) and call other `chatgpt.com` endpoints with it.
+- An access token from a sign-in (3) lets its holder act as your ChatGPT account until it
+  expires, which is 10 days after it was issued (measured with Codex 0.167.0), possibly beyond
+  what Codex itself needs. The sandbox also gets your name, email address and plan. It cannot be renewed from the sandbox. What exactly it can reach is listed
+  in `worker/internal/runner/CODEX_NOTES.md` as far as it has been verified.
+- A Business/Enterprise access token (2) is limited to the scope, expiry and workspace you
+  chose, and you can revoke it without touching anything else.
+
+Your plan's terms are between you and OpenAI. AgentFund makes no claim on OpenAI's behalf about
+what they permit. Whether donating usage fits your ChatGPT plan or workspace agreement is your
+call to make from those terms; an API key is the unambiguous option. Read them yourself:
+[Terms of Use](https://openai.com/policies/terms-of-use/),
+[Usage Policies](https://openai.com/policies/usage-policies/).
+
 ## 8. Reading your own logs
 
 ```sh
@@ -446,6 +499,7 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | You see | Meaning | Do |
 | --- | --- | --- |
 | `no credentials for the coding agent: set CLAUDE_CODE_OAUTH_TOKEN ...` | Neither variable is set and there is no `claude_token_command`. | Export one in the shell (or env file) that runs `work`. |
+| `the agent credentials need attention: ... sign in again with: CODEX_HOME=<dir> npx … login` | The AgentFund-only Codex sign-in can no longer be renewed: it was signed out, or its refresh token was used elsewhere or expired. The claim was released and the worker stopped. | Run the command shown, then start the worker again. |
 | `the model provider rejected your credentials or account (<why>); fix them and start the worker again` | Expired or revoked token, billing or organisation problem. The worker has stopped. | Fix the credential. If an OAuth token is valid but still rejected, try adding `platform.claude.com` to `sandbox.extra_allow_hosts` (untested; see `CLAUDE_CODE_NOTES.md`). |
 | `API Error: Unable to connect to API: SSL certificate verification failed (SELF_SIGNED_CERT_IN_CHAIN)` (or `UNABLE_TO_VERIFY_LEAF_SIGNATURE`) in the agent output | Your network re-signs TLS with a CA the sandbox does not trust. | Set [`sandbox.extra_ca_certs`](#behind-a-tls-inspecting-proxy). |
 | `global.sandbox.extra_ca_certs: ...` | The CA file is missing, unreadable, not PEM, or holds something other than certificates. | Do what the message says; `""` turns the option off. |

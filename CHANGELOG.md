@@ -27,6 +27,12 @@ All notable changes to this project are documented here. The format follows
   sandbox with `CODEX_API_KEY`/`OPENAI_API_KEY`; usage is metered at turn end, background
   features are switched off, and a run stuck waiting for an unreachable API is stopped.
   `runner.token_command` for any runner. The sandbox image ships Codex next to Claude Code.
+- **Codex with ChatGPT credentials (experimental)** — a Business/Enterprise access token in
+  `CODEX_ACCESS_TOKEN`, or a ChatGPT sign-in used only by AgentFund (`runner.codex_home`,
+  `CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login`) that the worker refreshes on the host before each run; the
+  sandbox gets the access token without the refresh token. The egress allowlist follows the
+  credential (`chatgpt.com` instead of `api.openai.com`). Design:
+  `docs/dev/codex-chatgpt-signin.md`.
 - `make trial` — tasks of the sample project with a real agent under the backer's own key;
   `TASKS="0001-slugify 0002-truncate 0003-cli"` runs the whole project in order, and
   `TRIAL_KEEP=1` keeps its state and run logs.

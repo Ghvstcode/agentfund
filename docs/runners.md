@@ -8,7 +8,7 @@ pick it and manifests do not name it. Each report records the runner and its ver
 | Runner | `runner.name` | Credentials | State |
 | --- | --- | --- | --- |
 | [Claude Code](https://code.claude.com/docs/en/headless) | `claude-code` (default) | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) or `ANTHROPIC_API_KEY`; Bedrock, Vertex and gateways through `sandbox.pass_env` | Supported. Full loop proven with a mock agent; the real CLI was run in the sandbox up to the model API |
-| [Codex](https://github.com/openai/codex) | `codex` | `CODEX_API_KEY` or `OPENAI_API_KEY` | **Experimental.** Runs in the sandbox; no run against the real API yet. See its caveats below |
+| [Codex](https://github.com/openai/codex) | `codex` | `CODEX_API_KEY` or `OPENAI_API_KEY`; a ChatGPT Business/Enterprise access token in `CODEX_ACCESS_TOKEN`; or a ChatGPT sign-in used only by AgentFund (`runner.codex_home`) | **Experimental.** One real run (2026-11-10, ChatGPT Plus sign-in, the smallest sample task) went through verify, CI and merge; API keys and access tokens have not run for real yet. See its caveats below |
 
 Both CLIs are in the sandbox image (`images/sandbox/Dockerfile`, version-pinned). Try either
 end to end with your own key:
@@ -16,6 +16,7 @@ end to end with your own key:
 ```sh
 ANTHROPIC_API_KEY=sk-ant-… make trial                  # Claude Code
 RUNNER=codex OPENAI_API_KEY=sk-… make trial            # Codex
+RUNNER=codex make trial                                # Codex, ChatGPT sign-in (see below)
 MODEL=sonnet ANTHROPIC_API_KEY=sk-ant-… make trial     # pick a model (passed as --model)
 ```
 
@@ -33,13 +34,18 @@ the details and for what has and has not been verified. In short:
   run can end above a task's `max_tokens`; it is then recorded as having hit its cap, and its
   real usage is reported and counted against your daily and weekly caps. `timeout_minutes`
   still applies. With Claude Code the worker stops the agent at the cap.
-- **API keys only.** ChatGPT-plan sign-in keeps its tokens in a file (`~/.codex/auth.json`);
-  the worker passes environment variables into the sandbox, never files.
+- **ChatGPT credentials work, with a wider blast radius.** An access token (`CODEX_ACCESS_TOKEN`)
+  is passed like an API key. A sign-in (`CODEX_HOME=~/.config/agentfund/codex npx -y @openai/codex@0.167.0 login`, a
+  sign-in for AgentFund only, never your own `~/.codex`) is refreshed by the worker on your
+  machine, and the sandbox gets a copy of it without the refresh token. Either way the sandbox
+  then reaches `chatgpt.com`, and code in it can use that credential there. Read
+  [Codex in the donor guide](donors.md#codex-experimental) before choosing one; the design is
+  [docs/dev/codex-chatgpt-signin.md](dev/codex-chatgpt-signin.md).
 - **It never gives up on an unreachable API by itself.** The runner stops it after a few
   minutes of "waiting for network" instead of letting it run to the task's timeout. If the API
   never answered, the claim is released (not failed) and the worker backs off.
-- **It tries to reach `chatgpt.com`** even with an API key. The egress proxy refuses that; the
-  allowlist is `api.openai.com` only. Background features (plugins, apps, updates, browser and
+- **It tries to reach `chatgpt.com`** even with an API key. The egress proxy refuses that; with
+  an API key the allowlist is `api.openai.com` only. Background features (plugins, apps, updates, browser and
   computer use, analytics, feedback) are switched off for every run.
 
 ## Adding another agent

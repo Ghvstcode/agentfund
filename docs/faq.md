@@ -19,6 +19,13 @@ unambiguous option. Read the terms yourself:
 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
 The careful version of this answer is limitation 3 in [Security](SECURITY.md).
 
+The same goes for Codex (experimental) and OpenAI: with a ChatGPT sign-in or access token,
+whether donating usage fits your plan or workspace agreement is between you and OpenAI, and an
+API key is the unambiguous option. Read
+[OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/) and
+[Usage Policies](https://openai.com/policies/usage-policies/). A ChatGPT sign-in is also the one
+credential the worker stores and renews; see [Codex in the donor guide](donors.md#codex-experimental).
+
 ### What does it cost me?
 
 Tokens: against your subscription's limits, or on your API bill. AgentFund itself costs

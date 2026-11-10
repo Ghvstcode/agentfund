@@ -44,7 +44,7 @@ Update it every time something gets proven.
 | Real GitHub path (push, PR via `gh`, Actions, delivery by polling, merge), mock agent, backer owns the repo | Proven once, by hand |
 | Real Claude Code CLI in the real sandbox, through the egress proxy, up to the model API | **Proven 2026-11-08** (fake key refused; claim released cleanly; worker stopped). See §2 |
 | A real model completing a task | **Proven 2026-11-10** for all three `hello-project` tasks (Claude Code, Sonnet). A gridrs task is still open in A1 |
-| Codex runner | Added 2026-11-08, **experimental**, never run against the real API. This is A2 |
+| Codex runner | Added 2026-11-08, **experimental**. ChatGPT sign-in added and one real run (`0001-slugify`, Plus) completed through merge, 2026-11-10. A rejected token is handled (run for real); plan limits, API key, access token not yet. This is A2 |
 | PR from a fork (backer does not own the repo) | **Not exercised.** This is how every real donation works. This is A3 |
 | CI results by live GitHub webhook | **Proven 2026-11-10** (A4) |
 | Release workflow, published images, `install.sh` against a real release | **Never run.** This is A6 |
@@ -177,6 +177,13 @@ experimental for v0.1 (it is fine if it does; the overshoot of `max_tokens` is t
 
 **Done when** the notes have no unverified item that matters, and there are tests built from
 real recorded streams.
+
+**State 2026-11-10:** ChatGPT sign-in support built (design:
+[codex-chatgpt-signin.md](codex-chatgpt-signin.md)); one real run with a Plus sign-in completed,
+stream recorded (`testdata/codex-0.167.0-chatgpt-task.jsonl`), usage shape confirmed. A rejected
+ChatGPT token was also run for real (released, worker stopped, no tokens; the matching was
+fixed from its output). Still open in CODEX_NOTES: how a reached plan limit shows; an API key
+and a Business/Enterprise access token for real.
 
 ### A3. The fork path on real GitHub
 
@@ -401,3 +408,5 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   tmpfs, `NODE_EXTRA_CA_CERTS` + combined `SSL_CERT_FILE`). Verified that Claude Code 2.1.289
   and Codex 0.167.0 honour these against a local TLS server; Codex's WebSocket
   client uses `SSL_CERT_FILE` in place of its roots. Egress proxy unchanged (CONNECT-only, no TLS).
+- 2026-11-10: A2 in progress: Codex with a ChatGPT sign-in (access token in the sandbox, refresh
+  token on the host); first real Codex run (`0001-slugify`, Plus) completed through merge.
