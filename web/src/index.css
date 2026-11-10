@@ -8,31 +8,40 @@
 /*
  * THE THEME. Everything visual derives from the variables in :root (light) and .dark.
  * To restyle a fork, change values here; nothing else hard-codes a colour, radius or font.
- * `--live` is the one accent: it is reserved for live values and progress.
+ * `--live` is the one accent: it is reserved for live values and progress. It is the brand's
+ * Pass green, the colour a check turns when CI passes: green means a token counted.
+ * `--pass` is the same green for fills (bars, dots, the mark); `--live` is its text-safe shade.
+ * `--band-*` colour the always-dark bands of the home page.
  * Documented live at /styleguide.
  */
 :root {
-  --background: #fafafa;
-  --foreground: #0a0a0b;
+  --background: #ffffff;
+  --foreground: #0c0d0d;
   --card: #ffffff;
   --card-foreground: #0a0a0b;
   --popover: #ffffff;
   --popover-foreground: #0a0a0b;
   --primary: #111113;
   --primary-foreground: #fafafa;
-  --secondary: #f1f1f2;
-  --secondary-foreground: #111113;
-  --muted: #f3f3f4;
-  --muted-foreground: #62626a;
-  --accent: #f1f1f2;
-  --accent-foreground: #111113;
+  --secondary: #f1f3f2;
+  --secondary-foreground: #0c0d0d;
+  --muted: #f1f3f2;
+  --muted-foreground: #5f6461;
+  --accent: #f1f3f2;
+  --accent-foreground: #0c0d0d;
   --destructive: #c4261b;
-  --border: #e6e6e8;
-  --input: #dcdce0;
-  --ring: #8b8b93;
-  --live: #bd3509;
+  --border: #e3e6e4;
+  --input: #d3d7d5;
+  --ring: #878c8a;
+  --live: #0a8a4a;
   --live-foreground: #ffffff;
-  --radius: 0.625rem;
+  --pass: #0fb863;
+  --pass-tint: #e3f7ec;
+  --band: #0c0d0d;
+  --band-foreground: #ffffff;
+  --band-muted: #a7aca9;
+  --band-line: #2e3231;
+  --radius: 0.25rem;
   /* Elevation: a hairline of shadow under cards, more under overlays. */
   --shadow-card: 0 1px 2px rgb(10 10 11 / 0.04), 0 0 0 1px rgb(10 10 11 / 0.02);
   --shadow-raised: 0 8px 24px -8px rgb(10 10 11 / 0.12), 0 2px 6px -2px rgb(10 10 11 / 0.06);
@@ -59,8 +68,14 @@
   --border: rgb(255 255 255 / 0.09);
   --input: rgb(255 255 255 / 0.14);
   --ring: #71717a;
-  --live: #ff6a33;
+  --live: #3ddc84;
   --live-foreground: #0b0b0d;
+  --pass: #22c670;
+  --pass-tint: rgb(34 198 112 / 0.14);
+  --band: #0f0f12;
+  --band-foreground: #f4f4f5;
+  --band-muted: #a0a0ab;
+  --band-line: rgb(255 255 255 / 0.1);
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-raised: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 4px 12px -4px rgb(0 0 0 / 0.5);
   --highlight: inset 0 1px 0 rgb(255 255 255 / 0.05);
@@ -91,6 +106,12 @@
   --color-ring: var(--ring);
   --color-live: var(--live);
   --color-live-foreground: var(--live-foreground);
+  --color-pass: var(--pass);
+  --color-pass-tint: var(--pass-tint);
+  --color-band: var(--band);
+  --color-band-foreground: var(--band-foreground);
+  --color-band-muted: var(--band-muted);
+  --color-band-line: var(--band-line);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -138,6 +159,54 @@
   to {
     opacity: 0;
     transform: scale(2.6);
+  }
+}
+
+/* ── Token pyramid (home page): build, wave, ripple, promotion ── */
+@keyframes token-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-48px) scale(0.55);
+  }
+  60% {
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(3px) scale(1.04);
+  }
+}
+
+@keyframes token-wave {
+  0%,
+  12%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  6% {
+    transform: translateY(-5px) scale(1.06);
+  }
+}
+
+@keyframes token-ripple {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.1);
+  }
+}
+
+@keyframes token-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 
@@ -211,9 +280,14 @@
     @apply mx-auto w-full max-w-[76rem] px-4 sm:px-6 lg:px-8;
   }
 
-  /* Raised surface: card colour, hairline border, soft shadow, inner top highlight. */
+  /* Surface: card colour and a hairline border. Square and flat, like the ledger it frames. */
   .surface {
-    @apply rounded-xl border bg-card shadow-card;
+    @apply rounded-none border bg-card;
+  }
+
+  /* Section title: sentence case, tight, sitting on an ink rule. */
+  .section-rule {
+    @apply border-t border-t-foreground;
   }
 
   /* Staggered entrance for page sections: set --i on each child. */
@@ -256,6 +330,37 @@
 
   :root:not(.dark) .live-glow {
     text-shadow: none;
+  }
+
+  /* ── Token pyramid. Each token sets --row (0 at the top) and --order (0 at the bottom). ── */
+  .pyramid-slot {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: token-drop 0.7s var(--ease-out-quint) both;
+    animation-delay: calc(var(--order) * 28ms);
+  }
+
+  .pyramid-token {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition:
+      fill 0.6s ease,
+      stroke 0.6s ease;
+    /* The wave starts once the pile has built, then runs bottom row first, upward. */
+    animation: token-wave 6s ease-in-out infinite;
+    animation-delay: calc(1.6s + (6 - var(--row)) * 90ms);
+  }
+
+  .pyramid-token[data-promoted] {
+    animation: token-pop 0.7s var(--ease-out-quint);
+  }
+
+  .pyramid-ripple {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: token-ripple 2.4s ease-out infinite;
+    animation-delay: 1.4s;
+    opacity: 0;
   }
 
   /* ── Token counter: fixed-height, clipped wheels ── */
@@ -333,12 +438,12 @@
 
   /* ── Prose block for manifest prompts ── */
   .prose-block {
-    @apply rounded-lg border bg-muted/40 p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap;
+    @apply border bg-card p-4 font-sans text-[0.9375rem] leading-relaxed whitespace-pre-wrap;
     overflow-wrap: anywhere;
   }
 
   .code-block {
-    @apply rounded-lg border bg-muted/50 p-3 font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap;
+    @apply border bg-muted/50 p-3.5 font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap;
     overflow-wrap: anywhere;
   }
 }

@@ -1,24 +1,26 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { FolderGit2, Pause, Play, Plus } from 'lucide-react';
+import { ArrowUpRight, FolderGit2, Pause, Play } from 'lucide-react';
 import { type CSSProperties, type FormEvent, type ReactNode, useState } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { api, unwrap } from '@/api/client';
-import { flatItems, queryKeys, useMe, useProjects } from '@/api/queries';
+import { flatItems, queryKeys, useMe, useProjects, useTasks } from '@/api/queries';
 import type { Project } from '@/api/types';
 import { Button, ButtonLink } from '@/components/Button';
 import { SwitchField, TextField } from '@/components/Field';
 import { FundingBar } from '@/components/FundingBar';
 import { Hash } from '@/components/Hash';
+import { TokenDot } from '@/components/Mark';
 import { Num } from '@/components/Num';
 import { SignInRequired } from '@/components/SignIn';
 import { describeError, EmptyState, ErrorState, Loading, Notice, SkeletonRows } from '@/components/States';
 import { Time } from '@/components/Time';
-import { Badge } from '@/components/ui/badge';
 import { WebhookPanel } from '@/components/WebhookPanel';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSession } from '@/hooks/useSession';
 import { formatExact, formatPercent, parseTokenAmount } from '@/lib/format';
+import { pullRequestLabel } from '@/lib/prs';
+import { cn } from '@/lib/utils';
 
 const STATUS_LABELS: Record<Project['status'], string> = {
   active: 'Active',
@@ -38,12 +40,15 @@ function useProjectMutation<T>(slug: string, action: (input: T) => Promise<Proje
   });
 }
 
-/** One control group in a project card: what it changes, then the control. */
-function Control({ title, children }: { title: string; children: ReactNode }) {
+/** One setting in a project card: what it changes on the left, the control on the right. */
+function Control({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
-    <div className="grid content-start gap-3 p-5">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      {children}
+    <div className="grid gap-3 border-t py-5 md:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] md:gap-10">
+      <div className="grid content-start gap-1">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <p className="text-[0.8125rem] text-pretty text-muted-foreground">{note}</p>
+      </div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -93,29 +98,29 @@ function ManageProject({ project }: { project: Project }) {
   const ToggleIcon = active ? Pause : Play;
 
   return (
-    <article className="surface overflow-hidden" aria-labelledby={`manage-${slug}`}>
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-5 py-4">
-        <div className="grid min-w-0 flex-1 gap-0.5">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <h2 id={`manage-${slug}`} className="truncate text-base font-semibold tracking-tight">
-              <Link to={`/${slug}`} className="underline-offset-4 hover:underline">
-                {project.name}
-              </Link>
+    <article className="border px-6 pt-6 pb-1 sm:px-7" aria-labelledby={`manage-${slug}`}>
+      <header className="flex flex-wrap items-start gap-x-4 gap-y-3 pb-5">
+        <div className="grid min-w-0 flex-1 gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <h2 id={`manage-${slug}`} className="truncate text-[1.375rem] font-semibold tracking-[-0.03em]">
+              {project.name}
             </h2>
-            <Badge variant={active ? 'outline' : 'secondary'}>{STATUS_LABELS[project.status]}</Badge>
+            <span className={cn('flex h-5 items-center px-1.5 text-[0.6875rem] font-medium', active ? 'bg-pass-tint text-live' : 'border text-muted-foreground')}>
+              {STATUS_LABELS[project.status]}
+            </span>
           </div>
-          <p className="num truncate text-xs text-muted-foreground">{project.repo_url.replace(/^https?:\/\//, '')}</p>
+          <p className="num truncate text-xs text-muted-foreground">
+            {project.repo_url.replace(/^https?:\/\//, '')} · key {project.pubkey_fingerprint.slice(0, 15)}… ·{' '}
+            {project.tasks.open + project.tasks.claimed + project.tasks.delivered + project.tasks.merged} tasks
+          </p>
         </div>
-        {canToggle && (
-          <Button size="sm" busy={patch.isPending} busyLabel="Saving…" onClick={() => patch.mutate({ status: active ? 'paused' : 'active' })}>
-            <ToggleIcon strokeWidth={1.5} aria-hidden="true" />
-            {active ? 'Pause' : 'Resume'}
-          </Button>
-        )}
+        <ButtonLink to={`/${slug}`} className="rounded-none">
+          Open project ›
+        </ButtonLink>
       </header>
 
       {(project.index_error || project.status === 'pending') && (
-        <div className="grid gap-3 border-b p-5">
+        <div className="grid gap-3 pb-5">
           {project.index_error && (
             <Notice tone="strong" title="The latest commit was not indexed" role="status">
               <p className="num text-[0.8125rem] text-foreground">{project.index_error}</p>
@@ -128,41 +133,41 @@ function ManageProject({ project }: { project: Project }) {
         </div>
       )}
 
-      <div className="grid gap-3 border-b p-5">
+      <div className="grid gap-3 border-t py-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
           <p className="text-sm text-muted-foreground">
-            <Num value={project.totals.delivered} className="text-lg font-medium tracking-tight text-foreground" /> delivered of{' '}
+            <Num value={project.totals.delivered} className="text-lg font-medium tracking-tight text-live" /> delivered of{' '}
             <Num value={project.token_goal} className="text-foreground" />
             <span className="num ml-2 text-xs">{formatPercent(project.totals.delivered, project.token_goal)}</span>
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="num text-xs text-muted-foreground">
             <Num value={project.totals.pledged} className="text-foreground" /> pledged ·{' '}
-            <span className="num text-foreground">{project.tasks.claimable ?? 0}</span> claimable tasks
+            <span className="text-foreground">{project.tasks.claimable ?? 0}</span> claimable
           </p>
         </div>
         <FundingBar totals={project.totals} goal={project.token_goal} />
       </div>
 
-      <div className="grid divide-y border-b md:grid-cols-2 md:divide-x md:divide-y-0">
-        <Control title="Token goal">
-          <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" onSubmit={saveGoal} noValidate>
-            <TextField
-              label="Token goal"
-              hideLabel
-              mono
-              placeholder={formatExact(project.token_goal)}
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              hint="Accepts 60m, 1.5b or a full number."
-              error={goalInvalid ? 'Enter a whole number of tokens, like 60m.' : null}
-            />
-            <Button type="submit" className="h-9" busy={patch.isPending} busyLabel="Saving…">
-              Save goal
-            </Button>
-          </form>
-        </Control>
+      <Control title="Token goal" note="What the funding bar counts toward. Donors see it on the project page.">
+        <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" onSubmit={saveGoal} noValidate>
+          <TextField
+            label="Token goal"
+            hideLabel
+            mono
+            placeholder={formatExact(project.token_goal)}
+            value={goal}
+            onChange={(event) => setGoal(event.target.value)}
+            hint="Accepts 60m, 1.5b or a full number."
+            error={goalInvalid ? 'Enter a whole number of tokens, like 60m.' : null}
+          />
+          <Button type="submit" className="h-9 rounded-none" busy={patch.isPending} busyLabel="Saving…">
+            Save goal
+          </Button>
+        </form>
+      </Control>
 
-        <Control title="Pinned commit">
+      <Control title="Pinned commit" note="The commit workers claim tasks from. Re-pin after you push a newly signed lock.">
+        <div className="grid gap-4">
           <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" onSubmit={submitRepin} noValidate>
             <TextField
               label="Re-pin commit"
@@ -185,37 +190,108 @@ function ManageProject({ project }: { project: Project }) {
               }
               error={commitInvalid ? 'A commit is 40 lowercase hex characters.' : null}
             />
-            <Button type="submit" className="h-9" busy={repin.isPending} busyLabel="Indexing…" disabled={commitInvalid}>
+            <Button type="submit" className="h-9 rounded-none" busy={repin.isPending} busyLabel="Indexing…" disabled={commitInvalid}>
               Re-pin
             </Button>
           </form>
-        </Control>
-      </div>
+          <SwitchField
+            label={
+              <>
+                Follow <span className="num text-[0.8125rem]">{project.base_branch}</span>: advance the pin when a new head carries a
+                valid signature
+              </>
+            }
+            checked={project.follow_branch}
+            disabled={patch.isPending}
+            onCheckedChange={(checked) => patch.mutate({ follow_branch: checked })}
+          />
+        </div>
+      </Control>
 
-      <div className="border-b px-5 py-3 last:border-b-0">
-        <SwitchField
-          label={
-            <>
-              Follow <span className="num text-[0.8125rem]">{project.base_branch}</span>: advance the pin when a new head carries a
-              valid signature
-            </>
-          }
-          checked={project.follow_branch}
-          disabled={patch.isPending}
-          onCheckedChange={(checked) => patch.mutate({ follow_branch: checked })}
-        />
-      </div>
+      {canToggle && (
+        <Control title={active ? 'Pause' : 'Resume'} note={active ? 'Stops new claims. Running work finishes and still counts.' : 'Lets workers claim tasks again.'}>
+          <Button busy={patch.isPending} busyLabel="Saving…" onClick={() => patch.mutate({ status: active ? 'paused' : 'active' })} className="rounded-none">
+            <ToggleIcon strokeWidth={1.5} aria-hidden="true" />
+            {active ? 'Pause project' : 'Resume project'}
+          </Button>
+        </Control>
+      )}
 
       {(patch.isError || repin.isError) && (
-        <div className="border-b p-5 last:border-b-0">
+        <div className="border-t py-5">
           <Notice tone="strong" role="alert" title="That change was not saved">
             {describeError(patch.error ?? repin.error)}
           </Notice>
         </div>
       )}
 
-      {project.status !== 'removed' && <WebhookPanel slug={slug} />}
+      {project.status !== 'removed' && (
+        <div className="border-t">
+          <WebhookPanel slug={slug} />
+        </div>
+      )}
     </article>
+  );
+}
+
+/** Delivered tasks of one project: CI passed, the pull request waits for the maintainer. */
+function ProjectReviews({ project }: { project: Project }) {
+  const tasks = flatItems(useTasks(project.slug)).filter((task) => task.state === 'delivered');
+  return (
+    <>
+      {tasks.map((task) => {
+        const report = task.latest_report;
+        const pr = report?.pr_url && /^https?:/.test(report.pr_url) ? report.pr_url : null;
+        return (
+          <li key={task.id} className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b py-4">
+            <TokenDot state="delivered" />
+            <div className="grid min-w-0 flex-1 gap-0.5">
+              <Link to={`/${project.slug}/tasks/${task.task_id}`} className="num truncate text-[0.8125rem] hover:underline">
+                {task.task_id}
+              </Link>
+              <span className="truncate text-xs text-muted-foreground">
+                {project.name}
+                {pr && ` · ${pullRequestLabel(pr)}`}
+                {report?.donor && ` · by ${report.donor.handle}`}
+                {report && (
+                  <>
+                    {' · CI passed '}
+                    <Time value={report.created_at} />
+                  </>
+                )}
+              </span>
+            </div>
+            <Num value={task.burn.total} className="w-20 text-right text-[0.8125rem] text-live" />
+            {pr && (
+              <a href={pr} rel="noreferrer" className="inline-flex h-8 items-center gap-1 bg-foreground px-3 text-[0.8125rem] font-medium text-background transition-opacity hover:opacity-90">
+                Review on {new URL(pr).hostname.replace(/^www\./, '')} <ArrowUpRight className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+              </a>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
+function Summary({ projects }: { projects: Project[] }) {
+  const sum = (pick: (project: Project) => number) => projects.reduce((total, project) => total + pick(project), 0);
+  const cells = [
+    ['Projects', <span key="p">{projects.length}</span>, ''],
+    ['Open tasks', <span key="o">{sum((project) => project.tasks.open)}</span>, `${sum((project) => project.tasks.claimable ?? 0)} claimable`],
+    ['Awaiting your review', <span key="r">{sum((project) => project.tasks.delivered)}</span>, 'CI passed'],
+    ['Delivered', <Num key="d" value={sum((project) => project.totals.delivered)} className="text-live" />, 'to your projects'],
+  ] as const;
+  return (
+    <dl className="grid border-t border-b border-t-foreground sm:grid-cols-2 lg:grid-cols-4">
+      {cells.map(([label, value, note], index) => (
+        <div key={label} className={cn('grid content-start gap-2 border-b py-5 lg:border-b-0', index % 2 === 1 && 'sm:border-l sm:pl-6', index > 0 && 'lg:border-l lg:pl-6')}>
+          <dt className="text-xs font-semibold tracking-[0.12em] uppercase">{label}</dt>
+          <dd className="num text-4xl leading-none font-medium tracking-[-0.04em]">{value}</dd>
+          {note && <dd className="text-[0.8125rem] text-muted-foreground">{note}</dd>}
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -226,7 +302,7 @@ function Dashboard({ handle }: { handle: string }) {
   if (projects.isPending) {
     return (
       <Loading label="your projects">
-        <SkeletonRows rows={3} className="h-36 rounded-xl" />
+        <SkeletonRows rows={3} className="h-36 rounded-none" />
       </Loading>
     );
   }
@@ -252,12 +328,32 @@ function Dashboard({ handle }: { handle: string }) {
     );
   }
   return (
-    <div className="grid gap-6">
-      {items.map((project, index) => (
-        <div key={project.slug} className="rise" style={{ '--i': index + 1 } as CSSProperties}>
-          <ManageProject project={project} />
+    <div className="grid gap-14">
+      <Summary projects={items} />
+      <section aria-labelledby="reviews-title" className="group grid">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-b-foreground pb-3.5">
+          <h2 id="reviews-title" className="text-2xl font-semibold tracking-[-0.03em]">
+            Waiting on you
+          </h2>
+          <p className="text-[0.8125rem] text-muted-foreground">Delivered pull requests. Nothing merges without you.</p>
         </div>
-      ))}
+        <ol aria-labelledby="reviews-title">
+          {items.map((project) => (
+            <ProjectReviews key={project.slug} project={project} />
+          ))}
+        </ol>
+        <p className="py-5 text-sm text-muted-foreground group-has-[li]:hidden">Nothing to review. Delivered tasks appear here once CI passes.</p>
+      </section>
+      <section aria-labelledby="settings-title" className="grid gap-4">
+        <h2 id="settings-title" className="text-2xl font-semibold tracking-[-0.03em]">
+          Settings
+        </h2>
+        {items.map((project, index) => (
+          <div key={project.slug} className="rise" style={{ '--i': index + 1 } as CSSProperties}>
+            <ManageProject project={project} />
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
@@ -272,21 +368,22 @@ export default function Maintain() {
   }
 
   return (
-    <section className="container-page py-10">
-      <div className="mx-auto max-w-4xl">
+    <section className="container-page py-10 sm:py-12">
+      <div>
         <header className="rise mb-8 flex flex-wrap items-end justify-between gap-4">
-          <div className="grid gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Maintain</h1>
-            <p className="max-w-prose text-sm text-muted-foreground">Projects you maintain on this instance.</p>
+          <div className="grid gap-3">
+            <h1 className="text-[clamp(2.25rem,5vw,3.5rem)] leading-[1.05] font-semibold tracking-[-0.045em]">Your projects.</h1>
+            <p className="max-w-2xl text-base text-pretty text-muted-foreground">
+              Signed tasks, the work that came back, and the settings donors' workers rely on.
+            </p>
           </div>
-          <ButtonLink to="/maintain/new" variant="primary">
-            <Plus strokeWidth={1.5} aria-hidden="true" />
-            Register a project
+          <ButtonLink to="/maintain/new" variant="primary" size="lg" className="rounded-none px-5">
+            Register a repository
           </ButtonLink>
         </header>
         {me.isPending ? (
           <Loading label="your account">
-            <SkeletonRows rows={3} className="h-36 rounded-xl" />
+            <SkeletonRows rows={3} className="h-36 rounded-none" />
           </Loading>
         ) : me.isError ? (
           <ErrorState title="Couldn't load your account" error={me.error} onRetry={() => void me.refetch()} />

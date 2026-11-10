@@ -17,7 +17,7 @@ export function CommandLine({ command, label, className }: CommandLineProps) {
   return (
     <div
       className={cn(
-        'dark flex max-w-full min-w-0 items-start gap-2 rounded-lg border border-white/10 bg-[#0b0b0d] py-1.5 pr-1.5 pl-3 text-zinc-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.04)]',
+        'dark flex max-w-full min-w-0 items-start gap-2 border border-white/10 bg-[#0c0d0d] py-2 pr-2 pl-3.5 text-zinc-100',
         className,
       )}
     >

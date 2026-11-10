@@ -10,9 +10,8 @@ import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, SkeletonRows } from '@/components/States';
 import { Time } from '@/components/Time';
 import { TokenCounter } from '@/components/TokenCounter';
-import { Badge } from '@/components/ui/badge';
 import { UserLink } from '@/components/UserLink';
-import { formatDuration, formatExact, formatUsd } from '@/lib/format';
+import { formatCompact, formatDuration, formatExact, formatUsd } from '@/lib/format';
 import { pullRequestLabel } from '@/lib/prs';
 import { cn } from '@/lib/utils';
 import { taskStatus } from './taskStates';
@@ -37,11 +36,11 @@ const DELIVERY: Record<Report['delivery'], string> = {
 /** A two-column list of facts: muted label, value. */
 function Facts({ rows }: { rows: [label: string, value: ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm">
+    <dl className="grid border-b text-[0.8125rem]">
       {rows.map(([label, value]) => (
-        <div key={label} className="contents">
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className="min-w-0 [overflow-wrap:anywhere]">{value}</dd>
+        <div key={label} className="flex items-baseline justify-between gap-6 border-t py-2.5">
+          <dt className="shrink-0 text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 text-right [overflow-wrap:anywhere]">{value}</dd>
         </div>
       ))}
     </dl>
@@ -52,7 +51,7 @@ function Globs({ globs, strong }: { globs: string[]; strong?: boolean }) {
   return (
     <ul className="flex flex-wrap gap-1.5">
       {globs.map((glob) => (
-        <li key={glob} className={cn('num rounded-md border px-2 py-0.5 text-xs', strong ? 'bg-muted/60 text-foreground' : 'text-muted-foreground')}>
+        <li key={glob} className={cn('num px-2 py-1 text-xs', strong ? 'bg-muted text-foreground' : 'border text-muted-foreground')}>
           {glob}
         </li>
       ))}
@@ -138,10 +137,13 @@ function TaskDetails({ task }: { task: Task }) {
     <>
       <DialogSection>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={status.live ? 'outline' : 'secondary'} className={cn('gap-1.5', status.live && 'border-live/30 bg-live/8 text-live')}>
-            {status.live ? <span className="live-dot" aria-hidden="true" /> : <status.icon className="size-3" strokeWidth={1.75} aria-hidden="true" />}
+          <span className={cn('flex h-6 items-center gap-1.5 px-2 text-xs font-medium', status.live ? 'bg-pass-tint text-live' : 'bg-muted text-muted-foreground')}>
+            {status.live ? <span className="live-dot size-1.5" aria-hidden="true" /> : <status.icon className="size-3" strokeWidth={1.75} aria-hidden="true" />}
             {status.label}
-          </Badge>
+          </span>
+          <span className="num text-xs text-muted-foreground">
+            cap {formatCompact(manifest.max_tokens)} tokens · {manifest.timeout_minutes ?? 60} min
+          </span>
           {task.blocked_by.length > 0 && (
             <span className="text-xs text-muted-foreground">
               waits for <span className="num text-foreground">{task.blocked_by.join(', ')}</span>
@@ -149,12 +151,21 @@ function TaskDetails({ task }: { task: Task }) {
           )}
         </div>
         {claim && (
-          <div className="grid gap-1 rounded-lg border border-live/30 bg-live/5 p-3.5">
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-live">
-              {claim.donor ? <UserLink handle={claim.donor.handle} avatar className="text-live" /> : 'A donor'} is running this now
-              <TokenCounter value={claim.tokens_so_far ?? 0} label="tokens so far" size="md" tone="accent" />
+          <div className="grid gap-3 bg-muted px-4 py-4">
+            <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[0.8125rem]">
+              <span>
+                {claim.donor ? <UserLink handle={claim.donor.handle} className="font-semibold" /> : 'A donor'}{' '}
+                <span className="text-muted-foreground">is running this now</span>
+              </span>
+              <TokenCounter value={claim.tokens_so_far ?? 0} label="tokens so far" size="lg" tone="accent" />
             </p>
-            <p className="text-xs text-muted-foreground">
+            <span className="block h-1 bg-border" aria-hidden="true">
+              <span
+                className="block h-1 bg-pass transition-[width] duration-500"
+                style={{ width: `${Math.min(100, ((claim.tokens_so_far ?? 0) / Math.max(manifest.max_tokens, 1)) * 100)}%` }}
+              />
+            </span>
+            <p className="num text-[0.6875rem] text-muted-foreground">
               {claim.phase ? `Phase: ${claim.phase}. ` : ''}
               {claim.claimed_at && (
                 <>
@@ -217,7 +228,7 @@ function TaskDetails({ task }: { task: Task }) {
           <p className="text-xs text-muted-foreground">Runs after the agent. Exit code 0 means pass.</p>
           <CopyButton text={manifest.verify} label="the verify command" caption="Copy" />
         </div>
-        <pre className="code-block">{manifest.verify}</pre>
+        <pre className="code-block bg-foreground text-background">{manifest.verify}</pre>
       </DialogSection>
 
       <DialogSection title="Provenance" id="task-provenance">
