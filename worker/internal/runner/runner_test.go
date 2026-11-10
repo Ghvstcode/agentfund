@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -267,6 +268,15 @@ func TestClaudeCodeArgs(t *testing.T) {
 		"--setting-sources user", "--strict-mcp-config", "--no-session-persistence"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args lack %q: %s", want, args)
+		}
+	}
+	// Tools that act outside the sandbox (server-side web access, scheduled cloud agents) stay off.
+	if !strings.Contains(args, "--tools Bash,Read,Edit,Write,") {
+		t.Errorf("args lack the --tools allowlist: %s", args)
+	}
+	for _, tool := range []string{"WebSearch", "WebFetch", "RemoteTrigger", "CronCreate", "ScheduleWakeup", "Workflow", "SendMessage", "Skill"} {
+		if slices.Contains(ClaudeCodeTools, tool) {
+			t.Errorf("%s must not be allowed", tool)
 		}
 	}
 	if strings.Contains(args, "--bare") {

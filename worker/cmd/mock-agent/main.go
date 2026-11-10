@@ -37,6 +37,7 @@ var knownFlags = map[string]bool{
 	"-p": false, "--print": false, "--verbose": false, "--include-partial-messages": false,
 	"--dangerously-skip-permissions": false, "--strict-mcp-config": false, "--no-session-persistence": false,
 	"--output-format": true, "--setting-sources": true, "--model": true, "--permission-mode": true,
+	"--tools": true,
 }
 
 const version = "0.0.0-mock"
@@ -156,6 +157,7 @@ const badImpl = `def slugify(text: str) -> str:
 func main() {
 	args := os.Args[1:]
 	var outputFormat string
+	tools := []string{"Task", "Bash", "Edit", "Read", "Write", "WebSearch", "RemoteTrigger"} // like the real default: more than a task needs
 	printMode, verbose, skipPerms := false, false, false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -188,6 +190,8 @@ func main() {
 			outputFormat = val
 		case "--model":
 			model = val
+		case "--tools":
+			tools = strings.Split(val, ",")
 		}
 	}
 	if !printMode || outputFormat != "stream-json" || !verbose {
@@ -214,7 +218,7 @@ func main() {
 	_, gitErr := os.Stat(".git")
 	emit(map[string]any{
 		"type": "system", "subtype": "init", "session_id": session, "model": model, "claude_code_version": version,
-		"cwd": cwd, "permissionMode": "bypassPermissions",
+		"cwd": cwd, "permissionMode": "bypassPermissions", "tools": tools,
 		"mock": map[string]any{
 			"scenario": scenario, "uid": os.Getuid(), "prompt_bytes": len(prompt), "prompt_head": firstLine(prompt),
 			"has_oauth_token": token != "", "has_api_key": apiKey != "", "https_proxy": os.Getenv("HTTPS_PROXY"),
