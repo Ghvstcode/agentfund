@@ -18,13 +18,15 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version-file: worker/go.mod, cache-dependency-path: worker/go.sum }
+      # Outside the checkout: GoReleaser refuses to release from a dirty tree.
       - uses: actions/download-artifact@v4
-        with: { pattern: image-ref-*, merge-multiple: true, path: image-refs }
+        with: { pattern: image-ref-*, merge-multiple: true, path: "${{ runner.temp }}/image-refs" }
       - name: Image digests for the binary
+        env: { REFS: "${{ runner.temp }}/image-refs" }
         run: |
-          echo "RELEASE_SANDBOX_IMAGE=$(cat image-refs/agentfund-sandbox)" >> "$GITHUB_ENV"
-          echo "RELEASE_EGRESS_PROXY_IMAGE=$(cat image-refs/agentfund-egress-proxy)" >> "$GITHUB_ENV"
-          cat image-refs/*
+          echo "RELEASE_SANDBOX_IMAGE=$(cat "$REFS/agentfund-sandbox")" >> "$GITHUB_ENV"
+          echo "RELEASE_EGRESS_PROXY_IMAGE=$(cat "$REFS/agentfund-egress-proxy")" >> "$GITHUB_ENV"
+          cat "$REFS"/*
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
