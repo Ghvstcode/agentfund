@@ -32,6 +32,12 @@ All notable changes to this project are documented here. The format follows
   `TRIAL_KEEP=1` keeps its state and run logs.
 
 ### Changed
+- A released `agentfund` defaults to the sandbox and egress-proxy images published with it, by
+  digest (`agentfund version` names them); a build from source keeps the local `:dev` images. A
+  saved `config.yaml` stores `""` for the default images, so upgrading the binary upgrades them.
+  A config saved by an earlier build names `agentfund/sandbox:dev` and
+  `agentfund/egress-proxy:dev` outright and keeps them: set both to `""` to follow the binary.
+  Release candidates no longer move the `latest` image tag.
 - The project's home is `github.com/ghvstcode/agentfund` (was the placeholder
   `agentfund/agentfund`): Go module path, install script, release config, server and web
   defaults, compose file and docs.

@@ -348,9 +348,12 @@ func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
 	}
 	for _, img := range []string{w.Cfg.Global.Sandbox.Image, w.Cfg.Global.Sandbox.EgressProxyImage} {
 		if !sandbox.ImagePresent(ctx, w.Engine, img) {
-			return nil, fmt.Errorf("container image %s is not present locally. From a checkout of the repository, build both images with `make -C worker images`; "+
-				"once images are published, `%s pull %s`. To use another image set sandbox.image / sandbox.egress_proxy_image in %s",
-				img, w.Cfg.Global.Sandbox.Docker, img, config.Path())
+			get := "from a checkout of the repository, build both images with `make -C worker images`"
+			if strings.Contains(img, "@sha256:") { // a released binary's default, or a pinned image
+				get = fmt.Sprintf("pull it: `%s pull %s`", w.Cfg.Global.Sandbox.Docker, img)
+			}
+			return nil, fmt.Errorf("container image %s is not present locally; %s. To use another image set sandbox.image / sandbox.egress_proxy_image in %s",
+				img, get, config.Path())
 		}
 	}
 	if removed, _ := sandbox.CleanOrphans(ctx, w.Engine, store.PIDAlive); len(removed) > 0 {

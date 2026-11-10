@@ -22,6 +22,10 @@ builds:
       - -X github.com/ghvstcode/agentfund/worker/internal/app.Version={{ .Version }}
       - -X github.com/ghvstcode/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
       - -X github.com/ghvstcode/agentfund/worker/internal/app.Date={{ .CommitDate }}
+      # The release workflow sets these to the digests it just pushed; a local snapshot keeps the
+      # images built from the checkout.
+      - -X github.com/ghvstcode/agentfund/worker/internal/config.DefaultSandboxImage={{ envOrDefault "RELEASE_SANDBOX_IMAGE" "agentfund/sandbox:dev" }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/config.DefaultEgressProxyImage={{ envOrDefault "RELEASE_EGRESS_PROXY_IMAGE" "agentfund/egress-proxy:dev" }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
