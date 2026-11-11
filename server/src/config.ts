@@ -84,6 +84,9 @@ const envSchema = z.object({
   SOURCE_URL: optional,
   INSTALL_COMMAND: optional,
   DOCS_URL: optional,
+  PRIVACY_URL: optional,
+  TERMS_URL: optional,
+  LEGAL_CONTACT: optional,
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
 });
 
@@ -123,6 +126,10 @@ export interface Config {
   sourceUrl: string;
   installCommand: string;
   docsUrl: string | undefined;
+  privacyUrl: string | undefined;
+  termsUrl: string | undefined;
+  /** Email address the built-in privacy and terms pages give for requests. */
+  legalContact: string | undefined;
   /** Human-readable notes about defaults that were applied; logged at boot. */
   warnings: string[];
 }
@@ -172,7 +179,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (authDevLogin) warnings.push("AUTH_DEV_LOGIN=true: anyone who can reach this instance can log in as any handle. Never use this on a public instance.");
     if (!authDevLogin && !githubOauth) warnings.push("Neither GitHub OAuth nor dev login is enabled: nobody can log in.");
   }
-  for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL]] as const) {
+  for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL], ["PRIVACY_URL", e.PRIVACY_URL], ["TERMS_URL", e.TERMS_URL]] as const) {
     if (value && !/^https?:\/\/\S+$/.test(value)) problems.push(`  ${name}: must be an http(s) URL`);
   }
   if (e.CLIENT_IP_HEADER && !/^[A-Za-z0-9-]+$/.test(e.CLIENT_IP_HEADER)) problems.push("  CLIENT_IP_HEADER: must be a header name, e.g. fly-client-ip");
@@ -197,6 +204,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (authDevLogin) problems.push("  INSTANCE_ACCESS=members: AUTH_DEV_LOGIN must be false (dev login skips the membership check)");
   }
   for (const org of e.ALLOWED_GITHUB_ORGS) if (!/^[a-z0-9-]{1,39}$/.test(org)) problems.push(`  ALLOWED_GITHUB_ORGS: "${org}" is not a GitHub organization name`);
+  if (e.LEGAL_CONTACT && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.LEGAL_CONTACT)) problems.push("  LEGAL_CONTACT: must be an email address");
+  if (githubOauth && !e.LEGAL_CONTACT && !(e.PRIVACY_URL && e.TERMS_URL)) {
+    warnings.push("LEGAL_CONTACT is not set: the built-in /privacy and /terms pages give no address for data requests. Set it, or publish your own pages with PRIVACY_URL and TERMS_URL.");
+  }
   if (e.WEBHOOK_SECRET && e.WEBHOOK_SECRET.length < 16) problems.push("  WEBHOOK_SECRET: must be at least 16 characters");
   if (problems.length) throw new ConfigError(`Invalid configuration:\n${problems.join("\n")}`);
 
@@ -239,6 +250,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sourceUrl: e.SOURCE_URL ?? "https://github.com/ghvstcode/agentfund",
     installCommand: e.INSTALL_COMMAND ?? "curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh",
     docsUrl: e.DOCS_URL,
+    privacyUrl: e.PRIVACY_URL,
+    termsUrl: e.TERMS_URL,
+    legalContact: e.LEGAL_CONTACT,
     warnings,
   };
 }
