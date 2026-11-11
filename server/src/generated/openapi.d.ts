@@ -747,6 +747,15 @@ export interface components {
                 /** @description Shell one-liner that installs the worker CLI */
                 install_command?: string;
                 docs_url?: string;
+                /** @description The operator's own privacy policy; UIs link here instead of their built-in page */
+                privacy_url?: string;
+                /** @description The operator's own terms of use; UIs link here instead of their built-in page */
+                terms_url?: string;
+                /**
+                 * Format: email
+                 * @description Where privacy, deletion and terms requests go
+                 */
+                legal_contact?: string;
             };
             defaults?: {
                 lease_seconds?: number;

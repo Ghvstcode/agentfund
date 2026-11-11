@@ -8,6 +8,7 @@ import { docLinks, instanceLinks } from '@/lib/commands';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
 import { ErrorBoundary } from './ErrorBoundary';
+import { LegalLink } from './LegalLink';
 import { Mark } from './Mark';
 import { UserPill } from './UserPill';
 import { Loading, SkeletonRows } from './States';
@@ -160,6 +161,16 @@ function Footer() {
                 <Link to="/styleguide" className="inline-block py-1 transition-colors hover:text-foreground">
                   Styleguide
                 </Link>
+              </li>
+              <li>
+                <LegalLink page="privacy" className="inline-block py-1 transition-colors hover:text-foreground">
+                  Privacy
+                </LegalLink>
+              </li>
+              <li>
+                <LegalLink page="terms" className="inline-block py-1 transition-colors hover:text-foreground">
+                  Terms
+                </LegalLink>
               </li>
             </ul>
           </nav>

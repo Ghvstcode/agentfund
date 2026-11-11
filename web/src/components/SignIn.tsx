@@ -8,6 +8,7 @@ import { session } from '@/lib/session';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { TextField } from './Field';
+import { LegalLink } from './LegalLink';
 import { describeError, Notice, Skeleton } from './States';
 
 const RETURN_KEY = 'agentfund.return_to';
@@ -68,8 +69,16 @@ export function SignInPanel({ onSignedIn }: { onSignedIn?: () => void }) {
             Continue with GitHub
           </Button>
           <p className="text-xs text-pretty text-muted-foreground">
-            Read-only access to your public profile. {meta.data.name} never receives a token that can write to your
-            repositories.
+            Reads your GitHub profile and email address. {meta.data.name} never receives a token that can write to your
+            repositories. By continuing you accept the{' '}
+            <LegalLink page="terms" className="link hover:text-foreground">
+              terms of use
+            </LegalLink>{' '}
+            and the{' '}
+            <LegalLink page="privacy" className="link hover:text-foreground">
+              privacy policy
+            </LegalLink>
+            .
           </p>
         </div>
       )}

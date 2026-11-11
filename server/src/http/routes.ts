@@ -49,7 +49,14 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
         federation: false,
         members_only: ctx.config.instanceAccess === "members",
       },
-      links: { source_url: ctx.config.sourceUrl, install_command: ctx.config.installCommand, ...(ctx.config.docsUrl ? { docs_url: ctx.config.docsUrl } : {}) },
+      links: {
+        source_url: ctx.config.sourceUrl,
+        install_command: ctx.config.installCommand,
+        ...(ctx.config.docsUrl ? { docs_url: ctx.config.docsUrl } : {}),
+        ...(ctx.config.privacyUrl ? { privacy_url: ctx.config.privacyUrl } : {}),
+        ...(ctx.config.termsUrl ? { terms_url: ctx.config.termsUrl } : {}),
+        ...(ctx.config.legalContact ? { legal_contact: ctx.config.legalContact } : {}),
+      },
       defaults: { lease_seconds: instance.leaseSeconds, heartbeat_interval_seconds: HEARTBEAT_INTERVAL_SECONDS },
     });
   });

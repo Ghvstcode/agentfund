@@ -990,6 +990,9 @@ components:
             source_url: { type: string, description: Where this instance's software source lives }
             install_command: { type: string, description: Shell one-liner that installs the worker CLI }
             docs_url: { type: string }
+            privacy_url: { type: string, description: "The operator's own privacy policy; UIs link here instead of their built-in page" }
+            terms_url: { type: string, description: "The operator's own terms of use; UIs link here instead of their built-in page" }
+            legal_contact: { type: string, format: email, description: "Where privacy, deletion and terms requests go" }
         defaults:
           type: object
           properties:

@@ -12,6 +12,10 @@ export interface InstanceLinks {
   installCommand: string;
   sourceUrl: string;
   docsUrl: string | null;
+  /** The operator's own policy pages; null means the built-in `/privacy` and `/terms`. */
+  privacyUrl: string | null;
+  termsUrl: string | null;
+  legalContact: string | null;
 }
 
 /** Operator-configured links from `/v1/meta`, with this build's fallbacks where absent. */
@@ -20,6 +24,9 @@ export function instanceLinks(meta: Pick<Meta, 'links'> | undefined): InstanceLi
     installCommand: meta?.links?.install_command || FALLBACK_INSTALL_COMMAND,
     sourceUrl: meta?.links?.source_url || FALLBACK_SOURCE_URL,
     docsUrl: meta?.links?.docs_url || null,
+    privacyUrl: meta?.links?.privacy_url || null,
+    termsUrl: meta?.links?.terms_url || null,
+    legalContact: meta?.links?.legal_contact || null,
   };
 }
 

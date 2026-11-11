@@ -137,6 +137,15 @@ describe("config", () => {
     expect(c.authDevLogin).toBe(false);
     expect(c.baseUrl).toBe("https://fund.example");
     expect(c.webOrigins).toEqual([]);
+    expect(c.warnings.join(" ")).toMatch(/LEGAL_CONTACT is not set/);
+  });
+  it("takes the operator's own legal pages and contact", () => {
+    const oauth = { ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret" };
+    const c = loadConfig({ ...oauth, PRIVACY_URL: "https://fund.example/privacy.html", TERMS_URL: "https://fund.example/terms.html", LEGAL_CONTACT: "privacy@fund.example" });
+    expect(c).toMatchObject({ privacyUrl: "https://fund.example/privacy.html", termsUrl: "https://fund.example/terms.html", legalContact: "privacy@fund.example" });
+    expect(c.warnings.join(" ")).not.toMatch(/LEGAL_CONTACT/);
+    expect(() => loadConfig({ ...env, TERMS_URL: "javascript:alert(1)" })).toThrow(/TERMS_URL/);
+    expect(() => loadConfig({ ...env, LEGAL_CONTACT: "not an address" })).toThrow(/LEGAL_CONTACT/);
   });
   it("fails clearly on bad values", () => {
     expect(() => loadConfig({})).toThrow(ConfigError);
