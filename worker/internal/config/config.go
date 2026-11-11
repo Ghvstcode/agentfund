@@ -122,6 +122,9 @@ type Project struct {
 	ApprovedLockSHA256 string    `yaml:"approved_lock_sha256"`
 	ApprovedAt         time.Time `yaml:"approved_at"`
 	APIKeyEnv          string    `yaml:"api_key_env,omitempty"`
+	// GitAuth is "gh" when the donor agreed, at approve time, to fetch this
+	// project's private repository with their gh login. Empty = anonymous.
+	GitAuth string `yaml:"git_auth,omitempty"`
 
 	// Optional per-project overrides of the global policy. They can only be
 	// combined with the global caps, never exceed them (see policy package).
@@ -243,6 +246,9 @@ func (c *Config) Validate() error {
 		}
 		if p.APIKeyEnv != "" && !envNameRE.MatchString(p.APIKeyEnv) {
 			return fmt.Errorf("projects[%s].api_key_env is not an environment variable name", key)
+		}
+		if p.GitAuth != "" && p.GitAuth != "gh" {
+			return fmt.Errorf("projects[%s].git_auth must be gh or empty, not %q", key, p.GitAuth)
 		}
 	}
 	return nil

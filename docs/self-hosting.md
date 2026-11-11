@@ -60,7 +60,10 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `WEBHOOK_SECRET` | – (none) | Optional operator-level webhook secret accepted for every project; projects have their own secrets regardless |
 | `CI_POLL` | `false` | Poll GitHub for check runs / PR state (capability `ci_poll`) |
 | `CI_POLL_INTERVAL_SECONDS` | `30` | Poll period |
-| `GITHUB_TOKEN` | – | Raises the poller's GitHub rate limit |
+| `GITHUB_TOKEN` | – | Raises the poller's GitHub rate limit for public repositories |
+| `INSTANCE_ACCESS` | `public` | `members`: every page and API call needs a signed-in member; see [Members-only instance](#members-only-instance-private-repositories) |
+| `ALLOWED_GITHUB_ORGS` | – | GitHub organizations whose members may sign in (`members` only) |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | – | Read-only GitHub App that reads private repositories and checks membership; allowed only with `INSTANCE_ACCESS=members` |
 | `DATA_DIR` | `./data` (`/data` in the image) | Bare clones live in `DATA_DIR/repos` |
 | `INDEX_INTERVAL_SECONDS` | `60` | Re-index period; `0` disables the timer |
 | `ALLOW_FILE_REPOS` | `false` | Accept `file://` repos (tests, local e2e) |
@@ -95,6 +98,67 @@ environment variables.
 The server asks for `read:user user:email` only and discards the GitHub token as soon as it
 has read the profile. Handles are the lower-cased GitHub login. Once OAuth is configured dev
 login turns itself off unless you force `AUTH_DEV_LOGIN=true`.
+
+## Members-only instance (private repositories)
+
+With `INSTANCE_ACCESS=members` the instance is for the members of your GitHub organization
+only, and its projects may live in private repositories. The two come together on purpose:
+an instance that can read private repositories never shows anything to anonymous visitors.
+
+1. **Create a GitHub App** owned by the organization (Settings → Developer settings → GitHub
+   Apps). It needs no webhook and no callback. Give it read-only permissions and nothing else:
+   - Repository: **Contents**, **Metadata**, **Checks** and **Pull requests**, read.
+   - Organization: **Members**, read.
+
+   Generate a private key, then install the app on the organization. Choose **only selected
+   repositories**: the ones you will register on the instance.
+2. **Configure the server**:
+
+   ```bash
+   INSTANCE_ACCESS=members
+   ALLOWED_GITHUB_ORGS=acme
+   GITHUB_APP_ID=Iv23...            # the app's client ID (or its numeric app ID)
+   GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github-app.pem
+   GITHUB_CLIENT_ID=...             # GitHub OAuth, as above
+   GITHUB_CLIENT_SECRET=...
+   AUTH_DEV_LOGIN=false
+   CI_POLL=true                     # optional, see below
+   ```
+
+   The server refuses to start if any of these is missing, if dev login is on, or if a GitHub
+   App is configured on a public instance.
+
+What changes:
+
+- **Every API operation needs a member's session or worker key**, except `GET /v1/meta`, GitHub
+  sign-in and the signed CI webhook. Sign-in refuses anyone who is not a member of an allowed
+  organization. Membership is re-checked through the app at most every 15 minutes, so someone
+  who leaves the organization loses access within that window. Banning them in the admin UI
+  takes effect at once.
+- **Pages carry no project data.** Every path gets the same unindexed shell, which then asks
+  the visitor to sign in. `/sitemap.xml`, `/feed.atom` and `/og/*.png` answer 404, and
+  `robots.txt` disallows everything. Live updates use polling instead of server-sent events,
+  because a browser cannot send the token with `EventSource`.
+- **The server reads repositories with the app.** For each fetch it mints a one-hour token
+  narrowed to that one repository and to read access. The token stays in memory and reaches
+  git through the environment, never on a command line. A repository the app is not installed
+  on is fetched anonymously, as before.
+- **Registering a project needs write access.** Preview and create check, through the app,
+  that the signed-in member can write to the repository. They do this before anything is
+  fetched, and every failure reads the same, so preview cannot be used to read a private
+  repository or to learn that it exists.
+- **The CI poller uses the app's token** for the project's repository; webhooks work as before.
+- **Every member sees every project** on the instance: tasks, prompts, numbers and the feed. If
+  some repositories must stay hidden from some members, run a separate instance for them.
+
+Backers fetch and push private repositories with their own `gh` login, on their own machine.
+The server never hands out a git credential. See [Private projects](donors.md#private-projects)
+in the donor guide.
+
+GitHub's documentation does not say which app permission the membership and collaborator
+endpoints need. If sign-in refuses members, or registering refuses maintainers, check that
+the app has **Members: read** on the organization and **Metadata: read** on the repositories.
+Both checks fail closed.
 
 ## CI confirmation
 
@@ -242,7 +306,7 @@ starting; `seed` (dev login only) creates a user and prints an API key, and regi
 - Session tokens (`afs_…`) and API keys (`af_…`) are stored as SHA-256 hashes only; a key's
   secret is shown once.
 - Repository URLs must be `https://` on a public host name — no credentials, no ssh, no
-  `ext::`, no private or loopback addresses. Git runs via `execFile` with prompts, hooks,
+  `ext::`, no private or loopback host names. Git runs via `execFile` with prompts, hooks,
   system/global config and every other transport disabled, with timeouts. The host check is
   syntactic (it does not resolve DNS); if your instance can reach sensitive internal https
   services, restrict egress at the network level.

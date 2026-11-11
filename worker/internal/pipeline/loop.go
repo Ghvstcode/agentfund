@@ -273,7 +273,7 @@ func (w *Worker) DryRun(ctx context.Context, n int) ([]Preview, error) {
 			continue
 		}
 		if !fetched {
-			fetchErr = gitx.Fetch(ctx, repoDir, proj.RepoURL, t.Commit, w.Project.ApprovedCommit)
+			fetchErr = gitx.FetchAuth(ctx, repoDir, proj.RepoURL, gitx.Auth(w.Project.GitAuth), t.Commit, w.Project.ApprovedCommit)
 			fetched = true
 		}
 		if fetchErr != nil {

@@ -64,8 +64,9 @@ company can run its own.
 
 - **For a community.** Your own instance for the projects you care about, with your own
   sign-in and your own rules about which projects get listed.
-- **Inside your company.** A private instance, behind your VPN if you like, for the public
-  repositories your company maintains and the open source it depends on. Engineers give their
+- **Inside your company.** A members-only instance, behind your VPN if you like, for your
+  private repositories, the public ones your company maintains and the open source it depends
+  on. Engineers give their
   spare subscription quota to that backlog, each under their own caps, and the ledger shows
   what was delivered and merged.
 
@@ -82,7 +83,7 @@ Why it's practical:
 
 Read [For organisations](docs/for-organizations.md) for how the settings map onto a company
 (GitHub sign-in, admins, project approval, an organisation-wide webhook, VPN-only networking),
-what to decide about plan terms, and what v0.1 can't do yet, including private repositories.
+what to decide about plan terms and about private repositories, and what it can't do yet.
 [Self-hosting](docs/self-hosting.md) has the setup and every variable.
 
 ## What it looks like

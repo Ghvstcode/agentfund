@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { AppContext } from "../context.js";
 import { iso, isoOrNull, rows, tsParam, type Queryable } from "../db/client.js";
 import { apiKeys, oauthStates, sessions, users } from "../db/schema.js";
+import { isMemberLogin } from "./members.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { newApiKey, newId, newSecret, newSessionToken, sha256Hex } from "../lib/ids.js";
 import type { Schemas } from "../lib/openapi.js";
@@ -240,6 +241,7 @@ export async function finishGithubOauth(ctx: AppContext, code: string | undefine
       if (primary && typeof primary.email === "string") email = primary.email;
     }
   }
+  if (!(await isMemberLogin(ctx, profile.login))) throw new Problem("forbidden", `This instance is for members of ${ctx.config.allowedGithubOrgs.join(", ")} on GitHub.`);
   // The GitHub token is dropped here: the server never stores a credential for anyone's GitHub.
   const user = await upsertUser(ctx, { github: { id: profile.id, login: profile.login, email, avatarUrl: typeof profile.avatar_url === "string" ? profile.avatar_url : null } });
   const session = await createSession(ctx, user.id);

@@ -4,6 +4,7 @@ import type { AppContext } from "../context.js";
 import { formatErrors, type BodyOf, type Operation, type OperationId, type PathOf, type QueryOf } from "../lib/openapi.js";
 import { Problem } from "../lib/problem.js";
 import { authenticate, type Principal } from "../services/auth.js";
+import { membersOnly, OPEN_OPERATIONS, requireMember } from "../services/members.js";
 
 export const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
@@ -34,6 +35,7 @@ export function bearer(c: Context): string | null {
 async function resolveAuth(ctx: AppContext, c: Context, op: Operation): Promise<Principal | null> {
   const schemes = op.schemes.filter((s) => s !== "webhookSignature");
   const token = bearer(c);
+  if (membersOnly(ctx) && !OPEN_OPERATIONS.has(op.id)) return resolveMember(ctx, token, schemes, op);
   if (schemes.length === 0) {
     // Public operation: a valid credential personalises the answer, a bad one is ignored.
     if (!token) return null;
@@ -45,6 +47,20 @@ async function resolveAuth(ctx: AppContext, c: Context, op: Operation): Promise<
   if (!principal) throw new Problem("unauthorized", "The token is invalid, expired or revoked.", { headers: { "www-authenticate": 'Bearer error="invalid_token"' } });
   if (principal.user.banned) throw new Problem("banned", "This account is banned on this instance.");
   if (!schemes.includes(principal.kind)) {
+    throw new Problem("unauthorized", principal.kind === "donorKey" ? "This operation needs a session token (afs_…), not an API key." : "This operation needs a worker API key (af_…), not a session token.");
+  }
+  if (op.tags.includes("admin") && principal.user.role !== "admin") throw new Problem("forbidden", "Admin role required.");
+  return principal;
+}
+
+/** Members-only instances: every operation outside OPEN_OPERATIONS needs a member's credential. */
+async function resolveMember(ctx: AppContext, token: string | null, schemes: string[], op: Operation): Promise<Principal> {
+  if (!token) throw new Problem("unauthorized", "This instance is for members only; sign in first.", { headers: { "www-authenticate": "Bearer" } });
+  const principal = await authenticate(ctx, token);
+  if (!principal) throw new Problem("unauthorized", "The token is invalid, expired or revoked.", { headers: { "www-authenticate": 'Bearer error="invalid_token"' } });
+  if (principal.user.banned) throw new Problem("banned", "This account is banned on this instance.");
+  await requireMember(ctx, principal.user);
+  if (schemes.length > 0 && !schemes.includes(principal.kind)) {
     throw new Problem("unauthorized", principal.kind === "donorKey" ? "This operation needs a session token (afs_…), not an API key." : "This operation needs a worker API key (af_…), not a session token.");
   }
   if (op.tags.includes("admin") && principal.user.role !== "admin") throw new Problem("forbidden", "Admin role required.");

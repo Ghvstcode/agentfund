@@ -12,6 +12,7 @@ import { Problem, validation } from "../lib/problem.js";
 import type { Principal } from "./auth.js";
 import { appendEvent } from "./events.js";
 import { getInstance } from "./instance.js";
+import { membersOnly } from "./members.js";
 import { projectById, type ProjectRow } from "./projects.js";
 import { inspectRepo, readDescriptor, verifyCommit, type Inspection, type VerifiedLock } from "./repo.js";
 
@@ -23,6 +24,25 @@ function repoRef(ctx: AppContext, url: string): RepoRef {
   } catch (err) {
     if (err instanceof RepoUrlError) throw validation("/repo_url", err.message);
     throw err;
+  }
+}
+
+const NO_ACCESS = "repository not found or you have no write access to it";
+
+/**
+ * Members-only instances can read private repositories, so preview and create must not become
+ * a way to read one: the caller needs write on the repo (checked through the GitHub App) before
+ * anything about it is fetched or said. Every failure reads the same, so nothing leaks.
+ */
+async function canRegister(ctx: AppContext, who: Principal, repo: RepoRef): Promise<boolean> {
+  if (!membersOnly(ctx) || repo.scheme === "file") return true;
+  if (!ctx.githubApp || !repo.github || !who.user.githubLogin) return false;
+  try {
+    const permission = await ctx.githubApp.permissionOf(repo.github, who.user.githubLogin);
+    return permission === "admin" || permission === "write";
+  } catch (err) {
+    ctx.log.warn("repository permission check failed", { repo: repo.url, err });
+    return false;
   }
 }
 
@@ -40,8 +60,9 @@ async function suggestSlug(ctx: AppContext, name: string): Promise<string> {
   return `${base.slice(0, 50)}-${Date.now().toString(36)}`;
 }
 
-export async function previewProject(ctx: AppContext, repoUrl: string): Promise<Schemas["ProjectPreview"]> {
+export async function previewProject(ctx: AppContext, who: Principal, repoUrl: string): Promise<Schemas["ProjectPreview"]> {
   const repo = repoRef(ctx, repoUrl);
+  if (!(await canRegister(ctx, who, repo))) return { ok: false, errors: [NO_ACCESS] };
   const ins = await inspectRepo(ctx.git, repo);
   const errors = [...ins.errors];
   if (await registered(ctx, repo)) errors.push("this repository is already registered on this instance");
@@ -110,6 +131,7 @@ async function applyManifests(ctx: AppContext, tx: Tx, projectId: number, v: Ver
 
 export async function createProject(ctx: AppContext, who: Principal, body: BodyOf<"createProject">): Promise<Schemas["Project"]> {
   const repo = repoRef(ctx, body.repo_url);
+  if (!(await canRegister(ctx, who, repo))) throw new Problem("repo-unverifiable", NO_ACCESS, { errors: [{ path: "/repo_url", message: NO_ACCESS }] });
   if (await registered(ctx, repo)) throw new Problem("repo-already-registered", "This repository is already registered on this instance.");
   const ins: Inspection = await inspectRepo(ctx.git, repo);
   const d = ins.descriptor;

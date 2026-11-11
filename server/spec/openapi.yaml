@@ -977,6 +977,9 @@ components:
             ci_providers: { type: array, items: { type: string, enum: [github, generic] } }
             ci_poll: { type: boolean, description: "Server also polls the CI provider, so webhooks need not reach it" }
             federation: { type: boolean }
+            members_only:
+              type: boolean
+              description: "Every page and API call needs a signed-in member of the instance's GitHub organizations (INSTANCE_ACCESS=members). Only getMeta, sign-in and webhooks answer anonymously."
           additionalProperties: true
         links:
           type: object

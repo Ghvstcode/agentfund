@@ -42,10 +42,12 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
       capabilities: {
         github_oauth: Boolean(ctx.config.githubClientId && ctx.config.githubClientSecret),
         dev_login: ctx.config.authDevLogin,
-        sse: true,
+        // EventSource cannot send a bearer token, so a members-only instance offers polling only.
+        sse: ctx.config.instanceAccess !== "members",
         ci_providers: ["github", "generic"],
         ci_poll: ctx.config.ciPoll,
         federation: false,
+        members_only: ctx.config.instanceAccess === "members",
       },
       links: { source_url: ctx.config.sourceUrl, install_command: ctx.config.installCommand, ...(ctx.config.docsUrl ? { docs_url: ctx.config.docsUrl } : {}) },
       defaults: { lease_seconds: instance.leaseSeconds, heartbeat_interval_seconds: HEARTBEAT_INTERVAL_SECONDS },
@@ -118,7 +120,7 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
 
   op("createProject", async ({ c, body, who }) => json<ResponseOf<"createProject", 201>>(c, 201, await indexer.createProject(ctx, who, body)));
 
-  op("previewProject", async ({ c, body }) => json<ResponseOf<"previewProject", 200>>(c, 200, await indexer.previewProject(ctx, body.repo_url)));
+  op("previewProject", async ({ c, body, who }) => json<ResponseOf<"previewProject", 200>>(c, 200, await indexer.previewProject(ctx, who, body.repo_url)));
 
   op("updateProject", async ({ c, path, body, who }) => json<ResponseOf<"updateProject", 200>>(c, 200, await projects.updateProject(ctx, who, path.slug, body)));
 

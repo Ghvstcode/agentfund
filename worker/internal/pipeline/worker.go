@@ -278,7 +278,7 @@ func ApprovalBasis(ctx context.Context, cfg *config.Config, p *config.Project, r
 	}
 	repoDir := gitx.CachePath(reposDir, repoURL)
 	if fetch {
-		if err := gitx.Fetch(ctx, repoDir, repoURL, commit, p.ApprovedCommit); err != nil {
+		if err := gitx.FetchAuth(ctx, repoDir, repoURL, gitx.Auth(p.GitAuth), commit, p.ApprovedCommit); err != nil {
 			return "", false, "", err
 		}
 	} else if !gitx.CommitExists(ctx, repoDir, commit) || !gitx.CommitExists(ctx, repoDir, p.ApprovedCommit) {

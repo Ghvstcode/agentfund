@@ -142,12 +142,22 @@ func TestLocalPublish(t *testing.T) {
 type ghCall struct{ args []string }
 
 func fakeGH(login string, calls *[]ghCall, failCreate bool) CommandRunner {
+	return fakeGHRepo(login, "false false", calls, failCreate)
+}
+
+// fakeGHRepo answers `gh api repos/...` with access ("<private> <push>").
+func fakeGHRepo(login, access string, calls *[]ghCall, failCreate bool) CommandRunner {
 	return func(_ context.Context, name string, args ...string) (string, error) {
 		*calls = append(*calls, ghCall{append([]string{name}, args...)})
 		j := strings.Join(args, " ")
 		switch {
 		case strings.HasPrefix(j, "api user"):
 			return login, nil
+		case strings.HasPrefix(j, "api repos/"):
+			if access == "" {
+				return "", errors.New("HTTP 404: Not Found")
+			}
+			return access + "\n", nil
 		case strings.HasPrefix(j, "repo fork"):
 			return "", nil
 		case strings.HasPrefix(j, "api graphql"):
@@ -205,8 +215,8 @@ func TestGitHubPublishFlow(t *testing.T) {
 			t.Errorf("pr create lacks %q: %s", want, j)
 		}
 	}
-	if !strings.Contains(strings.Join(calls[1].args, " "), "repo fork example/hello --clone=false") {
-		t.Errorf("fork call: %v", calls[1].args)
+	if !strings.Contains(strings.Join(calls[2].args, " "), "repo fork example/hello --clone=false") {
+		t.Errorf("fork call: %v", calls[2].args)
 	}
 
 	// The project owner pushes to the project itself: no fork, plain head.
@@ -241,5 +251,64 @@ func TestGitHubPublishFlow(t *testing.T) {
 	g.Push = func(context.Context, string, string, string, string) error { return errors.New("denied") }
 	if _, err := g.Publish(ctx, req); err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("push failure: %v", err)
+	}
+}
+
+func TestGitHubPublishPrivate(t *testing.T) {
+	req, _, _ := baseRequest(t)
+	req.RepoURL = "https://github.com/acme/internal"
+	var calls []ghCall
+	var pushes []string
+	g := &GitHub{
+		Run: fakeGHRepo("donor", "true true", &calls, false),
+		Push: func(_ context.Context, _, pushURL, _, branch string) error {
+			pushes = append(pushes, pushURL+" "+branch)
+			return nil
+		},
+		RetryDelay: 1,
+	}
+	// Write access to a private repository: the branch goes to the repository itself, no fork.
+	if _, err := g.Publish(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(pushes) != 1 || pushes[0] != "https://github.com/acme/internal.git agentfund/0001-slugify-k3j9x0aq" {
+		t.Fatalf("pushes %v", pushes)
+	}
+	for _, c := range calls {
+		j := strings.Join(c.args, " ")
+		if strings.Contains(j, "fork") {
+			t.Errorf("private repo was forked: %s", j)
+		}
+		if strings.Contains(j, "pr create") && !strings.Contains(j, "--head agentfund/0001-slugify-k3j9x0aq") {
+			t.Errorf("pr head should be the plain branch: %s", j)
+		}
+	}
+	if err := g.Preflight(ctx, req.RepoURL); err != nil {
+		t.Fatalf("preflight with write access: %v", err)
+	}
+
+	// No write access, or no read access at all: refused, before and at publish time.
+	for _, access := range []string{"true false", "true null", ""} {
+		pushes = nil
+		g.Run = fakeGHRepo("donor", access, &calls, false)
+		if err := g.Preflight(ctx, req.RepoURL); err == nil {
+			t.Errorf("preflight accepted access %q", access)
+		}
+		if _, err := g.Publish(ctx, req); err == nil || len(pushes) != 0 {
+			t.Errorf("publish with access %q: %v, pushes %v", access, err, pushes)
+		}
+	}
+
+	// A public repository keeps the fork path even with push access (CI secrets stay out of reach).
+	pushes, calls = nil, nil
+	g.Run = fakeGHRepo("donor", "false true", &calls, false)
+	if _, err := g.Publish(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(pushes) != 1 || !strings.HasPrefix(pushes[0], "https://github.com/donor/hello-fork.git ") {
+		t.Fatalf("public repo pushes %v", pushes)
+	}
+	if err := g.Preflight(ctx, req.RepoURL); err != nil {
+		t.Fatalf("public preflight: %v", err)
 	}
 }
