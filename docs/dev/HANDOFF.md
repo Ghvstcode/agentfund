@@ -374,6 +374,19 @@ SECURITY.md item 2: the proxy pins the resolved IP but does not check the TLS SN
 tunnel, so domain fronting through a shared CDN edge is not ruled out. Peek at the ClientHello
 in the CONNECT tunnel and reject a server name that does not match the CONNECT host.
 
+### C4b. Private repositories: first run against a real organization
+
+Members-only instances with a read-only GitHub App are implemented
+([design](private-repos.md), [operator docs](../self-hosting.md#members-only-instance-private-repositories)),
+tested with a fake `api.github.com` and the fake `gh` runner only. Not yet tried for real:
+- installation tokens narrowed with `repositories` and `permissions`;
+- `GET /orgs/{org}/members/{login}` with an installation token returning 204 for private
+  members (GitHub's docs describe the codes only for a requester who is an org member);
+- the app permission the collaborator-permission endpoint needs;
+- `approve` → `git_auth: gh` → `work` → a direct push and a PR on a private repository.
+
+Do one end-to-end run in a test organization and correct the docs where GitHub disagrees.
+
 ### C5. Federation (roadmap, not v0.1)
 
 See [decisions.md](../decisions.md#federation-what-was-decided-now-so-it-stays-possible-later).
@@ -427,3 +440,8 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
 - 2026-11-10: A6: `v0.1.0-rc2` released (rc1 failed on a dirty tree, #8). Repo and GHCR packages
   public. install.sh, the published server image and a real task through the published sandbox
   and proxy images all worked on macOS. Then `v0.1.0`.
+- 2026-11-11: Private repositories (option A): `INSTANCE_ACCESS=members` gates every API call
+  and page, sign-in checks GitHub org membership, a read-only GitHub App reads private repos
+  and feeds the poller. The worker fetches with the backer's `gh` login after consent
+  (`git_auth: gh`) and pushes straight to a private repo when the backer can write. Not yet run
+  against a real organization (C4b). Branch `claude/private-repos-28c0a0`.

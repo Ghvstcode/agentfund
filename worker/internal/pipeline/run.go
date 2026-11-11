@@ -391,12 +391,21 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	if err != nil {
 		return r.release(parent, err.Error()), nil
 	}
+	// A host that can tell up front that publishing will fail (a private repo without write
+	// access) says so now, before any tokens are spent.
+	if pf, ok := host.(interface {
+		Preflight(context.Context, string) error
+	}); ok {
+		if err := pf.Preflight(ctx, claim.RepoURL); err != nil {
+			return r.release(parent, err.Error()), nil
+		}
+	}
 
 	// ── Steps 1–4: fetch and verify. Nothing from the repo runs before this passes.
 	repoDir := gitx.CachePath(w.ReposDir, claim.RepoURL)
 	lock := w.repoLock(repoDir)
 	lock.Lock()
-	ferr := gitx.Fetch(ctx, repoDir, claim.RepoURL, claim.Commit, w.Project.ApprovedCommit)
+	ferr := gitx.FetchAuth(ctx, repoDir, claim.RepoURL, gitx.Auth(w.Project.GitAuth), claim.Commit, w.Project.ApprovedCommit)
 	lock.Unlock()
 	if res, stopped := r.interrupted(parent); stopped {
 		return res, nil

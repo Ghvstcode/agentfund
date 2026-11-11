@@ -40,6 +40,15 @@ can write to anyone's repositories.
 Roles: `donor` (default), `maintainer` (granted on first project creation), `admin` (handles
 listed in instance config, or the first user when none are configured). Banned users get `403`.
 
+**Members-only instances** (`meta.capabilities.members_only`): every operation except
+`getMeta`, `authGithubStart`, `authGithubCallback` and `ciWebhook` needs a credential, also the
+ones the OpenAPI marks public, and answers `401` without one. A credential whose user is not
+(or no longer) a member of the instance's GitHub organizations gets `403`. GitHub sign-in
+refuses non-members. Such an instance also sets `capabilities.sse` to `false`: `EventSource`
+cannot send a bearer token, so clients poll. Creating or previewing a project on GitHub needs
+write access to its repository; until that holds, every answer is the same
+"repository not found or you have no write access to it".
+
 ## 4. Task state machine
 
 ```
@@ -200,7 +209,8 @@ the trailing `<code>`. Codes used by v1:
 Served by the reference server next to the API, for discoverability; not part of the protocol
 contract and not needed by workers: `/sitemap.xml`, `/feed.atom` (new projects + deliveries),
 `/og/<slug>.png` (generated card with the progress bar), `/healthz`, and the built SPA with
-per-route meta/OpenGraph/JSON-LD tags injected.
+per-route meta/OpenGraph/JSON-LD tags injected. On a members-only instance the sitemap, feed
+and cards answer `404`, and every path gets the same generic, `noindex` shell.
 
 ## 13. Clarifications
 

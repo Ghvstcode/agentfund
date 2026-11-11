@@ -735,6 +735,8 @@ export interface components {
                 /** @description Server also polls the CI provider, so webhooks need not reach it */
                 ci_poll: boolean;
                 federation: boolean;
+                /** @description Every page and API call needs a signed-in member of the instance's GitHub organizations (INSTANCE_ACCESS=members). Only getMeta, sign-in and webhooks answer anonymously. */
+                members_only?: boolean;
             } & {
                 [key: string]: unknown;
             };

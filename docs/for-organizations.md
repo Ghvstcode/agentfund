@@ -1,12 +1,12 @@
 # Running AgentFund for your organisation
 
 Your company already pays for coding-agent seats, and most of them sit idle part of the week.
-A private AgentFund instance lets your engineers point that idle time at the open-source code
-you maintain or depend on. You choose the projects, every engineer sets their own caps, and the
+A private AgentFund instance lets your engineers point that idle time at your own internal
+repositories, or at the open-source code you maintain or depend on. You choose the projects, every engineer sets their own caps, and the
 ledger shows what was delivered and merged.
 
 This page covers why you might run an instance yourself and how its settings map onto an
-organisation. It also lists what v0.1 can't do yet. The commands for installing and running it
+organisation. It also lists what AgentFund can't do yet. The commands for installing and running it
 are in [Self-hosting](self-hosting.md).
 
 ## Why run it yourself
@@ -20,8 +20,9 @@ are in [Self-hosting](self-hosting.md).
   instance can hide tasks or show wrong numbers. They can't change what runs. The
   [threat model](SECURITY.md#threat-model) lists exactly what a compromised server can and
   can't do.
-- **Agents run only on your engineers' machines.** The server never runs an agent and never
-  sees a model credential or a git credential. Each task runs in a Docker sandbox with no host
+- **Agents run only on your engineers' machines.** The server never runs an agent, never sees a
+  model credential and never holds a credential that can write to a repository. For private
+  repositories it uses a read-only GitHub App. Each task runs in a Docker sandbox with no host
   mounts. Its only way out is an egress proxy that, by default, allows the model API and
   nothing else.
 - **It's Apache-2.0.** Fork it, rebrand it and run it without asking anyone.
@@ -31,17 +32,19 @@ are in [Self-hosting](self-hosting.md).
 **For a community.** Run an instance for the projects you care about, with your own rules
 about which projects get listed. Anyone with a GitHub account can sign in and back a project.
 
-**Inside a company.** Run an instance for your engineers. It lists the public repositories
-your company maintains, plus the open-source projects it depends on and wants to support.
-Engineers give their spare quota to those tasks, and the ledger shows the result per project
-and per person. The instance itself can sit behind your VPN (see
-[Internal-only networking](#internal-only-networking)). The repositories still have to be
-public. See [What v0.1 can't do](#what-v01-cant-do).
+**Inside a company.** Run a members-only instance for your engineers
+(`INSTANCE_ACCESS=members`). Only members of your GitHub organization can sign in, and its
+projects can live in your **private repositories**, alongside public ones you maintain or
+depend on. Engineers give their spare quota to those tasks, and the ledger shows the result
+per project and per person. The instance itself can sit behind your VPN (see
+[Internal-only networking](#internal-only-networking)). See
+[Private repositories](#private-repositories) for what that involves.
 
 ## How it maps onto an organisation
 
 | You want | Set |
 | --- | --- |
+| Only your organization can sign in, and private repositories work | `INSTANCE_ACCESS=members`, `ALLOWED_GITHUB_ORGS=acme`, and a read-only GitHub App (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`). See [Members-only instance](self-hosting.md#members-only-instance-private-repositories). |
 | Sign-in with your engineers' GitHub accounts | A GitHub OAuth app for the instance: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. Once both are set, dev login turns itself off. The server asks for `read:user user:email` only and drops the GitHub token after reading the profile. See [GitHub login](self-hosting.md#github-login). |
 | Named admins | `ADMIN_HANDLES=alice,bob` (GitHub logins). If you leave it empty, the first user to sign in becomes the admin. |
 | Nobody lists a project without review | In the admin UI, set project creation to **approval**. New projects then start `pending` until an admin activates them. Projects that an admin creates skip this. The default is **open**. Admins can also pause or remove a project at any time. |
@@ -60,9 +63,10 @@ The instance doesn't have to be reachable from the internet. A typical setup put
 VPN:
 
 - Set `CI_POLL=true`. The instance then asks the GitHub REST API for check runs and pull
-  request state, so GitHub never has to reach it and no webhook is needed. Set `GITHUB_TOKEN`
-  to raise the poller's rate limit from 60 requests an hour to 5,000. For public repositories
-  it needs no scopes.
+  request state, so GitHub never has to reach it and no webhook is needed. On a members-only
+  instance the poller uses the GitHub App's token. Otherwise set `GITHUB_TOKEN` to raise the
+  poller's rate limit from 60 requests an hour to 5,000. For public repositories it needs no
+  scopes.
 - The instance still needs **outbound** HTTPS to `github.com` and `api.github.com`: to clone
   the project repositories, to run the poller and to complete GitHub sign-in.
 - GitHub sign-in still works. The OAuth callback is a browser redirect, so the instance only
@@ -77,6 +81,27 @@ Two worker settings help on corporate networks. Both are covered in the donor gu
 - `sandbox.pass_env` and `sandbox.extra_allow_hosts` let the agent use a model gateway, such
   as one set with `ANTHROPIC_BASE_URL`. Every extra host is another place a hostile prompt
   could send data, so add only what you need. See [Coding agents](runners.md).
+
+## Private repositories
+
+A members-only instance can index private repositories. Setting it up takes a GitHub App
+with read-only permissions, installed on the repositories you choose; the steps are in
+[Self-hosting](self-hosting.md#members-only-instance-private-repositories). What to know
+before you start:
+
+- **Every member sees every project.** Tasks, prompts and numbers are visible to everyone who
+  can sign in. Teams that must not see each other's repositories need separate instances.
+- **Backers need write access** to a private repository. Their worker fetches it and pushes
+  the task branch with their own `gh` login, after they agree to that at `approve`. The
+  server never hands out a git credential.
+- **The task branch lives in the repository itself**, so pull-request workflows get the
+  repository's secrets. Keep secrets out of jobs that run on `agentfund/**` branches; see the
+  [CI hardening checklist](maintainers.md#7-ci-hardening-checklist).
+- **Your code goes to the model provider** under the backer's credential. Decide which
+  credentials your engineers should use for that: company seats or an organization API key,
+  not personal subscriptions. [Security](SECURITY.md#private-repositories) has the details.
+- Someone who leaves the organization loses access within 15 minutes. Ban them in the admin UI
+  to cut it off at once.
 
 ## Subscription terms: what the organisation has to decide
 
@@ -97,13 +122,12 @@ give engineers an API key, which the worker accepts as `ANTHROPIC_API_KEY`. Read
 [Usage Policy](https://www.anthropic.com/legal/aup). [Whose credentials, whose
 bill](donors.md#7-whose-credentials-whose-bill) in the donor guide has the details.
 
-## What v0.1 can't do
+## What it can't do yet
 
-- **Private repositories.** The server only indexes public repositories. Repository URLs must
-  be `https://` on a public host name, and the server clones without credentials. This is a
-  deliberate choice. Backers must be able to read every prompt before they approve a project,
-  and the sandbox's safety argument rests on there being nothing private inside it (see the
-  [FAQ](faq.md#can-it-work-on-a-private-repository)).
+- **Private projects on a public instance.** Private repositories work only on a
+  members-only instance, where nothing is visible without signing in. A public instance
+  can't mark single projects private.
+- **Access control between members.** Every member of an instance sees all of its projects.
 - **GitHub Enterprise Server and other git hosts.** CI polling talks to `api.github.com`, and
   repository hosts on internal domains are refused. Other CI systems can report results
   through the generic signed-JSON adapter ([Self-hosting](self-hosting.md#ci-confirmation)).

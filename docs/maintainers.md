@@ -111,7 +111,10 @@ independent; that is on you.
 ### Register the project
 
 1. Sign in to the instance, open **Maintain → Register a project**, and paste the repository
-   URL. The repository must be public: the instance clones it without credentials. The wizard
+   URL. On a public instance the repository must be public: the instance clones it without
+   credentials. On a members-only instance it may be private, if the instance's GitHub App is
+   installed on it and you have write access to it
+   ([Self-hosting](self-hosting.md#members-only-instance-private-repositories)). The wizard
    clones it, verifies the lock signature against the key in `agentfund.yaml`, and shows you the
    key fingerprint, the commit, the lock hash and the manifest list before anything is created.
 2. Confirm. The key in `agentfund.yaml` at that moment becomes the **registered key**; from
@@ -523,6 +526,10 @@ The worker's scope check limits *where* the change is, not what it does.
   repository default to read-only too (Settings → Actions → General → Workflow permissions).
 - [ ] **No secrets in any job that runs PR code.** No deploy keys, no registry tokens, no
   self-hosted runners (GitHub: they "can be persistently compromised by untrusted code").
+  On a **private** repository this matters more: the worker pushes `agentfund/…` into the
+  repository itself, so GitHub does pass secrets to `pull_request` workflows for those PRs.
+  Guard secret-using jobs with `if: ${{ !startsWith(github.head_ref, 'agentfund/') }}`, or
+  keep secrets behind an environment with required reviewers.
 - [ ] **Pin actions by full commit SHA**, e.g.
   `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2`. GitHub calls this
   "the only way to use an action as an immutable release". Set `persist-credentials: false`

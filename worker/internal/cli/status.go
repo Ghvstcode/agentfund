@@ -207,7 +207,8 @@ func statusCmd(e *env) *cobra.Command {
 func approvalNote(ctx context.Context, cfg *config.Config, p *config.Project) (note string, needs bool) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	proj, err := api.New(p.Server, "").Project(ctx, p.Slug)
+	key, _ := config.APIKey(p.Server, p) // needed on a members-only instance
+	proj, err := api.New(p.Server, key).Project(ctx, p.Slug)
 	if err != nil || proj.PinnedCommit == p.ApprovedCommit {
 		return "", false
 	}

@@ -1,7 +1,8 @@
 import { ArrowUpRight, Search } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { useMe, useMeta } from '@/api/queries';
+import { useSession } from '@/hooks/useSession';
 import { APP_NAME, apiUrl } from '@/config';
 import { docLinks, instanceLinks } from '@/lib/commands';
 import { cn } from '@/lib/utils';
@@ -16,6 +17,26 @@ import { ThemeToggle } from './ThemeToggle';
 const CommandPalette = lazy(() => import('./CommandPalette'));
 const UserMenu = lazy(() => import('./UserMenu'));
 const SignInDialog = lazy(() => import('./SignIn').then((module) => ({ default: module.SignInDialog })));
+const SignInPanel = lazy(() => import('./SignIn').then((module) => ({ default: module.SignInPanel })));
+
+/** A members-only instance shows nothing but sign-in until the visitor has a session. */
+function MembersGate({ children }: { children: ReactNode }) {
+  const meta = useMeta();
+  const token = useSession();
+  const { pathname } = useLocation();
+  if (!meta.data?.capabilities.members_only || token || pathname === '/auth/callback') return <>{children}</>;
+  return (
+    <div className="container-page max-w-md py-16">
+      <h1 className="text-2xl font-semibold tracking-tight">Members only</h1>
+      <p className="mt-2 text-muted-foreground">
+        {meta.data.name} is open to members of its GitHub organization. Sign in to see its projects.
+      </p>
+      <div className="mt-6">
+        <SignInPanel />
+      </div>
+    </div>
+  );
+}
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -226,7 +247,9 @@ export function AppShell() {
               </div>
             }
           >
-            <Outlet />
+            <MembersGate>
+              <Outlet />
+            </MembersGate>
           </Suspense>
         </ErrorBoundary>
       </main>

@@ -23,9 +23,9 @@ export function friendlyGitMessage(stderr: string, timedOut: boolean): string {
   if (timedOut || /timed out|timeout|transfer closed|low speed/.test(s)) return "timed out";
   if (/could not resolve host|failed to connect|connection refused|network is unreachable|could not connect|ssl|certificate|unable to look up/.test(s)) return "could not reach host";
   if (/repository .* not found|not found|does not exist|does not appear to be a git repository|no such file|authentication failed|could not read username|terminal prompts disabled|returned error: 40[134]|access denied|permission denied/.test(s)) {
-    return "repository not found or not public";
+    return "repository not found or no access";
   }
-  if (/redirect/.test(s)) return "repository not found or not public";
+  if (/redirect/.test(s)) return "repository not found or no access";
   if (/protocol|transport/.test(s)) return "this kind of repository URL is not allowed";
   return "could not read the repository";
 }
@@ -93,6 +93,17 @@ export interface GitOptions {
   allowFile: boolean;
   timeoutMs?: number;
   maxBlobBytes?: number;
+  /** Read token for a github.com repository (members-only instances), or null for anonymous access. */
+  token?: (repo: RepoRef) => Promise<string | null>;
+}
+
+/**
+ * Environment that makes git send `token` to exactly this repository's URL. Passed through
+ * GIT_CONFIG_COUNT so the token never appears in argv (and so in no process listing).
+ */
+export function authEnv(repo: RepoRef, token: string): Record<string, string> {
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `http.${repo.url}/.extraHeader`, GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}` };
 }
 
 const locks = new Map<string, Promise<unknown>>();
@@ -109,7 +120,13 @@ export class Git {
     return join(this.opts.dataDir, "repos", `${createHash("sha256").update(repo.key).digest("hex").slice(0, 32)}.git`);
   }
 
-  private run(args: string[], cwd?: string, maxBuffer = 16 * 1024 * 1024, opts: { report?: boolean } = {}): Promise<Buffer> {
+  private async remoteEnv(repo: RepoRef): Promise<Record<string, string>> {
+    if (!this.opts.token || repo.github === null) return {};
+    const token = await this.opts.token(repo);
+    return token ? authEnv(repo, token) : {};
+  }
+
+  private run(args: string[], cwd?: string, maxBuffer = 16 * 1024 * 1024, opts: { report?: boolean; env?: Record<string, string> } = {}): Promise<Buffer> {
     const hardened = [
       "-c", "core.hooksPath=/dev/null",
       "-c", "core.fsmonitor=false",
@@ -147,6 +164,7 @@ export class Git {
             GIT_CONFIG_GLOBAL: "/dev/null",
             GIT_OPTIONAL_LOCKS: "0",
             GIT_ALLOW_PROTOCOL: this.opts.allowFile ? "https:file" : "https",
+            ...opts.env,
           },
         },
         (err, stdout, stderr) => {
@@ -181,14 +199,14 @@ export class Git {
         await mkdir(dir, { recursive: true });
         await this.run(["init", "--bare", "--quiet", dir]);
       }
-      await this.run(["fetch", "--quiet", "--prune", "--no-tags", "--force", "--end-of-options", repo.url, "+refs/heads/*:refs/heads/*"], dir);
+      await this.run(["fetch", "--quiet", "--prune", "--no-tags", "--force", "--end-of-options", repo.url, "+refs/heads/*:refs/heads/*"], dir, undefined, { env: await this.remoteEnv(repo) });
       return dir;
     });
   }
 
   /** Default branch of the remote, from its HEAD symref. */
   async defaultBranch(repo: RepoRef): Promise<string | null> {
-    const out = (await this.run(["ls-remote", "--symref", "--end-of-options", repo.url, "HEAD"])).toString("utf8");
+    const out = (await this.run(["ls-remote", "--symref", "--end-of-options", repo.url, "HEAD"], undefined, undefined, { env: await this.remoteEnv(repo) })).toString("utf8");
     const m = /^ref: refs\/heads\/(\S+)\s+HEAD$/m.exec(out);
     return m && BRANCH.test(m[1]!) ? m[1]! : null;
   }

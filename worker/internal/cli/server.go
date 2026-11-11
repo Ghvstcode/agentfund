@@ -152,7 +152,7 @@ func (e *env) page(text string, usePager bool) {
 
 func approveCmd(e *env) *cobra.Command {
 	var yes, noPager, followFlag, noFollowFlag bool
-	var pubkeyFlag, commitFlag string
+	var pubkeyFlag, commitFlag, gitAuthFlag string
 	cmd := &cobra.Command{
 		Use:   "approve <server-url>/<project>",
 		Short: "Review a project's signed tasks and pin its key and commit",
@@ -172,7 +172,11 @@ to the one you reviewed (stored per project as follow_unchanged_lock): the
 prompts cannot change, but the repository's code may have, and it runs only
 inside the sandbox. Non-interactively: --follow-unchanged-lock or
 --no-follow-unchanged-lock;
---yes alone leaves the setting as it is (off by default).`,
+--yes alone leaves the setting as it is (off by default).
+
+A private repository cannot be fetched anonymously. approve then asks whether
+to fetch it with your gh login (stored per project as git_auth: gh; only
+github.com, never inside the sandbox). Non-interactively: --git-auth gh.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, err := config.ParseRef(args[0])
@@ -185,7 +189,9 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or
 			}
 			ctx, cancel := signalContext()
 			defer cancel()
-			client := api.New(ref.Server, "")
+			// A members-only instance answers nobody anonymously; a public one ignores a missing key.
+			key, _ := config.APIKey(ref.Server, cfg.Projects[ref.Key()])
+			client := api.New(ref.Server, key)
 			meta, err := client.Negotiate(ctx, spec.SpecVersion)
 			if err != nil {
 				return err
@@ -209,9 +215,37 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or
 				meta.Name, meta.App, meta.Version, proj.Name, proj.Description, proj.RepoURL, proj.Status, proj.Trust.Tier, commit)
 
 			repoDir := gitx.CachePath(config.ReposDir(), proj.RepoURL)
+			auth := gitx.AuthNone
+			if existing := cfg.Projects[ref.Key()]; existing != nil {
+				auth = gitx.Auth(existing.GitAuth)
+			}
+			switch gitAuthFlag {
+			case "":
+			case "gh", "none":
+				auth = gitx.Auth(strings.TrimPrefix(gitAuthFlag, "none"))
+			default:
+				return exitWith(ExitUsage, "--git-auth must be gh or none")
+			}
 			fmt.Fprintf(e.out, "Fetching the repository…\n")
-			if err := gitx.Fetch(ctx, repoDir, proj.RepoURL, commit); err != nil {
-				return err
+			ferr := gitx.FetchAuth(ctx, repoDir, proj.RepoURL, auth, commit)
+			if ferr != nil && auth == gitx.AuthNone && gitAuthFlag == "" && !yes && strings.HasPrefix(strings.ToLower(proj.RepoURL), "https://github.com/") {
+				// A private repository answers an anonymous fetch like a missing one.
+				fmt.Fprintf(e.out, "The repository could not be fetched anonymously; it may be private.\n"+
+					"Fetching it with your gh login lets this worker read it on your machine (never inside the sandbox).\n")
+				ok, cerr := e.confirm(fmt.Sprintf("Use your gh login to read %s?", proj.RepoURL))
+				if cerr != nil {
+					return cerr
+				}
+				if ok {
+					auth = gitx.AuthGH
+					ferr = gitx.FetchAuth(ctx, repoDir, proj.RepoURL, auth, commit)
+				}
+			}
+			if ferr != nil {
+				if auth == gitx.AuthNone && strings.HasPrefix(strings.ToLower(proj.RepoURL), "https://github.com/") {
+					return fmt.Errorf("%w\n(if the repository is private, re-run with --git-auth gh to fetch it with your gh login)", ferr)
+				}
+				return ferr
 			}
 
 			// Two channels: the key the server registered, and the key the repo publishes.
@@ -352,7 +386,7 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or
 				fmt.Fprintf(e.out, "follow_unchanged_lock: off for this project — after the project moves to a newer commit you will need to run `%s approve %s` again "+
 					"(or re-run with --follow-unchanged-lock).\n", app.BinaryName, ref.Key())
 			}
-			p.Server, p.Slug, p.Pubkey = ref.Server, ref.Slug, pin
+			p.Server, p.Slug, p.Pubkey, p.GitAuth = ref.Server, ref.Slug, pin, string(auth)
 			p.ApprovedCommit, p.ApprovedLockSHA256, p.ApprovedAt = commit, lr.LockSHA256, time.Now().UTC().Truncate(time.Second)
 			if err := cfg.Save(); err != nil {
 				return err
@@ -368,6 +402,7 @@ inside the sandbox. Non-interactively: --follow-unchanged-lock or
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "approve without asking (non-interactive); manifests are printed, not paged")
 	cmd.Flags().BoolVar(&noPager, "no-pager", false, "print manifests instead of opening $PAGER")
+	cmd.Flags().StringVar(&gitAuthFlag, "git-auth", "", "how to fetch the repository: gh (your gh login, for a private github.com repository) or none")
 	cmd.Flags().StringVar(&pubkeyFlag, "pubkey", "", "pin this maintainer key (minisign encoding) instead of the one the server publishes")
 	cmd.Flags().BoolVar(&followFlag, "follow-unchanged-lock", false, "keep working on newer commits whose signed task list (MANIFEST.lock) is byte-identical to the one approved now")
 	cmd.Flags().BoolVar(&noFollowFlag, "no-follow-unchanged-lock", false, "require a new approval whenever the project moves to a newer commit (the default)")

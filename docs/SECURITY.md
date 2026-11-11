@@ -57,6 +57,10 @@ public's ability to **verify** every number the system shows.
 | Donor reports fake token numbers | Tokens count as **delivered** only when the CI provider confirms a passing run on the reported branch + commit. Leaderboards rank by delivered, never reported. |
 | Sybil donors inflating leaderboards | GitHub identity + delivered-only ranking: inflation costs real tokens and real passing work. |
 | New project farming trust | Per-task and per-day caps for projects with no merge history; they lift only with CI-passing merged work. Reputation is computed from the ledger. |
+| A public page leaks a private project | Private repositories are readable only on a members-only instance (`INSTANCE_ACCESS=members`). There every API operation except sign-in, `/v1/meta` and the signed webhook needs a member's credential, pages carry no project data, and the sitemap, feed and OG cards are off. The server refuses to start with a GitHub App on a public instance. |
+| Preview used to read a private repository | Preview and create first check, through the GitHub App, that the caller can write to the repository. Every failure reads the same, so preview tells nobody that a repository exists. |
+| The instance's GitHub App key is stolen | The app is read-only (Contents, Metadata, Checks, Pull requests; Members on the org) and installed on selected repositories. A thief can read those repositories, not change them. Tokens are minted per repository for one hour and kept in memory only. |
+| A server tricks a backer into using their GitHub login elsewhere | The backer agrees per project, at `approve`, to fetch with `gh` (`git_auth: gh`); the server cannot set it. The credential helper is scoped to `https://github.com` and redirects are off. Pushing and opening PRs already used `gh` on the host; none of it enters the sandbox. |
 | Tampering with history | The `events` table is append-only (enforced in the database) and public; ledgers are computed from evidence rows, not stored totals. |
 
 ## Honest limitations
@@ -64,12 +68,15 @@ public's ability to **verify** every number the system shows.
 1. **Docker is not a hypervisor.** The sandbox isolates against untrusted code paths — it drops
    capabilities, runs non-root, has no host mounts and a filtered network — but a container
    escape (kernel or runtime bug) is out of scope for v1. This is why the system is scoped to
-   open-source repositories with public task lists, not arbitrary compute. If that risk is not
-   acceptable to you, run the worker inside a VM.
+   open-source repositories with public task lists, or to a members-only instance whose
+   members trust each other's task lists about as much as their own codebase, not arbitrary
+   compute. If that risk is not acceptable to you, run the worker inside a VM.
 2. **The egress proxy does not inspect content.** It decides *where* the sandbox may connect,
    not *what* is sent. Data could in principle be sent to an allow-listed host — for example
-   inside the prompts the agent sends to the model API. Only the checked-out public repository
-   is in the sandbox, so there is nothing private to send unless you put it there. The proxy
+   inside the prompts the agent sends to the model API. For a public project only the
+   checked-out public repository is in the sandbox, so there is nothing private to send unless
+   you put it there. For a private project the repository itself is private: see
+   [Private repositories](#private-repositories). The proxy
    pins the IP an allow-listed name resolved to but does not check the TLS server name inside
    the tunnel, so domain fronting through a shared CDN edge is not ruled out; SNI pinning is a
    planned hardening. The proxy also cannot see tools that the model provider runs on its own
@@ -113,6 +120,32 @@ public's ability to **verify** every number the system shows.
    until it expires (it cannot be renewed from the sandbox, because the refresh token stays on
    the host). A Business/Enterprise access token is limited to the scope and expiry you chose.
    See [Codex in the donor guide](donors.md#codex-experimental).
+
+## Private repositories
+
+On a members-only instance a project's repository can be private. Everything above still
+holds, and three things change:
+
+- **Private code goes to the model provider.** The agent reads the repository and sends what
+  it needs to the model API under the backer's credential. That is the point of the feature,
+  and it is a data-governance decision for the company: back private projects with
+  **organization-managed** credentials (a Claude for Work or Enterprise seat, or an
+  organization API key), not personal subscriptions. Codex with a personal ChatGPT sign-in is
+  not recommended for private projects.
+- **Limitation 2 now concerns real data.** A hostile task could try to move private code out
+  through the model API, or through domain fronting at a shared CDN edge. The defences are the
+  same: members review every prompt at `approve`, prompts cannot change without re-approval,
+  and the default allowlist is one host.
+- **The agent's branch lives in the repository itself.** A private repository usually cannot
+  be forked, so the worker pushes `agentfund/…` straight to it, and only when the backer has
+  write access. GitHub treats that pull request as coming from the same repository, so
+  workflows on `pull_request` **do** get the repository's secrets. Keep secrets out of every job
+  that runs on `agentfund/**` branches ([maintainer guide](maintainers.md#7-ci-hardening-checklist)).
+  Public repositories keep the fork path even when the backer could push.
+
+The server's side is described in
+[Self-hosting](self-hosting.md#members-only-instance-private-repositories) and the design in
+[docs/dev/private-repos.md](dev/private-repos.md).
 
 ## Verifying things yourself
 

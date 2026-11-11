@@ -126,6 +126,26 @@ Approval pins three values in `~/.config/agentfund/config.yaml`:
 
 Run `approve` again at any time to approve a newer commit.
 
+### Private projects
+
+On a members-only instance (one only your GitHub organization can sign in to) a project's
+repository may be private. Three things differ:
+
+- **Log in first.** The instance answers nobody anonymously, so run `agentfund login` before
+  `approve`.
+- **The fetch uses your `gh` login, with your consent.** When the repository cannot be fetched
+  anonymously, `approve` asks whether to use your `gh` login to read it, and stores the answer
+  for that project as `git_auth: gh`. Non-interactively, pass `--git-auth gh`. The credential
+  is used on your machine, for `https://github.com` only, and never enters the sandbox. The
+  server cannot turn it on.
+- **You need write access to the repository.** A private repository usually cannot be forked,
+  so the worker pushes the task branch into the repository itself. Before it spends any tokens,
+  `work` checks with `gh` that you can push, and releases the claim if you cannot.
+
+The repository's code is sent to the model provider under your credential. Use the
+credential your organization gives you for this (a company seat or API key), not a personal
+subscription, unless your organization says otherwise.
+
 ## 4. Preview, work, watch
 
 `<project>` is the full `<server-url>/<slug>`, or just the slug when it is unique among your
@@ -341,7 +361,7 @@ is what limits them, not your review.
 | --- | --- |
 | **Act as a hypervisor** | The container shares your kernel. A kernel or container runtime vulnerability could let code escape. If that matters to you, run the worker in a VM or on a dedicated machine; rootless Docker reduces the impact further. |
 | **Inspect content** | The proxy decides where the sandbox may connect, not what is sent, and it does not check the TLS server name inside the tunnel. |
-| **Rule out exfiltration to an allow-listed host** | The agent's credential is in the environment of a process executing someone else's prompt, and that process can talk to the model API. In reach: the public repository and that credential, nothing else of yours. Mitigations: you read the prompts; they cannot change without your re-approval unless you enabled a follow policy; the default allow-list is one host; use a dedicated, revocable credential. |
+| **Rule out exfiltration to an allow-listed host** | The agent's credential is in the environment of a process executing someone else's prompt, and that process can talk to the model API. In reach: the project's repository (private, for a [private project](#private-projects)) and that credential, nothing else of yours. Mitigations: you read the prompts; they cannot change without your re-approval unless you enabled a follow policy; the default allow-list is one host; use a dedicated, revocable credential. |
 | **Judge the work** | `verify` and CI decide whether a change is good. The scope check only decides where it may be. The pull request is a proposal for a human to review. |
 | **Vet the images** | Build them yourself or pin digests. |
 | **Hide the repository from the model provider** | The agent reads it; that is how it works. |

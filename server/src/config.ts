@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { DEFAULT_PORT } from "./constants.js";
 
@@ -58,6 +59,11 @@ const envSchema = z.object({
   GITHUB_CLIENT_ID: optional,
   GITHUB_CLIENT_SECRET: optional,
   GITHUB_TOKEN: optional,
+  GITHUB_APP_ID: optional,
+  GITHUB_APP_PRIVATE_KEY: optional,
+  GITHUB_APP_PRIVATE_KEY_FILE: optional,
+  INSTANCE_ACCESS: z.enum(["public", "members"]).optional().default("public"),
+  ALLOWED_GITHUB_ORGS: list.transform((arr) => arr.map((o) => o.toLowerCase())),
   WEBHOOK_SECRET: optional,
   WEB_ORIGINS: list.transform((arr, ctx) => arr.map((o) => origin(o, ctx))),
   ADMIN_HANDLES: list.transform((arr) => arr.map((h) => h.toLowerCase())),
@@ -90,6 +96,11 @@ export interface Config {
   githubClientId: string | undefined;
   githubClientSecret: string | undefined;
   githubToken: string | undefined;
+  /** GitHub App used to read private repositories; set only on members-only instances. */
+  githubApp: { appId: string; privateKey: string } | undefined;
+  /** `members`: every page and API call needs a signed-in member of `allowedGithubOrgs`. */
+  instanceAccess: "public" | "members";
+  allowedGithubOrgs: string[];
   webhookSecret: string | undefined;
   webOrigins: string[];
   adminHandles: string[];
@@ -165,6 +176,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (value && !/^https?:\/\/\S+$/.test(value)) problems.push(`  ${name}: must be an http(s) URL`);
   }
   if (e.CLIENT_IP_HEADER && !/^[A-Za-z0-9-]+$/.test(e.CLIENT_IP_HEADER)) problems.push("  CLIENT_IP_HEADER: must be a header name, e.g. fly-client-ip");
+  let githubApp: Config["githubApp"];
+  if (e.GITHUB_APP_PRIVATE_KEY && e.GITHUB_APP_PRIVATE_KEY_FILE) problems.push("  GITHUB_APP_PRIVATE_KEY / GITHUB_APP_PRIVATE_KEY_FILE: set one, not both");
+  let appKey = e.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  if (e.GITHUB_APP_PRIVATE_KEY_FILE) {
+    try {
+      appKey = readFileSync(e.GITHUB_APP_PRIVATE_KEY_FILE, "utf8");
+    } catch {
+      problems.push(`  GITHUB_APP_PRIVATE_KEY_FILE: cannot read ${e.GITHUB_APP_PRIVATE_KEY_FILE}`);
+    }
+  }
+  if (Boolean(e.GITHUB_APP_ID) !== Boolean(appKey)) problems.push("  GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY: set both or neither");
+  else if (e.GITHUB_APP_ID && appKey) githubApp = { appId: e.GITHUB_APP_ID, privateKey: appKey };
+  // The app can read private repositories, so it is only allowed where nothing is public.
+  if (githubApp && e.INSTANCE_ACCESS !== "members") problems.push("  GITHUB_APP_ID: a GitHub App can read private repositories; it needs INSTANCE_ACCESS=members");
+  if (e.INSTANCE_ACCESS === "members") {
+    if (!githubApp) problems.push("  INSTANCE_ACCESS=members: needs GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (membership is checked through the app)");
+    if (e.ALLOWED_GITHUB_ORGS.length === 0) problems.push("  INSTANCE_ACCESS=members: needs ALLOWED_GITHUB_ORGS");
+    if (!githubOauth) problems.push("  INSTANCE_ACCESS=members: needs GitHub OAuth (GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET)");
+    if (authDevLogin) problems.push("  INSTANCE_ACCESS=members: AUTH_DEV_LOGIN must be false (dev login skips the membership check)");
+  }
+  for (const org of e.ALLOWED_GITHUB_ORGS) if (!/^[a-z0-9-]{1,39}$/.test(org)) problems.push(`  ALLOWED_GITHUB_ORGS: "${org}" is not a GitHub organization name`);
   if (e.WEBHOOK_SECRET && e.WEBHOOK_SECRET.length < 16) problems.push("  WEBHOOK_SECRET: must be at least 16 characters");
   if (problems.length) throw new ConfigError(`Invalid configuration:\n${problems.join("\n")}`);
 
@@ -183,6 +215,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubClientId: e.GITHUB_CLIENT_ID,
     githubClientSecret: e.GITHUB_CLIENT_SECRET,
     githubToken: e.GITHUB_TOKEN,
+    githubApp,
+    instanceAccess: e.INSTANCE_ACCESS,
+    allowedGithubOrgs: e.ALLOWED_GITHUB_ORGS,
     webhookSecret: e.WEBHOOK_SECRET,
     webOrigins,
     adminHandles: e.ADMIN_HANDLES,

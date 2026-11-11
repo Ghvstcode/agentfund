@@ -183,6 +183,49 @@ func ParseGitHubRepo(repoURL string) (owner, repo string, err error) {
 	return m[1], m[2], nil
 }
 
+// repoAccess asks GitHub, as the donor, whether upstream is private and whether the donor can push to it.
+func repoAccess(ctx context.Context, run CommandRunner, upstream string) (private, push bool, err error) {
+	out, err := run(ctx, "gh", "api", "repos/"+upstream, "--jq", `"\(.private) \(.permissions.push)"`)
+	if err != nil {
+		return false, false, fmt.Errorf("read %s with your gh login: %w", upstream, err)
+	}
+	answer := strings.TrimSpace(out)
+	switch answer {
+	case "true true":
+		return true, true, nil
+	case "true false", "true null":
+		return true, false, nil
+	case "false true", "false false", "false null":
+		return false, answer == "false true", nil
+	}
+	return false, false, fmt.Errorf("unexpected answer from gh about %s: %q", upstream, out)
+}
+
+// Preflight checks, before any work is done, that the donor's gh login can publish to the
+// repository: logged in, and with write access when the repository is private.
+func (g *GitHub) Preflight(ctx context.Context, repoURL string) error {
+	run := g.Run
+	if run == nil {
+		run = execRunner
+	}
+	owner, repo, err := ParseGitHubRepo(repoURL)
+	if err != nil {
+		return err
+	}
+	login, err := run(ctx, "gh", "api", "user", "--jq", ".login")
+	if err != nil || login == "" {
+		return fmt.Errorf("gh is not logged in to github.com (run `gh auth login`): %w", err)
+	}
+	private, canPush, err := repoAccess(ctx, run, owner+"/"+repo)
+	if err != nil {
+		return err
+	}
+	if private && !canPush {
+		return fmt.Errorf("%s/%s is private and %s cannot push to it: backing a private project needs write access to its repository", owner, repo, login)
+	}
+	return nil
+}
+
 func gitPush(ctx context.Context, repoDir, pushURL, sha, branch string) error {
 	_, err := gitx.Cmd{
 		Dir:    repoDir,
@@ -223,7 +266,17 @@ func (g *GitHub) Publish(ctx context.Context, req Request) (Published, error) {
 	}
 
 	target, head := upstream, req.Branch
-	if !strings.EqualFold(login, owner) {
+	private, canPush, err := repoAccess(ctx, run, upstream)
+	if err != nil {
+		return Published{}, err
+	}
+	if private && !canPush {
+		return Published{}, fmt.Errorf("%s is private and %s cannot push to it: backing a private project needs write access to its repository", upstream, login)
+	}
+	// A private repository cannot be forked in general, so its branch goes to the repository
+	// itself. A public one keeps the fork path even when the donor could push, so the
+	// branch's CI never runs with the project's secrets.
+	if !strings.EqualFold(login, owner) && !private {
 		// Ensure a fork exists; idempotent when it already does.
 		if _, err := run(ctx, "gh", "repo", "fork", upstream, "--clone=false"); err != nil {
 			return Published{}, fmt.Errorf("fork %s: %w", upstream, err)

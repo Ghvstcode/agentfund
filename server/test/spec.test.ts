@@ -91,10 +91,10 @@ describe("repo URL validation", () => {
 
 describe("git failures are reported in plain words", () => {
   it.each([
-    ["remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found", false, "repository not found or not public"],
-    ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "repository not found or not public"],
-    ["fatal: unable to access 'https://gitlab.com/a/b/': The requested URL returned error: 403", false, "repository not found or not public"],
-    ["fatal: '/nonexistent/x' does not appear to be a git repository", false, "repository not found or not public"],
+    ["remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found", false, "repository not found or no access"],
+    ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "repository not found or no access"],
+    ["fatal: unable to access 'https://gitlab.com/a/b/': The requested URL returned error: 403", false, "repository not found or no access"],
+    ["fatal: '/nonexistent/x' does not appear to be a git repository", false, "repository not found or no access"],
     ["fatal: unable to access 'https://nope.invalid/a/b/': Could not resolve host: nope.invalid", false, "could not reach host"],
     ["fatal: unable to access 'https://h.example/a/b/': Failed to connect to h.example port 443", false, "could not reach host"],
     ["", true, "timed out"],
