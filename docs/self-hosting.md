@@ -69,10 +69,11 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `SESSION_TTL_DAYS` | `30` | Session lifetime |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per IP and per credential on `/v1`; `0` = off |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per IP on `/v1/auth/*` |
+| `CLIENT_IP_HEADER` | – | Header the edge proxy sets to the client IP, overwriting any client value (`fly-client-ip` on Fly.io); takes precedence over `TRUST_PROXY` |
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` |
 | `DB_POOL_MAX` | `10` | Postgres connections per process |
 | `SOURCE_URL` | `https://github.com/ghvstcode/agentfund` | `meta.links.source_url`: where this instance's source lives |
-| `INSTALL_COMMAND` | a `git clone` and build from source (see `.env.example`) | `meta.links.install_command`: how donors install the worker; set it to the `install.sh` line for released binaries |
+| `INSTALL_COMMAND` | the `install.sh` one-liner (see `.env.example`) | `meta.links.install_command`: how donors install the worker |
 | `DOCS_URL` | – (omitted) | `meta.links.docs_url` |
 | `OG_ACCENT` | `#2563eb` | Accent colour (`#rrggbb`) of generated OG cards |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`; JSON lines on stdout |
@@ -142,7 +143,10 @@ curl -X POST "$BASE_URL/v1/webhooks/ci" -H "X-AgentFund-Signature: sha256=$sig" 
 ## Behind a reverse proxy
 
 Terminate TLS in front and proxy everything to port 8787. Set `BASE_URL` to the public https
-URL and `TRUST_PROXY=true`. `/v1/stream` is Server-Sent Events: the server already sends
+URL and tell the server where the client IP is: `CLIENT_IP_HEADER` when the proxy sets a header
+it overwrites (Fly's `fly-client-ip`, nginx's `X-Real-IP` if you set it), otherwise
+`TRUST_PROXY=true`, which takes the first `X-Forwarded-For` entry and is only safe when the proxy
+replaces that header rather than appending to it. `/v1/stream` is Server-Sent Events: the server already sends
 `X-Accel-Buffering: no` and a ping every 15 s; make sure the proxy does not buffer or time out
 idle responses under ~60 s. Caddy needs nothing special:
 
@@ -155,6 +159,40 @@ fund.example.org {
 Several app replicas can share one Postgres: claims use `FOR UPDATE SKIP LOCKED`, every replica
 hears every change through `LISTEN/NOTIFY`, and timers are safe to run concurrently. Give each
 replica its own `DATA_DIR` (clones are a cache) and note that rate limits are per process.
+
+## Deploy to Fly.io
+
+[`deploy/fly/fly.toml`](../deploy/fly/fly.toml) runs the published image on one Fly machine
+that never stops (the server holds a `LISTEN` connection, runs timers and answers webhooks).
+It needs no volume: `DATA_DIR` holds only the clone cache. Postgres lives elsewhere.
+
+1. **Postgres.** Either Fly's managed Postgres (`fly mpg create`, backups included), or a
+   hosted provider such as Neon or Supabase. With a hosted provider use the **direct**
+   connection string, not the pooled one: a transaction-mode pooler (PgBouncer) breaks
+   `LISTEN/NOTIFY`, and the live updates with it.
+2. **The app.** Edit `app` and `primary_region` in `fly.toml`, then:
+
+   ```sh
+   fly apps create <app>
+   fly secrets set -a <app> \
+     DATABASE_URL='postgres://…' \
+     BASE_URL=https://fund.example.org \
+     GITHUB_CLIENT_ID=… GITHUB_CLIENT_SECRET=… \
+     ADMIN_HANDLES=<your github login>
+   fly deploy -c deploy/fly/fly.toml
+   ```
+
+   Create the GitHub OAuth app first ([GitHub login](#github-login)) with the callback
+   `https://fund.example.org/v1/auth/github/callback`. Migrations run at boot.
+3. **The domain.** `fly certs add -a <app> fund.example.org` prints the DNS records; add them at
+   your DNS provider. On Cloudflare, leave the record **DNS only** (grey cloud) so Fly
+   terminates TLS and `fly-client-ip` is the visitor's address. Behind Cloudflare's proxy it
+   would be a Cloudflare edge address and every visitor would share one rate limit.
+4. **Check it.** `curl https://fund.example.org/healthz`, sign in with GitHub, and confirm
+   `/v1/meta` shows `dev_login` off.
+
+Upgrades: change the image tag in `fly.toml` and `fly deploy` again. Keep one machine: rate
+limits are per process, and nothing needs more yet.
 
 ## Data, backups, upgrades
 

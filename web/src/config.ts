@@ -27,7 +27,7 @@ interface BuildEnv {
 }
 
 // Build from source: it works before any release exists. Instances override it in meta.links.
-const DEFAULT_INSTALL_COMMAND = 'git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images';
+const DEFAULT_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh';
 const DEFAULT_SOURCE_URL = 'https://github.com/ghvstcode/agentfund';
 
 /**

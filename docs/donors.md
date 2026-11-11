@@ -367,8 +367,10 @@ Full threat model: [SECURITY.md](SECURITY.md).
   [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
   [Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
   [Usage Policy](https://www.anthropic.com/legal/aup).
-  An API key (`ANTHROPIC_API_KEY`, pay-as-you-go under Anthropic's Commercial Terms) is the
-  unambiguous option. See also limitation 3 in [SECURITY.md](SECURITY.md).
+  AgentFund is built around subscription tokens (`claude setup-token`). If you would rather
+  keep donated usage apart from your plan, the worker also accepts an API key
+  (`ANTHROPIC_API_KEY`, pay-as-you-go under Anthropic's Commercial Terms). See also
+  limitation 3 in [SECURITY.md](SECURITY.md).
 
 ### Codex (experimental)
 
@@ -418,7 +420,7 @@ before choosing 2 or 3:
 
 Your plan's terms are between you and OpenAI. AgentFund makes no claim on OpenAI's behalf about
 what they permit. Whether donating usage fits your ChatGPT plan or workspace agreement is your
-call to make from those terms; an API key is the unambiguous option. Read them yourself:
+call to make from those terms; the worker also accepts an API key. Read them yourself:
 [Terms of Use](https://openai.com/policies/terms-of-use/),
 [Usage Policies](https://openai.com/policies/usage-policies/).
 
