@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Private repositories on members-only instances** — `INSTANCE_ACCESS=members` limits every
+  page and API call to signed-in members of `ALLOWED_GITHUB_ORGS`. A read-only GitHub App reads
+  private repositories and feeds the CI poller. Backers fetch with their own `gh` login after
+  consenting at `approve` (`git_auth: gh`, `--git-auth gh`), and push the task branch straight
+  to a private repository they can write to. See
+  [Self-hosting](docs/self-hosting.md#members-only-instance-private-repositories).
 - `deploy/fly/fly.toml` and a "Deploy to Fly.io" section in the self-hosting guide.
 - `CLIENT_IP_HEADER`: take the client IP from a header the edge proxy overwrites
   (`fly-client-ip` on Fly.io), so rate limits can't be dodged with a forged `X-Forwarded-For`.
