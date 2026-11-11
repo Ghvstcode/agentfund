@@ -269,7 +269,7 @@ export default function Styleguide() {
       <Section id="buttons" title="Buttons">
         <Specimen label="Variants and sizes" className="flex flex-wrap items-center gap-2.5">
           <Button variant="primary" size="lg">
-            Back with tokens
+            Back this project
           </Button>
           <Button variant="primary">Primary</Button>
           <Button>Secondary</Button>

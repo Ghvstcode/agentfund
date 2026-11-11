@@ -16,8 +16,8 @@ OUT = Path(__file__).resolve().parent.parent / "docs" / "assets"
 SANS = "ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
 MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace"
 THEMES = {
-    "light": dict(fg="#0a0a0b", muted="#62626a", border="#d9d9de", card="#ffffff", code="#f3f3f4", live="#bd3509", soft="#bd350914"),
-    "dark": dict(fg="#f4f4f5", muted="#a0a0ab", border="#34343a", card="#0f0f12", code="#1b1b1f", live="#ff6a33", soft="#ff6a331f"),
+    "light": dict(fg="#0c0d0d", muted="#5f6461", border="#d3d7d5", card="#ffffff", code="#f1f3f2", live="#0a8a4a", pass_="#0fb863", soft="#e3f7ec"),
+    "dark": dict(fg="#f4f4f5", muted="#a0a0ab", border="#2e3231", card="#0f0f12", code="#1b1b1f", live="#3ddc84", pass_="#22c670", soft="#22c67024"),
 }
 
 
@@ -42,20 +42,20 @@ def how_it_works(t):
          ["Your own coding-agent login, your own caps.", "A change outside the task's write scope", "discards the whole run."], False),
         ("3", "CI decides what counts", "Public · CI and the ledger",
          ["pull request opened from a fork", "CI passes   → delivered", "PR merges   → merged"],
-         ["The server is a scoreboard anyone can run.", "It can stall work. It cannot change what", "runs, and failed tokens never count."], True),
+         ["Anyone can run the server. It can stall", "work, but it can't change what runs, and", "failed runs never count."], True),
     ]
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img" '
            f'aria-label="How AgentFund works: a maintainer signs task manifests; a backer\'s worker verifies and runs them in a sandbox; CI decides which tokens count as delivered.">']
     for i, (num, title, who, code, caption, accent) in enumerate(panels):
         x = i * (pw + gap)
         stroke = t["live"] if accent else t["border"]
-        out.append(f'<rect x="{x + 0.75}" y="{top}" width="{pw - 1.5}" height="{h - top - 8}" rx="14" fill="{t["card"]}" stroke="{stroke}" stroke-width="1.5"/>')
-        out.append(f'<circle cx="{x + 40}" cy="{top + 42}" r="15" fill="{t["live"] if accent else t["fg"]}"/>')
+        out.append(f'<rect x="{x + 0.75}" y="{top}" width="{pw - 1.5}" height="{h - top - 8}" fill="{t["card"]}" stroke="{stroke}" stroke-width="1.5"/>')
+        out.append(f'<circle cx="{x + 40}" cy="{top + 42}" r="15" fill="{t["pass_"] if accent else t["fg"]}"/>')
         out.append(text(x + 40, top + 47, num, 14, "card", 600, MONO, "middle", t))
         out.append(text(x + 66, top + 38, title, 17, "fg", 600, t=t))
         out.append(text(x + 66, top + 58, who, 12.5, "live" if accent else "muted", t=t))
         cy = top + 86
-        out.append(f'<rect x="{x + 24}" y="{cy}" width="{pw - 48}" height="110" rx="8" fill="{t["code"]}"/>')
+        out.append(f'<rect x="{x + 24}" y="{cy}" width="{pw - 48}" height="110" fill="{t["code"]}"/>')
         for j, line in enumerate(code):
             hot = accent and j == 1
             out.append(text(x + 40, cy + 34 + j * 26, line, 13.5, "live" if hot else "fg", 600 if hot else 400, MONO, t=t))
@@ -87,12 +87,12 @@ def pipeline(t):
     for label, nodes, accent in lanes:
         lw = len(nodes) * nw + (len(nodes) - 1) * ngap + 32
         stroke = t["live"] if accent else t["border"]
-        out.append(f'<rect x="{x + 0.75}" y="34" width="{lw - 1.5}" height="150" rx="14" fill="none" stroke="{stroke}" stroke-width="1.5" stroke-dasharray="{"0" if accent else "5 5"}"/>')
+        out.append(f'<rect x="{x + 0.75}" y="34" width="{lw - 1.5}" height="150" fill="none" stroke="{stroke}" stroke-width="1.5" stroke-dasharray="{"0" if accent else "5 5"}"/>')
         out.append(text(x + 4, 20, label, 13, "live" if accent else "muted", 500, t=t))
         nx = x + 16
         for i, node in enumerate(nodes):
             hot = accent and node == "ledger"
-            out.append(f'<rect x="{nx}" y="66" width="{nw}" height="86" rx="10" fill="{t["soft"] if hot else t["card"]}" stroke="{t["live"] if hot else t["border"]}" stroke-width="1.5"/>')
+            out.append(f'<rect x="{nx}" y="66" width="{nw}" height="86" fill="{t["soft"] if hot else t["card"]}" stroke="{t["live"] if hot else t["border"]}" stroke-width="1.5"/>')
             out.append(text(nx + nw / 2, 104, node, 13.5, "live" if hot else "fg", 600, MONO, "middle", t))
             out.append(text(nx + nw / 2, 127, notes[node], 11, "muted", t=t, anchor="middle"))
             if prev_end is not None:
