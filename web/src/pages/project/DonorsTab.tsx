@@ -24,7 +24,7 @@ export default function DonorsTab() {
       ) : donors.length === 0 ? (
         <EmptyState icon={Users} title="No donors yet">
           <p>
-            Nobody has pledged to or worked on {project.name} so far. Use “Back with tokens” above to be the first name
+            Nobody has pledged to or worked on {project.name} so far. Use “Back this project” above to be the first name
             on this board.
           </p>
         </EmptyState>

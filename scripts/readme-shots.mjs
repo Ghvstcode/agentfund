@@ -21,20 +21,15 @@ const VIEWPORT = { width: 1280, height: 800 };
 // Shots shown at half width in the README are taken in a smaller viewport so their text survives.
 const GRID = { width: 1024, height: 640 };
 
-const backDialog = (page) => page.getByRole('button', { name: /Back with tokens/ }).click();
-
-const scrollTo = (text) => async (page) => {
-  const top = await page.getByText(text, { exact: false }).first().evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
-  await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, top - 96));
-};
+const backDialog = (page) => page.getByRole('button', { name: 'Back this project' }).click();
 
 /** name, path, options — `auth` signs in as the mock admin, `act` runs before the shot, `clip` crops. */
 const SHOTS = [
   ['discover', '/'],
-  ['project', '/gridrs', { act: scrollTo('Tokens delivered') }],
-  ['audit', '/gridrs/audit', { act: scrollTo('What this instance vouches for'), clip: { x: 40, y: 76, width: 640, height: 381 } }],
+  ['project', '/gridrs'],
   ['back', '/gridrs', { auth: true, act: backDialog, viewport: GRID }],
-  ['donor', '/u/ada', { clip: { x: 196, y: 68, width: 874, height: 520 } }],
+  ['maintain', '/maintain', { auth: true, viewport: GRID }],
+  ['donor', '/u/ada', { viewport: GRID }],
 ];
 
 async function ensureServer() {

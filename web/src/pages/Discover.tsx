@@ -464,12 +464,12 @@ function Projects() {
 function ForTeams() {
   const meta = useMeta();
   const docs = docLinks(meta.data);
-  const command = 'docker compose up -d';
+  const command = 'docker compose up --build';
   const points = [
-    ['Your instance, your network', 'One container and Postgres. Private repositories and runners never leave your infrastructure.'],
-    ['Budgets per team', 'Cap tokens by team, project or person. Every run stops at its cap.'],
+    ['Your instance, your rules', 'One Node process and Postgres, with your own GitHub sign-in. An admin approves every project it lists.'],
+    ['Caps on every worker', "Each engineer's worker stops at its own per-task, daily and weekly caps."],
     ['Signed tasks only', 'Workers run nothing a maintainer has not signed, and check it on their own machine.'],
-    ['A ledger finance can read', 'Tokens spent against work merged, per project and person. Proof the spend shipped.'],
+    ['A ledger you can audit', 'Tokens spent against work delivered and merged, per project and per person.'],
   ];
   return (
     <section aria-labelledby="teams-title" id="teams" className="container-page scroll-mt-20 pt-24">
@@ -478,11 +478,11 @@ function ForTeams() {
           <div className="grid gap-5">
             <p className="text-xs font-semibold tracking-[0.12em] text-band-muted uppercase">For teams and companies</p>
             <h2 id="teams-title" className="text-4xl leading-[1.08] font-semibold tracking-[-0.045em] sm:text-5xl">
-              Run your own ledger. Point the spare tokens at your backlog.
+              Run your own instance. Send your team's spare tokens where they count.
             </h2>
             <p className="text-[1.0625rem] leading-relaxed text-pretty text-band-muted">
-              Your company already pays for agent seats. Run your own instance and let every engineer's idle agent pick up
-              signed internal tasks, with budgets and an audit trail you own.
+              Your company already pays for agent seats. Run your own instance and let engineers' idle agents work on the
+              open-source projects you depend on, with caps and a ledger you control.
             </p>
           </div>
           <a
@@ -516,7 +516,7 @@ function ForTeams() {
 
 function States() {
   const steps: [TokenState, string, string, string][] = [
-    ['pledged', '01 · Pledged', 'A maintainer signs small tasks.', 'Any project, public or private: a prompt, a write scope and a token cap, under a key you can check.'],
+    ['pledged', '01 · Pledged', 'A maintainer signs small tasks.', 'A prompt, a write scope and a token cap, signed with a key you can check.'],
     ['reported', '02 · Reported', 'Your agent runs one, locally.', 'Sandboxed, with your own login and your caps. The spend is reported, pass or fail.'],
     ['delivered', '03 · Delivered', 'CI passes on its pull request.', 'Now it counts, and only now. Failed runs stay visible; they never rank.'],
     ['merged', '04 · Merged', 'The maintainer merges it.', 'Every merge is on the public ledger, linked to the run that paid for it.'],
