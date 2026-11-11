@@ -85,14 +85,16 @@ public's ability to **verify** every number the system shows.
    Code CLI with whichever credential you already use (subscription login or your own API key),
    never stores or transmits it, and never intermediates your usage. Anthropic's documentation
    says subscription usage limits "assume ordinary, individual usage"; whether donating
-   inference fits your plan is your call to make, and an API key is the unambiguous option.
+   inference fits your plan is your call to make. AgentFund is built around subscription
+   tokens (`claude setup-token`); the worker also accepts an API key if you would rather keep
+   donated usage apart from your plan.
    Read the terms:
    [Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
    [Usage Policy](https://www.anthropic.com/legal/aup),
    [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
    The same holds for Codex (experimental) and OpenAI: AgentFund makes no claim on OpenAI's
    behalf; whether donating usage fits your ChatGPT plan or workspace agreement is your call,
-   and an API key is the unambiguous option. Read
+   and the worker also accepts an API key. Read
    [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/) and
    [Usage Policies](https://openai.com/policies/usage-policies/). One difference: a Codex
    ChatGPT sign-in is stored and renewed by the worker, in a directory used only by AgentFund

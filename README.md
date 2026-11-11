@@ -223,7 +223,7 @@ Not planned: money anywhere in the system, microVM isolation, or an agent that w
 ## FAQ
 
 **Is this allowed under my AI plan?**
-We can't answer that for any provider. The worker runs the unmodified Claude Code CLI on your machine with the login you already use, and never stores or sends it anywhere. Anthropic's documentation says subscription limits "assume ordinary, individual usage", so whether donating fits your plan is your call. An API key is the unambiguous option. See the [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), the [Usage Policy](https://www.anthropic.com/legal/aup) and [Claude Code's legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance).
+We can't answer that for any provider. The worker runs the unmodified Claude Code CLI on your machine with the login you already use, and never stores or sends it anywhere. Anthropic's documentation says subscription limits "assume ordinary, individual usage", so whether donating fits your plan is your call. AgentFund is built around subscription tokens (`claude setup-token`); if you'd rather keep donated usage apart from your plan, the worker also accepts an API key. See the [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), the [Usage Policy](https://www.anthropic.com/legal/aup) and [Claude Code's legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance).
 
 **What does it cost me?**
 Tokens from your subscription or your API bill, nothing else. You set the limits per task, per day, per week, per run (`--budget`) and by time of day (`--schedule`).

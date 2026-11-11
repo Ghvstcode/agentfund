@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Context } from "hono";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../src/config.js";
+import type { AppContext } from "../src/context.js";
+import { clientIp } from "../src/http/middleware.js";
 import { friendlyGitMessage, parseRepoUrl } from "../src/lib/git.js";
 import { validateAgentfund, validateManifest } from "../src/lib/schemas.js";
 import { parseStrictYaml } from "../src/lib/yaml.js";
@@ -115,6 +118,19 @@ describe("config", () => {
     expect(c.docsUrl).toBeUndefined();
     expect(loadConfig({ ...env, SOURCE_URL: "https://git.example/fork", INSTALL_COMMAND: "brew install x", DOCS_URL: "https://docs.example" })).toMatchObject({ sourceUrl: "https://git.example/fork", installCommand: "brew install x", docsUrl: "https://docs.example" });
     expect(() => loadConfig({ ...env, DOCS_URL: "javascript:alert(1)" })).toThrow(/DOCS_URL/);
+  });
+  it("reads the client IP from CLIENT_IP_HEADER, never from a forgeable X-Forwarded-For", () => {
+    const ip = (vars: Record<string, string>, headers: Record<string, string>) => {
+      const ctx = { config: loadConfig({ ...env, ...vars }) } as unknown as AppContext;
+      const c = { req: { header: (n: string) => headers[n.toLowerCase()] }, env: { incoming: { socket: { remoteAddress: "10.0.0.1" } } } } as unknown as Context;
+      return clientIp(ctx, c);
+    };
+    const forged = { "x-forwarded-for": "6.6.6.6, 1.2.3.4", "fly-client-ip": "1.2.3.4" };
+    expect(ip({}, forged)).toBe("10.0.0.1");
+    expect(ip({ TRUST_PROXY: "true" }, forged)).toBe("6.6.6.6");
+    expect(ip({ TRUST_PROXY: "true", CLIENT_IP_HEADER: "Fly-Client-IP" }, forged)).toBe("1.2.3.4");
+    expect(ip({ CLIENT_IP_HEADER: "fly-client-ip" }, {})).toBe("10.0.0.1");
+    expect(() => loadConfig({ ...env, CLIENT_IP_HEADER: "fly client ip" })).toThrow(/CLIENT_IP_HEADER/);
   });
   it("turns dev login off by default once GitHub OAuth is configured", () => {
     const c = loadConfig({ ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret", BASE_URL: "https://fund.example/" });

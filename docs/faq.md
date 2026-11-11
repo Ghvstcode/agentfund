@@ -12,16 +12,17 @@ you already use (a subscription login or your own API key). It never stores, tra
 intermediates that credential or your usage.
 
 Anthropic's documentation says subscription usage limits "assume ordinary, individual
-usage". Whether donating inference fits your plan is your call to make, and an API key is the
-unambiguous option. Read the terms yourself:
+usage". Whether donating inference fits your plan is your call to make. AgentFund is built around
+subscription tokens (`claude setup-token`); the worker also accepts an API key if you would
+rather keep donated usage apart from your plan. Read the terms yourself:
 [Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
 [Usage Policy](https://www.anthropic.com/legal/aup),
 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
 The careful version of this answer is limitation 3 in [Security](SECURITY.md).
 
 The same goes for Codex (experimental) and OpenAI: with a ChatGPT sign-in or access token,
-whether donating usage fits your plan or workspace agreement is between you and OpenAI, and an
-API key is the unambiguous option. Read
+whether donating usage fits your plan or workspace agreement is between you and OpenAI; the
+worker also accepts an API key. Read
 [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/) and
 [Usage Policies](https://openai.com/policies/usage-policies/). A ChatGPT sign-in is also the one
 credential the worker stores and renews; see [Codex in the donor guide](donors.md#codex-experimental).

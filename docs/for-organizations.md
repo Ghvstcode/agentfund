@@ -46,7 +46,7 @@ public. See [What v0.1 can't do](#what-v01-cant-do).
 | Named admins | `ADMIN_HANDLES=alice,bob` (GitHub logins). If you leave it empty, the first user to sign in becomes the admin. |
 | Nobody lists a project without review | In the admin UI, set project creation to **approval**. New projects then start `pending` until an admin activates them. Projects that an admin creates skip this. The default is **open**. Admins can also pause or remove a project at any time. |
 | Your name on it | `INSTANCE_NAME` and `INSTANCE_DESCRIPTION` seed the instance's name and description on first boot. After that an admin edits them in the UI. The web UI's header and page titles show the instance name. `APP_NAME` renames the software in the API's `meta.app`, the server-rendered page titles and the Atom feed. A few places in the bundled UI still say AgentFund. `OG_ACCENT` sets the accent colour of the generated share cards. |
-| Point engineers at your own docs and install line | `DOCS_URL`, `SOURCE_URL` and `INSTALL_COMMAND`. The default `INSTALL_COMMAND` builds the worker from source, so set it to the `install.sh` line from the [README](../README.md#back-a-project) if you want released binaries. |
+| Point engineers at your own docs and install line | `DOCS_URL`, `SOURCE_URL` and `INSTALL_COMMAND`. The default `INSTALL_COMMAND` is the upstream `install.sh` line from the [README](../README.md#back-a-project); point it at your own mirror or a build-from-source line if you need to. |
 | One webhook for all your repositories | Add an organisation-level GitHub webhook and set `WEBHOOK_SECRET` (16+ characters) to its secret. The instance accepts it for every project, alongside each project's own secret. It is never shown to maintainers. See [CI confirmation](self-hosting.md#ci-confirmation). |
 | Limits on new projects and on each engineer | Instance settings in the admin UI: the per-task and per-day token caps for projects with no merge history, how many merged tasks make a project established, the lease length and how many claims one backer may hold at once. |
 
@@ -89,8 +89,9 @@ Whether donating fits a given plan is decided by that plan's terms, not by Agent
 project makes no claim about what any provider's terms permit. Each backer is responsible for
 their own plan. If the seats belong to the company, the company should check which agreement
 covers them before it asks engineers to take part. Anthropic's documentation says subscription
-usage limits "assume ordinary, individual usage". An API key is the unambiguous option, and
-the worker accepts `ANTHROPIC_API_KEY` too. Read the terms yourself:
+usage limits "assume ordinary, individual usage". AgentFund is built around subscription
+tokens (`claude setup-token`); a company that would rather bill donated usage separately can
+give engineers an API key, which the worker accepts as `ANTHROPIC_API_KEY`. Read the terms yourself:
 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
 [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) and the
 [Usage Policy](https://www.anthropic.com/legal/aup). [Whose credentials, whose

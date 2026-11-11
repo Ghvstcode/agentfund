@@ -78,7 +78,7 @@ describe('BackDialog', () => {
     const { dialog } = await openDialog();
     expect(
       await within(dialog).findByText(
-        'git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images',
+        'curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh',
       ),
     ).toBeInTheDocument();
   });

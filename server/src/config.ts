@@ -73,6 +73,7 @@ const envSchema = z.object({
   RATE_LIMIT_PER_MINUTE: int(600, 0, 1_000_000),
   AUTH_RATE_LIMIT_PER_MINUTE: int(30, 0, 1_000_000),
   TRUST_PROXY: bool(false),
+  CLIENT_IP_HEADER: optional,
   DB_POOL_MAX: int(10, 1, 200),
   SOURCE_URL: optional,
   INSTALL_COMMAND: optional,
@@ -104,6 +105,8 @@ export interface Config {
   rateLimitPerMinute: number;
   authRateLimitPerMinute: number;
   trustProxy: boolean;
+  /** Lower-case header the edge proxy sets to the client IP, overwriting any client value. */
+  clientIpHeader: string | undefined;
   dbPoolMax: number;
   logLevel: "debug" | "info" | "warn" | "error";
   sourceUrl: string;
@@ -161,6 +164,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL]] as const) {
     if (value && !/^https?:\/\/\S+$/.test(value)) problems.push(`  ${name}: must be an http(s) URL`);
   }
+  if (e.CLIENT_IP_HEADER && !/^[A-Za-z0-9-]+$/.test(e.CLIENT_IP_HEADER)) problems.push("  CLIENT_IP_HEADER: must be a header name, e.g. fly-client-ip");
   if (e.WEBHOOK_SECRET && e.WEBHOOK_SECRET.length < 16) problems.push("  WEBHOOK_SECRET: must be at least 16 characters");
   if (problems.length) throw new ConfigError(`Invalid configuration:\n${problems.join("\n")}`);
 
@@ -194,10 +198,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
     authRateLimitPerMinute: e.AUTH_RATE_LIMIT_PER_MINUTE,
     trustProxy: e.TRUST_PROXY,
+    clientIpHeader: e.CLIENT_IP_HEADER?.toLowerCase(),
     dbPoolMax: e.DB_POOL_MAX,
     logLevel: e.LOG_LEVEL,
     sourceUrl: e.SOURCE_URL ?? "https://github.com/ghvstcode/agentfund",
-    installCommand: e.INSTALL_COMMAND ?? "git clone https://github.com/ghvstcode/agentfund && make -C agentfund/worker build images",
+    installCommand: e.INSTALL_COMMAND ?? "curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh",
     docsUrl: e.DOCS_URL,
     warnings,
   };

@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `deploy/fly/fly.toml` and a "Deploy to Fly.io" section in the self-hosting guide.
+- `CLIENT_IP_HEADER`: take the client IP from a header the edge proxy overwrites
+  (`fly-client-ip` on Fly.io), so rate limits can't be dodged with a forged `X-Forwarded-For`.
+
+### Changed
+- The default `INSTALL_COMMAND` shown to backers is now the `install.sh` one-liner for the
+  released binaries, not a build from source.
+- The docs lead with subscription tokens (`claude setup-token`); an API key is still accepted.
+
 ## [0.1.0] - 2026-11-10
 
 ### Added
