@@ -129,14 +129,16 @@ get exit status 3 and `project moved to …; run agentfund approve …`.
 ## Part 2: for real
 
 Read the [Status section](../README.md#status) first. In short: the loop is proven against a
-mock agent, the GitHub path is proven once by hand, and a real model inside the sandbox has
-not been run yet. Treat your first run as a test.
+mock agent and with a real model on the sample project, and the GitHub path is proven once by
+hand. Pull requests from a fork, which is how most donations work, are not yet exercised.
+Treat your first run as a test.
 
 ### Back a project
 
 ```sh
-make -C worker build images                    # CLI + the real sandbox and proxy images
-export PATH="$PWD/worker/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
+agentfund version                              # the sandbox and proxy images, by digest
+docker pull <each image agentfund version names>
 gh auth login                                  # the worker forks, pushes and opens the PR as you
 export CLAUDE_CODE_OAUTH_TOKEN=...             # from `claude setup-token`; or ANTHROPIC_API_KEY
 
@@ -171,7 +173,7 @@ Everything else: [Maintainer guide](maintainers.md).
 ### Run an instance
 
 ```sh
-docker compose up --build        # http://localhost:8787
+docker compose up                # http://localhost:8787; --build builds from a checkout
 ```
 
 Everything else: [Self-hosting](self-hosting.md).

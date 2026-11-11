@@ -113,13 +113,14 @@ You need Docker (running), Node 22 with pnpm, Go 1.27+, git, curl and openssl. T
 
 ## Quick start
 
-There's no release yet, so each of these starts from a checkout.
+Released binaries are for macOS and Linux (amd64 and arm64), and the images are on GHCR.
 
 ### Back a project
 
 ```sh
-make -C worker build images                    # the CLI (worker/bin/agentfund) and the sandbox images
-export PATH="$PWD/worker/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
+agentfund version                              # names the sandbox and proxy images, by digest
+docker pull <each image agentfund version names>
 export CLAUDE_CODE_OAUTH_TOKEN=...             # from `claude setup-token`, or set ANTHROPIC_API_KEY
 
 agentfund login   https://fund.example         # paste an API key from Settings
@@ -144,7 +145,7 @@ Then register the repository under **For maintainers** on an instance. The comma
 ### Run your own instance
 
 ```sh
-docker compose up --build        # API, UI and Postgres on http://localhost:8787
+docker compose up                # API, UI and Postgres on http://localhost:8787 (--build: from this checkout)
 ```
 
 With no configuration you get dev login and a loud warning. Add GitHub OAuth and a public URL in `.env` to make it real. An instance is one Node process and one Postgres database, so a team can run its own and point everyone's workers at it. The [self-hosting guide](docs/self-hosting.md) covers configuration.
@@ -166,7 +167,7 @@ Some things it doesn't protect against. Docker isn't a VM, so run the worker ins
 
 ## Status
 
-AgentFund is pre-release. There's no tagged version and no published binaries or images yet, so you build from source.
+`v0.1.0` is the first release, with binaries on GitHub Releases and images on GHCR. It's early software.
 
 | | |
 | --- | --- |
@@ -177,6 +178,7 @@ AgentFund is pre-release. There's no tagged version and no published binaries or
 | Pull requests from a fork, several tasks at once | Not exercised yet |
 | Coding agents | Claude Code. Codex is experimental, with one real run using a ChatGPT sign-in ([runners](docs/runners.md)) |
 | Git hosts | GitHub only, plus a generic signed-JSON CI adapter |
+| The release | `v0.1.0-rc2` on 2026-11-10: the workflow published the binaries and the three images, `install.sh` installed on macOS, and a real task ran through the published images to merge. Not tried on a clean Linux machine yet |
 
 For a first real run, use `--once` and a small `--budget`, then read `agentfund logs`.
 
@@ -184,7 +186,6 @@ The first real project is [gridrs], a terminal spreadsheet in Rust with no depen
 
 ## Roadmap
 
-- **A first release.** Tagged binaries, published sandbox and proxy images, and an install script that uses them.
 - **gridrs, funded in public**, on an instance anyone can watch.
 - **More coding agents.** Codex out of experimental, then Gemini CLI, Cursor CLI and opencode ([runners](docs/runners.md)).
 - **Federation.** Instances are independent today. Ids, keys and ledgers are designed so they can link up later.

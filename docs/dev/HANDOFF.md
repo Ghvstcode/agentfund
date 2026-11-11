@@ -47,7 +47,7 @@ Update it every time something gets proven.
 | Codex runner | Added 2026-11-08, **experimental**. ChatGPT sign-in added and one real run (`0001-slugify`, Plus) completed through merge, 2026-11-10. A rejected token is handled (run for real); plan limits, API key, access token not yet. This is A2 |
 | PR from a fork (backer does not own the repo) | **Not exercised.** This is how every real donation works. This is A3 |
 | CI results by live GitHub webhook | **Proven 2026-11-10** (A4) |
-| Release workflow, published images, `install.sh` against a real release | **Never run.** This is A6 |
+| Release workflow, published images, `install.sh` against a real release | **Proven 2026-11-10** with `v0.1.0-rc2` on macOS; not on a clean Linux machine (A6) |
 | `max_concurrent` > 1 | Not exercised. Keep the default at 1 and say so |
 | GitHub OAuth login | Unit-tested with a mocked GitHub; never used live. Part of B1 |
 
@@ -254,6 +254,20 @@ to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy
    - The repository is private, and so are GHCR packages pushed from it. Each package's
      visibility is set on its own settings page. Until both repository and packages are public,
      nobody else can install the binary or pull the images it defaults to.
+   - GoReleaser refuses a dirty tree: anything a job downloads must land outside the checkout
+     (rc1 failed on `?? image-refs/`; fixed in #8, rc2 passed).
+   - `gh release edit <tag>` cannot find a draft (it has no tag yet). Publish it through the API:
+     `gh api -X PATCH repos/ghvstcode/agentfund/releases/<id> -F draft=false -F prerelease=true`.
+   - Package visibility has no API: each GHCR package's settings page, Danger Zone.
+
+   **Done 2026-11-10 (steps 2 and 4, macOS only):** `v0.1.0-rc2` published as a pre-release; repo
+   and the three packages public; anonymous pulls work. `install.sh` (from `main`, with
+   `AGENTFUND_VERSION=0.1.0-rc2`) installed and checksum-verified the darwin/arm64 binary, and
+   `agentfund version` named the published images. The published server image ran against
+   Postgres 17 and served the UI (with `docker run`; Compose was not installed on that machine,
+   so `docker compose up` itself is not re-tested). `make trial` with `SANDBOX_IMAGE` /
+   `EGRESS_PROXY_IMAGE` set to the published digests ran `0001-slugify` with Sonnet to merge
+   (38k in / 1.1k out). Still open: a clean Linux machine.
 4. On a clean macOS machine and a clean Linux machine: `install.sh` → `agentfund --version` →
    `docker compose up` from the published server image → the quickstart, as a newcomer would.
 5. Fix, tag `v0.1.0`, publish the draft release, update the README Status section.
@@ -374,7 +388,7 @@ Prepare each with options and a recommendation, then ask:
 1. Merge `claude/vibrant-fermat-ig3cvg` into `main` directly, or through a PR? (§2)
 2. ~~The project's GitHub home (A5)~~: renamed to `ghvstcode/agentfund`, 2026-11-10.
 3. Spending: model credits for A1/A2 (a few dollars), a second GitHub account for A3.
-4. When to tag `v0.1.0-rc1` and `v0.1.0`. (A6)
+4. ~~When to tag `v0.1.0-rc1` and `v0.1.0`~~: approved 2026-11-10. (A6)
 5. Does Codex ship as experimental or stay hidden in v0.1? (A2)
 6. ~~Security contact address (A7)~~: mail@tobiokewole.com, 2026-11-10.
 7. Hosting, domain and on-call for the public instance. (B1)
@@ -410,3 +424,6 @@ Append one line per milestone, newest last: date, what was proven or shipped, co
   client uses `SSL_CERT_FILE` in place of its roots. Egress proxy unchanged (CONNECT-only, no TLS).
 - 2026-11-10: A2 in progress: Codex with a ChatGPT sign-in (access token in the sandbox, refresh
   token on the host); first real Codex run (`0001-slugify`, Plus) completed through merge.
+- 2026-11-10: A6: `v0.1.0-rc2` released (rc1 failed on a dirty tree, #8). Repo and GHCR packages
+  public. install.sh, the published server image and a real task through the published sandbox
+  and proxy images all worked on macOS. Then `v0.1.0`.
