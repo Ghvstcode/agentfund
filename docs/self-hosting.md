@@ -1,17 +1,27 @@
 # Self-hosting an AgentFund instance
 
+An AgentFund instance is one container and one Postgres database. You can run one for your
+own community, or privately inside your company so engineers' spare agent quota goes to the
+open source you depend on. [For organisations](for-organizations.md) explains how the settings
+map onto a company and what v0.1 can't do yet. This page is how to run one.
+
 New here? `make demo` runs a throwaway instance with a sample project and a worker in one
-command ([Quickstart](quickstart.md)); [Concepts](concepts.md) explains what the server is and
-is not trusted with. This page is about running one for real.
+command ([Quickstart](quickstart.md)). [Concepts](concepts.md) explains what the server is and
+isn't trusted with.
+
+## What you're running
 
 One container serves the API (`/v1`), the live stream, the web UI and the discovery routes
 (`/sitemap.xml`, `/feed.atom`, `/og/<slug>.png`). It needs Postgres 16+ and a directory for
-git clones. Nothing else: the claim queue is Postgres row locks, live fan-out is Postgres
-`LISTEN/NOTIFY`.
+git clones, and nothing else. The claim queue uses Postgres row locks, and live fan-out uses
+Postgres `LISTEN/NOTIFY`. Released images are published as `ghcr.io/ghvstcode/agentfund`, and
+`docker-compose.yml` uses that image.
 
 The server is **untrusted middleware by design**. Workers verify every signed manifest
-themselves, so compromising an instance lets an attacker lie about numbers, not run code on
-donors' machines. Host it with ordinary care, not with HSM-grade paranoia.
+themselves, so someone who compromises an instance can lie about numbers but can't run code
+on donors' machines. Agents run only on donors' machines, in a sandbox whose only way out, by
+default, is the model API. The server never sees a model or git credential. Host it with ordinary care,
+not with HSM-grade paranoia.
 
 ## Quick start
 
@@ -62,7 +72,7 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` |
 | `DB_POOL_MAX` | `10` | Postgres connections per process |
 | `SOURCE_URL` | `https://github.com/ghvstcode/agentfund` | `meta.links.source_url`: where this instance's source lives |
-| `INSTALL_COMMAND` | the upstream `install.sh` one-liner | `meta.links.install_command`: how donors install the worker |
+| `INSTALL_COMMAND` | a `git clone` and build from source (see `.env.example`) | `meta.links.install_command`: how donors install the worker; set it to the `install.sh` line for released binaries |
 | `DOCS_URL` | – (omitted) | `meta.links.docs_url` |
 | `OG_ACCENT` | `#2563eb` | Accent colour (`#rrggbb`) of generated OG cards |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`; JSON lines on stdout |

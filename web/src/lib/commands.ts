@@ -32,6 +32,7 @@ export interface DocLinks {
   donors: string;
   maintainers: string;
   selfHosting: string;
+  organizations: string;
   spec: string;
   security: string;
 }
@@ -50,6 +51,7 @@ export function docLinks(meta: Pick<Meta, 'links'> | undefined): DocLinks {
     donors: doc('donors.md'),
     maintainers: doc('maintainers.md'),
     selfHosting: doc('self-hosting.md'),
+    organizations: doc('for-organizations.md'),
     spec: `${source}/tree/HEAD/spec`,
     security: doc('SECURITY.md'),
   };

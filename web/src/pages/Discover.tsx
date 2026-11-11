@@ -466,7 +466,7 @@ function ForTeams() {
   const docs = docLinks(meta.data);
   const command = 'docker compose up --build';
   const points = [
-    ['Your instance, your rules', 'One Node process and Postgres, with your own GitHub sign-in. An admin approves every project it lists.'],
+    ['Your instance, your rules', 'One container and Postgres, with your own GitHub sign-in. Turn on approval and an admin reviews every project before it is listed.'],
     ['Caps on every worker', "Each engineer's worker stops at its own per-task, daily and weekly caps."],
     ['Signed tasks only', 'Workers run nothing a maintainer has not signed, and check it on their own machine.'],
     ['A ledger you can audit', 'Tokens spent against work delivered and merged, per project and per person.'],
@@ -485,12 +485,20 @@ function ForTeams() {
               open-source projects you depend on, with caps and a ledger you control.
             </p>
           </div>
-          <a
-            href={docs.selfHosting}
-            className="inline-flex h-11 w-fit items-center gap-1.5 bg-band-foreground px-5 text-[0.9375rem] font-semibold text-band transition-opacity hover:opacity-90"
-          >
-            Read the self-hosting guide <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
-          </a>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <a
+              href={docs.organizations}
+              className="inline-flex h-11 w-fit items-center gap-1.5 bg-band-foreground px-5 text-[0.9375rem] font-semibold text-band transition-opacity hover:opacity-90"
+            >
+              Run it for your organisation <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            </a>
+            <a
+              href={docs.selfHosting}
+              className="inline-flex items-center gap-1 text-[0.9375rem] font-semibold text-band-muted underline-offset-4 transition-colors hover:text-band-foreground hover:underline"
+            >
+              Self-hosting guide <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          </div>
         </div>
         <div className="grid content-start">
           <ul className="grid">

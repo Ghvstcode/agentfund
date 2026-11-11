@@ -9,6 +9,7 @@ Pick the line that describes you. Each path is in reading order and none is long
 | **Back a project** with your tokens | [Quickstart](quickstart.md) → [Donor guide](donors.md) → [Security](SECURITY.md) |
 | **Fund your project** this way | [Quickstart](quickstart.md) → [Maintainer guide](maintainers.md) → [`examples/hello-project`](../examples/hello-project/) |
 | **Run an instance** | [Self-hosting](self-hosting.md) → [Security](SECURITY.md) |
+| **Run one inside your company** | [For organisations](for-organizations.md) → [Self-hosting](self-hosting.md) |
 | **Build a compatible worker, server or UI** | [`spec/manifest.md`](../spec/manifest.md) → [`spec/protocol.md`](../spec/protocol.md) → [`spec/openapi.yaml`](../spec/openapi.yaml) |
 | **Change AgentFund itself** | [CONTRIBUTING](../CONTRIBUTING.md) → the README of the package you are touching |
 | **Ask "but what about…"** | [FAQ](faq.md), then [Decisions](decisions.md) |
@@ -22,6 +23,7 @@ Pick the line that describes you. Each path is in reading order and none is long
 | [Donor guide](donors.md) | Installing, approving, the policy file, the sandbox, your logs, troubleshooting | reference |
 | [Maintainer guide](maintainers.md) | Decomposing a project into tasks, signing, keys, CI hardening, reviewing | reference |
 | [Self-hosting](self-hosting.md) | `docker compose`, configuration, GitHub login, CI confirmation, backups | reference |
+| [For organisations](for-organizations.md) | Running a private instance for a company or community: settings, networking, plan terms, limits | 5 min |
 | [Security](SECURITY.md) | The threat model, the honest limitations, how to report a vulnerability | 5 min |
 | [FAQ](faq.md) | Plans and terms, cost, safety, fake numbers, failure, naming | 5 min |
 | [Decisions](decisions.md) | The defaults we picked where the design left a choice, and how to change each | 3 min |

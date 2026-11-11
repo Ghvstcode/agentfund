@@ -57,6 +57,34 @@ The design follows one rule:
 
 The server keeps the queue and the ledger. It can't change what runs on your machine.
 
+## Run your own
+
+AgentFund is built to be self-hosted, and an instance is small enough that a community or a
+company can run its own.
+
+- **For a community.** Your own instance for the projects you care about, with your own
+  sign-in and your own rules about which projects get listed.
+- **Inside your company.** A private instance, behind your VPN if you like, for the public
+  repositories your company maintains and the open source it depends on. Engineers give their
+  spare subscription quota to that backlog, each under their own caps, and the ledger shows
+  what was delivered and merged.
+
+Why it's practical:
+
+- **One container plus Postgres.** No queue, cache or job runner to operate. The image is
+  published at `ghcr.io/ghvstcode/agentfund`.
+- **The server is untrusted middleware.** Workers verify the maintainer's signature and every
+  manifest themselves, so even your own instance can't change what runs on an engineer's machine.
+- **Agents run only on backers' machines**, in a Docker sandbox with no host mounts, behind an
+  egress allowlist that by default admits the model API and nothing else. The server never sees a model
+  or git credential.
+- **Apache-2.0.** Fork it, rebrand it (`APP_NAME`, `INSTANCE_NAME`, `OG_ACCENT`), run it.
+
+Read [For organisations](docs/for-organizations.md) for how the settings map onto a company
+(GitHub sign-in, admins, project approval, an organisation-wide webhook, VPN-only networking),
+what to decide about plan terms, and what v0.1 can't do yet, including private repositories.
+[Self-hosting](docs/self-hosting.md) has the setup and every variable.
+
 ## What it looks like
 
 <table>
@@ -148,7 +176,7 @@ Then register the repository under **For maintainers** on an instance. The comma
 docker compose up                # API, UI and Postgres on http://localhost:8787 (--build: from this checkout)
 ```
 
-With no configuration you get dev login and a loud warning. Add GitHub OAuth and a public URL in `.env` to make it real. An instance is one Node process and one Postgres database, so a team can run its own and point everyone's workers at it. The [self-hosting guide](docs/self-hosting.md) covers configuration.
+With no configuration you get dev login and a loud warning. Add GitHub OAuth and a public URL in `.env` to make it real. The [self-hosting guide](docs/self-hosting.md) covers configuration, and [Run your own](#run-your-own) says why you might.
 
 ## Why you can trust it
 
@@ -218,6 +246,7 @@ More questions are answered in [docs/faq.md](docs/faq.md).
 - [Donor guide](docs/donors.md): approving, your policy file, the sandbox and your logs
 - [Maintainer guide](docs/maintainers.md): splitting a project into tasks, signing, keys, hardening CI
 - [Self-hosting](docs/self-hosting.md): configuring and running an instance
+- [For organisations](docs/for-organizations.md): a private instance for your company or community, and its limits
 - [Coding agents](docs/runners.md): Claude Code, Codex, and what another agent would need
 - [Security](docs/SECURITY.md), [FAQ](docs/faq.md) and [Decisions](docs/decisions.md)
 
