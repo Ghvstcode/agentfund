@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows
   (`fly-client-ip` on Fly.io), so rate limits can't be dodged with a forged `X-Forwarded-For`.
 
 ### Changed
+- **Registering a project on a public instance needs push access** to its GitHub repository,
+  checked with the maintainer's own GitHub sign-in, so nobody can claim someone else's
+  AgentFund-ready project. Admins are exempt and register repositories outside github.com.
+  The sign-in token (`read:user user:email`) is now kept sealed on the session, under a key
+  derived from the session token; people signed in before this change sign in again to register.
 - The default `INSTALL_COMMAND` shown to backers is now the `install.sh` one-liner for the
   released binaries, not a build from source.
 - The docs lead with subscription tokens (`claude setup-token`); an API key is still accepted.

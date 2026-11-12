@@ -48,6 +48,8 @@ export const sessions = pgTable(
     createdAt: ts("created_at").notNull(),
     expiresAt: ts("expires_at").notNull(),
     revokedAt: ts("revoked_at"),
+    /** The GitHub sign-in token, AES-GCM sealed under a key derived from the session token. */
+    githubTokenSealed: text("github_token_sealed"),
   },
   (t) => [uniqueIndex("sessions_token_hash_key").on(t.tokenHash), index("sessions_user_idx").on(t.userId)],
 );

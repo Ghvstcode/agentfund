@@ -112,8 +112,12 @@ independent; that is on you.
 
 1. Sign in to the instance, open **Maintain → Register a project**, and paste the repository
    URL. On a public instance the repository must be public: the instance clones it without
-   credentials. On a members-only instance it may be private, if the instance's GitHub App is
-   installed on it and you have write access to it
+   credentials. You need push access to it on GitHub, which the instance checks with your
+   GitHub sign-in, so nobody can register someone else's project; an instance admin can
+   register a repository for its owner, or one hosted outside github.com. If your organization
+   restricts OAuth apps, an owner has to approve the instance's app first. On a members-only
+   instance it may be private, if the instance's GitHub App is installed on it and you have
+   write access to it
    ([Self-hosting](self-hosting.md#members-only-instance-private-repositories)). The wizard
    clones it, verifies the lock signature against the key in `agentfund.yaml`, and shows you the
    key fingerprint, the commit, the lock hash and the manifest list before anything is created.

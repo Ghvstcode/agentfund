@@ -220,6 +220,10 @@ Readings fixed while building the reference server; they are normative.
   commit that contains their merged dependencies.
 - **`agentfund.yaml` `repo_url` must equal the URL being registered** (else
   `repo-unverifiable`), so a fork cannot be registered as the original.
+- **On a public instance, creating or previewing a GitHub project needs push access** to its
+  repository, asked of GitHub with the caller's own sign-in; otherwise `forbidden` (403), before
+  the repository is read. Admins are exempt. Repositories off github.com are registered by an
+  admin.
 - **`Project.pubkey` is the newest key reached through a valid rotation chain** from the key
   registered at creation; the change emits `project.key_rotated`.
 - **CI conclusions.** `success` passes. `failure`, `cancelled`, `timed_out`, `action_required`

@@ -95,8 +95,11 @@ environment variables.
    `<BASE_URL>/v1/auth/github/callback`.
 3. Put the client id and secret in `.env`, set `ADMIN_HANDLES=<your github login, lowercase>`.
 
-The server asks for `read:user user:email` only and discards the GitHub token as soon as it
-has read the profile. Handles are the lower-cased GitHub login. Once OAuth is configured dev
+The server asks for `read:user user:email` only. It keeps the GitHub token on the session,
+sealed (AES-256-GCM) under a key derived from the session token, which the database holds only
+as a hash; the token dies with the session. Registering a project uses it to ask GitHub whether
+the maintainer can push to the repository (admins skip the check). Sessions from before that
+change have no token: those users sign in again to register. Handles are the lower-cased GitHub login. Once OAuth is configured dev
 login turns itself off unless you force `AUTH_DEV_LOGIN=true`.
 
 ## Members-only instance (private repositories)
