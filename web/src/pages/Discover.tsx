@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router';
 import { flatItems, type ProjectFilters, useMeta, useProjects, useStats } from '@/api/queries';
 import type { Project, Totals } from '@/api/types';
 import { Button, ButtonLink } from '@/components/Button';
+import { CommandLine } from '@/components/CommandLine';
 import { CopyButton } from '@/components/CopyButton';
 import { SelectField } from '@/components/Field';
 import { TokenDot, type TokenState } from '@/components/Mark';
@@ -15,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { APP_NAME, CLI_NAME } from '@/config';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useLive } from '@/hooks/useLive';
-import { docLinks } from '@/lib/commands';
+import { docLinks, instanceLinks } from '@/lib/commands';
 import { formatCompact } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -123,6 +124,9 @@ function Hero({ totals, live }: { totals: Totals | undefined; live: boolean }) {
           <Button asChild variant="primary" size="lg" className="rounded-none px-5">
             <a href="#projects">Find a project to back</a>
           </Button>
+          <a href="#install" className="text-[0.9375rem] font-medium hover:underline">
+            Install the worker
+          </a>
           <a href={docs.quickstart} className="flex items-center gap-1 text-[0.9375rem] font-medium hover:underline">
             Read the docs <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
           </a>
@@ -461,6 +465,52 @@ function Projects() {
   );
 }
 
+function Install() {
+  const meta = useMeta();
+  const docs = docLinks(meta.data);
+  const links = instanceLinks(meta.data);
+  const base = (meta.data?.base_url ?? (typeof window === 'undefined' ? '' : window.location.origin)).replace(/\/+$/, '');
+  const steps: [string, string, string][] = [
+    ['1', 'Install the worker', links.installCommand],
+    ['2', 'Sign in with an API key from Settings', `${CLI_NAME} login ${base}`],
+    ['3', 'Review a project, then lend your agent', `${CLI_NAME} approve ${base}/<project>`],
+  ];
+  return (
+    <section aria-labelledby="install-title" id="install" className="container-page grid scroll-mt-20 gap-7 pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-2">
+          <h2 id="install-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
+            Get the worker.
+          </h2>
+          <p className="max-w-[40rem] text-[0.9375rem] text-pretty text-muted-foreground">
+            One binary for macOS and Linux. It runs each task in Docker on your machine, with your own Claude Code
+            subscription, and never sends your credentials anywhere.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <a href={`${links.sourceUrl.replace(/\/+$/, '')}/releases/latest`} className="flex items-center gap-1 text-sm font-medium hover:underline">
+            Download a release <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          </a>
+          <a href={docs.donors} className="flex items-center gap-1 text-sm font-medium hover:underline">
+            Backer guide <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+      <ol className="grid border-t border-t-foreground">
+        {steps.map(([n, title, command]) => (
+          <li key={n} className="grid gap-3 border-b py-5 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] sm:items-center sm:gap-6">
+            <span className="flex items-baseline gap-3">
+              <span className="num text-xs text-muted-foreground">0{n}</span>
+              <span className="text-[1.0625rem] font-semibold tracking-tight">{title}</span>
+            </span>
+            <CommandLine command={command} label={title.toLowerCase()} />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function ForTeams() {
   const meta = useMeta();
   const docs = docLinks(meta.data);
@@ -624,6 +674,7 @@ export default function Discover() {
       <Hero totals={totals} live={live.status === 'live'} />
       <StatStrip totals={totals} />
       <Projects />
+      <Install />
       <ForTeams />
       <States />
       <Docs />

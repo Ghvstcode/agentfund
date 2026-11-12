@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The home page has a **Get the worker** section: the install one-liner, then `login` and
+  `approve` for this instance, each with a copy button, plus links to the latest release and the
+  backer guide. The hero links to it.
 ### Changed
 - A release is published as soon as its tag is built, not left as a draft: `install.sh`
   installs the latest release, and drafts don't count, so v0.1.1 and v0.1.2 were invisible to it
