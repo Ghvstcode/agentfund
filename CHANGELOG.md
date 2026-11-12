@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `/privacy` and `/terms` are served as real pages (status 200, indexable, with their own
+  titles); they were the app shell with status 404 and `noindex`. The server and web
+  packages report version 0.1.1.
+
 ## [0.1.1] - 2026-11-12
 
 ### Added
