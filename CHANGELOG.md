@@ -7,7 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-12
+
 ### Added
+- **Privacy policy and terms of use** at `/privacy` and `/terms`, linked in the footer.
+  `LEGAL_NAME` names the operator and `LEGAL_CONTACT` gives the address for data requests;
+  `PRIVACY_URL` and `TERMS_URL` point at your own pages instead.
 - **Private repositories on members-only instances** — `INSTANCE_ACCESS=members` limits every
   page and API call to signed-in members of `ALLOWED_GITHUB_ORGS`. A read-only GitHub App reads
   private repositories and feeds the CI poller. Backers fetch with their own `gh` login after
@@ -99,5 +104,6 @@ All notable changes to this project are documented here. The format follows
   outside the egress proxy, and tools that create scheduled cloud agents on the backer's
   account.
 
-[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ghvstcode/agentfund/releases/tag/v0.1.0
