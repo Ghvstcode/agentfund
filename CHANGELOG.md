@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- A release is published as soon as its tag is built, not left as a draft: `install.sh`
+  installs the latest release, and drafts don't count, so v0.1.1 and v0.1.2 were invisible to it
+  until published by hand. Tags with a suffix (`-rc1`) are still pre-releases.
+
 ## [0.1.2] - 2026-11-12
 
 ### Fixed

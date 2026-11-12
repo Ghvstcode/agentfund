@@ -230,7 +230,7 @@ release downloads only work for the public once they are public (a launch decisi
 ### A6. Release rehearsal
 
 The release workflow ([`.github/workflows/release.yml`](../../.github/workflows/release.yml)) has
-never run. It builds the worker with GoReleaser (draft release) and pushes three multi-arch images
+never run. It builds the worker with GoReleaser (a draft release until v0.1.2; since then a tag is published as soon as it is built) and pushes three multi-arch images
 to GHCR: `agentfund` (server + UI), `agentfund-sandbox`, `agentfund-egress-proxy`.
 
 1. `goreleaser check` and `goreleaser build --snapshot --clean` locally.
