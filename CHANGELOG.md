@@ -7,10 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-12
+
 ### Fixed
 - `/privacy` and `/terms` are served as real pages (status 200, indexable, with their own
   titles); they were the app shell with status 404 and `noindex`. The server and web
-  packages report version 0.1.1.
+  packages report their release version.
 
 ## [0.1.1] - 2026-11-12
 
@@ -109,6 +111,7 @@ All notable changes to this project are documented here. The format follows
   outside the egress proxy, and tools that create scheduled cloud agents on the backer's
   account.
 
-[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/ghvstcode/agentfund/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ghvstcode/agentfund/releases/tag/v0.1.0

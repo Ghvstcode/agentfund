@@ -5,7 +5,7 @@ primary_region = "iad"
 
 [build]
   # The published release image; bump the tag to upgrade. Migrations run at boot.
-  image = "ghcr.io/ghvstcode/agentfund:0.1.1"
+  image = "ghcr.io/ghvstcode/agentfund:0.1.2"
 
 [env]
   PORT = "8787"
