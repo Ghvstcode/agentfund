@@ -991,6 +991,7 @@ components:
             privacy_url: { type: string, description: "The operator's own privacy policy; UIs link here instead of their built-in page" }
             terms_url: { type: string, description: "The operator's own terms of use; UIs link here instead of their built-in page" }
             legal_contact: { type: string, format: email, description: "Where privacy, deletion and terms requests go" }
+            legal_name: { type: string, description: "The person or organisation that runs this instance, as its privacy policy and terms name them" }
         defaults:
           type: object
           properties:

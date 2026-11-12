@@ -141,8 +141,8 @@ describe("config", () => {
   });
   it("takes the operator's own legal pages and contact", () => {
     const oauth = { ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret" };
-    const c = loadConfig({ ...oauth, PRIVACY_URL: "https://fund.example/privacy.html", TERMS_URL: "https://fund.example/terms.html", LEGAL_CONTACT: "privacy@fund.example" });
-    expect(c).toMatchObject({ privacyUrl: "https://fund.example/privacy.html", termsUrl: "https://fund.example/terms.html", legalContact: "privacy@fund.example" });
+    const c = loadConfig({ ...oauth, PRIVACY_URL: "https://fund.example/privacy.html", TERMS_URL: "https://fund.example/terms.html", LEGAL_CONTACT: "privacy@fund.example", LEGAL_NAME: "Fund Example Ltd" });
+    expect(c).toMatchObject({ privacyUrl: "https://fund.example/privacy.html", termsUrl: "https://fund.example/terms.html", legalContact: "privacy@fund.example", legalName: "Fund Example Ltd" });
     expect(c.warnings.join(" ")).not.toMatch(/LEGAL_CONTACT/);
     expect(() => loadConfig({ ...env, TERMS_URL: "javascript:alert(1)" })).toThrow(/TERMS_URL/);
     expect(() => loadConfig({ ...env, LEGAL_CONTACT: "not an address" })).toThrow(/LEGAL_CONTACT/);

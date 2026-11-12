@@ -7,9 +7,9 @@ import { docLinks, instanceLinks } from '@/lib/commands';
 
 /*
  * The built-in privacy policy and terms of use. They describe what the software does, which holds
- * for every instance; operator-specific facts (legal entity, hosting, governing law) are visible
- * placeholders. Operators with their own pages set PRIVACY_URL / TERMS_URL and these routes link
- * there instead.
+ * for every instance. The operator's name and contact come from LEGAL_NAME / LEGAL_CONTACT; other
+ * operator-specific facts (hosting, governing law) are visible placeholders. Operators with their
+ * own pages set PRIVACY_URL / TERMS_URL and these routes link there instead.
  */
 
 const UPDATED = '11 November 2026';
@@ -39,6 +39,12 @@ function Contact() {
   ) : (
     <>the operator of this instance</>
   );
+}
+
+/** The operator's name from `LEGAL_NAME`, or a placeholder until it is set. */
+function Operator() {
+  const name = instanceLinks(useMeta().data).legalName;
+  return name ? <>{name}</> : <Fill>OPERATOR LEGAL NAME</Fill>;
 }
 
 function Doc({ page, title, lede, children }: { page: LegalPage; title: string; lede: ReactNode; children: ReactNode }) {
@@ -83,7 +89,7 @@ export function Privacy() {
       lede={
         <>
           What {name} collects, what it publishes, and what it never sees. {name} is run by{' '}
-          <Fill>OPERATOR LEGAL NAME</Fill> (“the operator”, “we”) on AgentFund, open-source software that lets backers
+          <Operator /> (“the operator”, “we”) on AgentFund, open-source software that lets backers
           donate coding-agent time to open-source projects.
         </>
       }
@@ -270,7 +276,7 @@ export function Privacy() {
 
       <Section title="Contact" i={11}>
         <p>
-          Write to <Contact /> with questions or requests. Operator: <Fill>OPERATOR LEGAL NAME AND POSTAL ADDRESS</Fill>
+          Write to <Contact /> with questions or requests. This instance is run by <Operator />.
         </p>
       </Section>
     </Doc>
@@ -290,7 +296,7 @@ export function Terms() {
         <>
           The rules for using {name}
           {meta?.base_url && <> at {meta.base_url}</>}. They are an agreement between you and{' '}
-          <Fill>OPERATOR LEGAL NAME</Fill> (“the operator”, “we”). By signing in, or by pointing a worker or other client at
+          <Operator /> (“the operator”, “we”). By signing in, or by pointing a worker or other client at
           this instance, you accept them.
         </>
       }

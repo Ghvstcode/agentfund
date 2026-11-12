@@ -756,6 +756,8 @@ export interface components {
                  * @description Where privacy, deletion and terms requests go
                  */
                 legal_contact?: string;
+                /** @description The person or organisation that runs this instance, as its privacy policy and terms name them */
+                legal_name?: string;
             };
             defaults?: {
                 lease_seconds?: number;
