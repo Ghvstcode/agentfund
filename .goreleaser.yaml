@@ -55,5 +55,7 @@ release:
   github:
     owner: ghvstcode
     name: agentfund
-  draft: true
+  # Published as soon as it is built: install.sh installs GitHub's "latest" release, which skips
+  # drafts. A tag with a suffix (v1.2.3-rc1) is a pre-release and never becomes latest.
+  draft: false
   prerelease: auto
