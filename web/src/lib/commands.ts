@@ -16,6 +16,7 @@ export interface InstanceLinks {
   privacyUrl: string | null;
   termsUrl: string | null;
   legalContact: string | null;
+  legalName: string | null;
 }
 
 /** Operator-configured links from `/v1/meta`, with this build's fallbacks where absent. */
@@ -27,6 +28,7 @@ export function instanceLinks(meta: Pick<Meta, 'links'> | undefined): InstanceLi
     privacyUrl: meta?.links?.privacy_url || null,
     termsUrl: meta?.links?.terms_url || null,
     legalContact: meta?.links?.legal_contact || null,
+    legalName: meta?.links?.legal_name || null,
   };
 }
 

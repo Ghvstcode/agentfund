@@ -78,8 +78,9 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `SOURCE_URL` | `https://github.com/ghvstcode/agentfund` | `meta.links.source_url`: where this instance's source lives |
 | `INSTALL_COMMAND` | the `install.sh` one-liner (see `.env.example`) | `meta.links.install_command`: how donors install the worker |
 | `DOCS_URL` | – (omitted) | `meta.links.docs_url` |
-| `PRIVACY_URL`, `TERMS_URL` | – (built-in pages) | `meta.links.privacy_url` / `terms_url`: your own policy pages. Without them the UI serves `/privacy` and `/terms`, a template that leaves your legal entity, hosting providers and governing law as visible `[placeholders]`, so a public instance should publish its own |
+| `PRIVACY_URL`, `TERMS_URL` | – (built-in pages) | `meta.links.privacy_url` / `terms_url`: your own policy pages. Without them the UI serves `/privacy` and `/terms`, a template that fills in `LEGAL_NAME` and `LEGAL_CONTACT` but leaves your hosting providers and governing law as visible `[placeholders]`, so a public instance should publish its own |
 | `LEGAL_CONTACT` | – | `meta.links.legal_contact`: the email address the built-in pages give for data, deletion and terms requests |
+| `LEGAL_NAME` | – | `meta.links.legal_name`: who runs the instance, a person or a company, as the built-in pages name the operator |
 | `OG_ACCENT` | `#2563eb` | Accent colour (`#rrggbb`) of generated OG cards |
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`; JSON lines on stdout |
 

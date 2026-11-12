@@ -87,6 +87,7 @@ const envSchema = z.object({
   PRIVACY_URL: optional,
   TERMS_URL: optional,
   LEGAL_CONTACT: optional,
+  LEGAL_NAME: optional,
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
 });
 
@@ -130,6 +131,8 @@ export interface Config {
   termsUrl: string | undefined;
   /** Email address the built-in privacy and terms pages give for requests. */
   legalContact: string | undefined;
+  /** Who runs the instance, as the built-in privacy and terms pages name them. */
+  legalName: string | undefined;
   /** Human-readable notes about defaults that were applied; logged at boot. */
   warnings: string[];
 }
@@ -253,6 +256,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     privacyUrl: e.PRIVACY_URL,
     termsUrl: e.TERMS_URL,
     legalContact: e.LEGAL_CONTACT,
+    legalName: e.LEGAL_NAME,
     warnings,
   };
 }
