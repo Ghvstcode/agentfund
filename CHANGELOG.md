@@ -7,10 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-12
+
 ### Added
 - The home page has a **Get the worker** section: the install one-liner, then `login` and
   `approve` for this instance, each with a copy button, plus links to the latest release and the
   backer guide. The hero links to it.
+
 ### Changed
 - A release is published as soon as its tag is built, not left as a draft: `install.sh`
   installs the latest release, and drafts don't count, so v0.1.1 and v0.1.2 were invisible to it
@@ -120,7 +123,8 @@ All notable changes to this project are documented here. The format follows
   outside the egress proxy, and tools that create scheduled cloud agents on the backer's
   account.
 
-[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/ghvstcode/agentfund/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/ghvstcode/agentfund/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ghvstcode/agentfund/releases/tag/v0.1.0
