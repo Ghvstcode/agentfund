@@ -243,7 +243,7 @@ It needs no volume: `DATA_DIR` holds only the clone cache. Postgres lives elsewh
      BASE_URL=https://fund.example.org \
      GITHUB_CLIENT_ID=… GITHUB_CLIENT_SECRET=… \
      ADMIN_HANDLES=<your github login>
-   fly deploy -c deploy/fly/fly.toml
+   fly deploy -c deploy/fly/fly.toml --ha=false
    ```
 
    Create the GitHub OAuth app first ([GitHub login](#github-login)) with the callback
