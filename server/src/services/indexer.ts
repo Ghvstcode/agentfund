@@ -46,6 +46,49 @@ async function canRegister(ctx: AppContext, who: Principal, repo: RepoRef): Prom
   }
 }
 
+/**
+ * On a public instance anyone may sign in, so registering must not let someone claim another
+ * person's AgentFund-ready repository: the caller needs push access to it on GitHub, asked with
+ * the caller's own sign-in token (`GET /repos/{owner}/{repo}` → `permissions.push`). Admins may
+ * register for anyone. Dev-login users and file:// repositories have no GitHub to ask; both exist
+ * only on instances where dev login (anyone may be admin) or ALLOW_FILE_REPOS is on.
+ * Members-only instances check write through the GitHub App in `canRegister` instead.
+ */
+export async function requirePushAccess(ctx: AppContext, who: Principal, repo: RepoRef): Promise<void> {
+  if (membersOnly(ctx) || who.user.role === "admin" || repo.scheme === "file") return;
+  if (ctx.config.authDevLogin && !who.user.githubLogin) return;
+  const refuse = (detail: string): never => {
+    throw new Problem("forbidden", detail, { errors: [{ path: "/repo_url", message: detail }] });
+  };
+  if (!repo.github) refuse("Only github.com repositories can be checked for push access on this instance; ask an admin to register this one for you.");
+  const token = who.githubToken?.() ?? null;
+  if (!token) refuse("Sign out and sign in with GitHub again, so the instance can check that you can push to this repository.");
+  let res: Response;
+  try {
+    res = await ctx.fetch(`https://api.github.com/repos/${repo.github}`, {
+      headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2026-03-10", "user-agent": "agentfund-server" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    ctx.log.warn("push access check failed", { repo: repo.url, err });
+    return refuse("GitHub could not be reached to check your push access; try again.");
+  }
+  if (res.status === 401) refuse("GitHub no longer accepts your sign-in; sign out and sign in with GitHub again.");
+  if (res.status === 301) refuse("This repository has moved on GitHub; register it under its current URL.");
+  if (res.status === 404) refuse("GitHub does not show you this repository; check the URL.");
+  if (!res.ok) {
+    ctx.log.warn("push access check failed", { repo: repo.url, status: res.status });
+    refuse("GitHub could not be reached to check your push access; try again.");
+  }
+  const { permissions } = (await res.json().catch(() => ({}))) as { permissions?: { push?: unknown } };
+  if (permissions?.push !== true) {
+    refuse(
+      `You need push access to ${repo.github} on GitHub to register it. If it belongs to an organization that restricts OAuth apps, an owner can approve this instance's app, or an instance admin can register it for you.`,
+    );
+  }
+}
+
 async function registered(ctx: AppContext, repo: RepoRef): Promise<boolean> {
   return Boolean(await one<{ id: string }>(ctx.db, sql`SELECT id FROM projects WHERE repo_key = ${repo.key} AND status <> 'removed'`));
 }
@@ -63,6 +106,7 @@ async function suggestSlug(ctx: AppContext, name: string): Promise<string> {
 export async function previewProject(ctx: AppContext, who: Principal, repoUrl: string): Promise<Schemas["ProjectPreview"]> {
   const repo = repoRef(ctx, repoUrl);
   if (!(await canRegister(ctx, who, repo))) return { ok: false, errors: [NO_ACCESS] };
+  await requirePushAccess(ctx, who, repo);
   const ins = await inspectRepo(ctx.git, repo);
   const errors = [...ins.errors];
   if (await registered(ctx, repo)) errors.push("this repository is already registered on this instance");
@@ -132,6 +176,7 @@ async function applyManifests(ctx: AppContext, tx: Tx, projectId: number, v: Ver
 export async function createProject(ctx: AppContext, who: Principal, body: BodyOf<"createProject">): Promise<Schemas["Project"]> {
   const repo = repoRef(ctx, body.repo_url);
   if (!(await canRegister(ctx, who, repo))) throw new Problem("repo-unverifiable", NO_ACCESS, { errors: [{ path: "/repo_url", message: NO_ACCESS }] });
+  await requirePushAccess(ctx, who, repo);
   if (await registered(ctx, repo)) throw new Problem("repo-already-registered", "This repository is already registered on this instance.");
   const ins: Inspection = await inspectRepo(ctx.git, repo);
   const d = ins.descriptor;

@@ -36,6 +36,13 @@
       "when": 1794268154950,
       "tag": "0004_branch_read_at",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794469751882,
+      "tag": "0005_session_github_token",
+      "breakpoints": true
     }
   ]
 }

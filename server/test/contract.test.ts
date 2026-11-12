@@ -253,7 +253,8 @@ describe("every operation, validated against the document", () => {
       }
     }
     // dev login 404 needs a differently configured instance; covered in auth.test.ts.
-    expect(missing.sort()).toEqual(["authDev 404", "authGithubStart 404"]);
+    // The push-access 403 needs GitHub sign-in instead of dev login; covered in registration.test.ts.
+    expect(missing.sort()).toEqual(["authDev 404", "authGithubStart 404", "createProject 403", "previewProject 403"]);
     const undocumented = [...t.seen].filter((s) => {
       const [id, status] = s.split(" ") as [OperationId, string];
       return !(status in t.ctx.spec.operation(id).raw.responses);

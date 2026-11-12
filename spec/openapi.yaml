@@ -109,6 +109,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Project" }
         "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
 
@@ -134,6 +135,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProjectPreview" }
         "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
 
   /v1/projects/{slug}:
