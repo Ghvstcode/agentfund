@@ -63,7 +63,10 @@ function headTags(ctx: AppContext, instanceName: string, h: Head): string {
 }
 
 /** Single-segment UI routes with no sub-paths, and prefixes whose sub-paths belong to the UI (web/src/App.tsx). */
-const UI_EXACT = new Set(["donors", "settings", "maintain", "admin", "styleguide"]);
+const UI_EXACT = new Set(["donors", "settings", "maintain", "admin", "styleguide", "privacy", "terms"]);
+/** UI pages a crawler may index; the other app screens are real pages but `noindex`. */
+const UI_PUBLIC = new Set(["donors", "privacy", "terms"]);
+const LEGAL_TITLES: Record<string, string> = { privacy: "Privacy policy", terms: "Terms of use" };
 const UI_PREFIX = new Set(["maintain", "admin", "styleguide"]);
 const PROJECT_TABS = new Set(["activity", "donors", "audit"]);
 
@@ -88,7 +91,8 @@ async function headFor(ctx: AppContext, path: string): Promise<{ head: Head; ins
   if (!first) return { head: home, instanceName: instance.name, found: true };
   if ((segments.length === 1 && UI_EXACT.has(first)) || (segments.length > 1 && UI_PREFIX.has(first)) || (first === "auth" && second === "callback" && segments.length === 2)) {
     // App screens (settings, admin, …) are real pages but nothing a crawler should index.
-    return { head: { ...generic, noindex: first !== "donors" }, instanceName: instance.name, found: true };
+    const title = LEGAL_TITLES[first] ? `${LEGAL_TITLES[first]} · ${instance.name}` : generic.title;
+    return { head: { ...generic, title, noindex: !UI_PUBLIC.has(first) }, instanceName: instance.name, found: true };
   }
   if (first === "u") {
     if (segments.length !== 2 || !second || !/^[a-z0-9][a-z0-9-]{0,38}$/.test(second)) return missing;

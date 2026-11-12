@@ -165,12 +165,15 @@ describe("serving the built SPA", () => {
       expect(html).not.toContain("application/ld+json");
     }
     // Every route the UI has is 200.
-    for (const path of ["/", "/donors", "/maintain", "/maintain/new", "/settings", "/admin", "/admin/users", "/styleguide", "/styleguide/buttons", "/auth/callback", "/u/some-donor", "/gridrs", "/gridrs/activity", "/gridrs/donors", "/gridrs/audit", "/gridrs/tasks/0001-a"]) {
+    for (const path of ["/", "/donors", "/maintain", "/maintain/new", "/settings", "/admin", "/admin/users", "/styleguide", "/styleguide/buttons", "/privacy", "/terms", "/auth/callback", "/u/some-donor", "/gridrs", "/gridrs/activity", "/gridrs/donors", "/gridrs/audit", "/gridrs/tasks/0001-a"]) {
       expect((await w.request(path)).status, path).toBe(200);
     }
     // App screens are real pages but not for indexing; public pages are.
     expect(await (await w.request("/settings")).text()).toContain("noindex");
     expect(await (await w.request("/donors")).text()).not.toContain("noindex");
+    for (const path of ["/privacy", "/terms"]) expect(await (await w.request(path)).text(), path).not.toContain("noindex");
+    expect(await (await w.request("/privacy")).text()).toContain("<title>Privacy policy · ");
+    expect((await w.request("/privacy/extra")).status).toBe(404);
     // A project that is not public is a 404 to crawlers.
     const admin = await w.login("gridrs-owner");
     await w.call("adminUpdateProject", { token: admin, path: { slug: "gridrs" }, body: { status: "removed" } });
