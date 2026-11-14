@@ -154,7 +154,7 @@ describe("serving the built SPA", () => {
   });
 
   it("no soft 404s: unknown projects, donors, tasks and routes get the shell with status 404 and noindex", async () => {
-    for (const path of ["/nope", "/no-such-project/audit", "/u/nobody-here", "/u", "/u/some-donor/extra", "/gridrs/unknown-tab", "/gridrs/tasks", "/gridrs/tasks/0099-missing", "/gridrs/tasks/0001-a/more", "/some/spa/route", "/donors/extra", "/auth/nope", "/Not_A_Slug"]) {
+    for (const path of ["/nope", "/no-such-project/audit", "/u/nobody-here", "/u/ghost@peer.example", "/u", "/u/some-donor/extra", "/gridrs/unknown-tab", "/gridrs/tasks", "/gridrs/tasks/0099-missing", "/gridrs/tasks/0001-a/more", "/some/spa/route", "/donors/extra", "/auth/nope", "/Not_A_Slug"]) {
       const res = await w.request(path);
       expect(res.status, path).toBe(404);
       const html = await res.text();

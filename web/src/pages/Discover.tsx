@@ -1,11 +1,22 @@
 import { ArrowUpRight, FolderGit2, Search, SearchX } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { flatItems, type ProjectFilters, useMeta, useProjects, useStats } from '@/api/queries';
-import type { Project, Totals } from '@/api/types';
+import {
+  flatItems,
+  type ProjectFilters,
+  useFederatedProjects,
+  useFederationEnabled,
+  useMeta,
+  usePeers,
+  useProjects,
+  useStats,
+} from '@/api/queries';
+import type { FederatedProject, Project, Totals } from '@/api/types';
 import { Button, ButtonLink } from '@/components/Button';
 import { CommandLine } from '@/components/CommandLine';
 import { CopyButton } from '@/components/CopyButton';
+import { FederatedBackDialog } from '@/components/FederatedBackDialog';
+import { FederatedProjectRow, FederatedProjectRowSkeleton } from '@/components/FederatedProjectRow';
 import { SelectField } from '@/components/Field';
 import { TokenDot, type TokenState } from '@/components/Mark';
 import { Num } from '@/components/Num';
@@ -30,6 +41,7 @@ const TABS = [
 
 type Tab = (typeof TABS)[number]['value'];
 const PAGE_SIZE = 10;
+const FEDERATED_PAGE_SIZE = 6;
 const TAG_CHIPS = 10;
 
 function useFilters() {
@@ -206,6 +218,9 @@ function ProjectStatus({ project }: { project: Project }) {
 }
 
 const ROW_GRID = 'md:grid md:grid-cols-[2.5rem_minmax(0,1fr)_6.5rem_15rem_5rem_4.5rem_4.5rem] md:items-center md:gap-6';
+/** The same first four columns and the same total width, so the two lists line up; the last three differ. */
+const FEDERATED_ROW_GRID = 'md:grid md:grid-cols-[2.5rem_minmax(0,1fr)_6.5rem_15rem_4.25rem_3.25rem_6.5rem] md:items-center md:gap-6';
+const COLUMN_HEAD = 'hidden h-10 border-t border-b border-t-foreground text-[0.6875rem] font-medium tracking-[0.08em] text-muted-foreground uppercase md:grid';
 
 function ProjectRow({ project, rank }: { project: Project; rank: number }) {
   const { totals, token_goal: goal } = project;
@@ -305,7 +320,7 @@ function Projects() {
   }, [search, filters.q, set]);
 
   return (
-    <section id="projects" aria-labelledby="projects-title" className="container-page grid scroll-mt-20 pt-20 sm:pt-24">
+    <section id="projects" aria-labelledby="projects-title" className="container-page grid grid-cols-[minmax(0,1fr)] scroll-mt-20 pt-20 sm:pt-24">
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5 pb-5">
         <div className="grid gap-2">
           <h2 id="projects-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
@@ -337,7 +352,7 @@ function Projects() {
         onSubmit={(event) => event.preventDefault()}
         className="flex flex-wrap items-center justify-between gap-3 pb-5"
       >
-        <div role="group" aria-label="Tags" className="flex w-full min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none] sm:w-auto sm:flex-wrap sm:overflow-visible">
+        <div role="group" aria-label="Tags" className="flex w-full min-w-0 flex-wrap gap-1.5 sm:w-auto">
           <Chip selected={!filters.tag} onClick={() => set({ tag: null })}>
             All
           </Chip>
@@ -433,7 +448,7 @@ function Projects() {
         <>
           <div
             aria-hidden="true"
-            className={cn('hidden h-10 border-t border-b border-t-foreground text-[0.6875rem] font-medium tracking-[0.08em] text-muted-foreground uppercase md:grid', ROW_GRID)}
+            className={cn(COLUMN_HEAD, ROW_GRID)}
           >
             <span>#</span>
             <span>Project</span>
@@ -461,6 +476,106 @@ function Projects() {
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Projects hosted on peer instances, under the local list. Absent unless federation is on and
+ * at least one active peer has projects to list, so a fresh instance shows no empty block. The
+ * search box and the language filter of the list above apply here too (a tag is matched through
+ * the search, which covers tags); the ordering tabs do not, because peers rank and gate their
+ * own projects.
+ */
+function FederatedProjects() {
+  const { filters } = useFilters();
+  const enabled = useFederationEnabled();
+  const peers = usePeers();
+  const [peer, setPeer] = useState('');
+  const [backing, setBacking] = useState<FederatedProject | null>(null);
+  const sources = (peers.data?.items ?? []).filter((item) => item.status === 'active' && item.discover && item.projects > 0);
+  const selected = sources.some((item) => item.host === peer) ? peer : '';
+  const q = filters.q || filters.tag;
+  const projects = useFederatedProjects(
+    { q: q || undefined, language: filters.language || undefined, peer: selected || undefined, limit: FEDERATED_PAGE_SIZE },
+    enabled && sources.length > 0,
+  );
+  const items = flatItems(projects);
+  const where = selected || (sources.length === 1 ? (sources[0]?.host ?? 'the peer') : 'other instances');
+
+  if (!enabled || peers.isPending || (!peers.isError && sources.length === 0)) return null;
+
+  return (
+    <section id="other-instances" aria-labelledby="other-instances-title" className="container-page grid grid-cols-[minmax(0,1fr)] scroll-mt-20 pt-14">
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 pb-5">
+        <div className="grid min-w-0 gap-1.5">
+          <h2 id="other-instances-title" className="text-2xl font-semibold tracking-[-0.03em]">
+            On other instances
+          </h2>
+          <p className="max-w-[44rem] text-[0.9375rem] text-pretty text-muted-foreground">
+            Projects hosted by instances this one peers with. A row opens on its home instance; the figures are that
+            instance's own, as of its last sync. The search and language filter above apply.
+          </p>
+        </div>
+        {sources.length > 1 && (
+          <SelectField
+            label="Instance"
+            hideLabel
+            value={selected}
+            onChange={(event) => setPeer(event.target.value)}
+            className="h-8 w-full sm:w-auto sm:min-w-52 [&_select]:rounded-none"
+          >
+            <option value="">Any instance</option>
+            {sources.map((item) => (
+              <option key={item.host} value={item.host}>
+                {item.host}
+              </option>
+            ))}
+          </SelectField>
+        )}
+      </div>
+      {peers.isError ? (
+        <ErrorState title="Couldn't load projects on other instances" error={peers.error} onRetry={() => void peers.refetch()} />
+      ) : projects.isPending ? (
+        <Loading label="projects on other instances" className="border-t border-t-foreground">
+          {Array.from({ length: 3 }, (_, index) => (
+            <FederatedProjectRowSkeleton key={index} />
+          ))}
+        </Loading>
+      ) : projects.isError ? (
+        <ErrorState title="Couldn't load projects on other instances" error={projects.error} onRetry={() => void projects.refetch()} />
+      ) : items.length === 0 ? (
+        <p className="border-t border-b border-t-foreground py-5 text-sm text-muted-foreground">
+          {q ? `No project on ${where} matches “${q}”${filters.language ? ` in ${filters.language}` : ''}.` : `No project on ${where} matches these filters.`}
+        </p>
+      ) : (
+        <>
+          <div aria-hidden="true" className={cn(COLUMN_HEAD, FEDERATED_ROW_GRID)}>
+            <span />
+            <span>Project · instance</span>
+            <span>Language</span>
+            <span>Delivered of goal</span>
+            <span className="text-right">Open</span>
+            <span className="text-right">Donors</span>
+            <span />
+          </div>
+          <ul aria-label="Projects on other instances" className="border-t border-t-foreground md:border-t-0">
+            {items.map((project) => (
+              <FederatedProjectRow key={project.id} project={project} onBack={() => setBacking(project)} className={FEDERATED_ROW_GRID} />
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 text-[0.8125rem] text-muted-foreground">
+            <span>Not counted in this instance's totals. Tokens delivered there are ranked there.</span>
+            <LoadMore
+              hasMore={projects.hasNextPage}
+              loading={projects.isFetchingNextPage}
+              onLoad={() => void projects.fetchNextPage()}
+              label="More from other instances"
+            />
+          </div>
+        </>
+      )}
+      {backing && <FederatedBackDialog project={backing} onClose={() => setBacking(null)} />}
     </section>
   );
 }
@@ -674,6 +789,7 @@ export default function Discover() {
       <Hero totals={totals} live={live.status === 'live'} />
       <StatStrip totals={totals} />
       <Projects />
+      <FederatedProjects />
       <Install />
       <ForTeams />
       <States />

@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:cr
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { AppContext } from "../context.js";
 import { iso, isoOrNull, rows, tsParam, type Queryable } from "../db/client.js";
-import { apiKeys, oauthStates, sessions, users } from "../db/schema.js";
+import { apiKeys, oauthStates, peers, sessions, users } from "../db/schema.js";
 import { isMemberLogin } from "./members.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { newApiKey, newId, newSecret, newSessionToken, sha256Hex } from "../lib/ids.js";
@@ -23,8 +23,12 @@ export interface Principal {
 
 export const userGlobalId = (ctx: AppContext, handle: string): string => `${ctx.config.baseUrl}/u/${handle}`;
 
-export const toUserRef = (ctx: AppContext, u: { handle: string; avatarUrl?: string | null; avatar_url?: string | null }): Schemas["UserRef"] => ({
-  id: userGlobalId(ctx, u.handle),
+/** `id` is rooted at the user's home instance: this one, or the peer a federated donor came from. */
+export const toUserRef = (
+  ctx: AppContext,
+  u: { handle: string; avatarUrl?: string | null; avatar_url?: string | null; homeId?: string | null; home_id?: string | null },
+): Schemas["UserRef"] => ({
+  id: u.homeId ?? u.home_id ?? userGlobalId(ctx, u.handle),
   handle: u.handle,
   avatar_url: u.avatarUrl ?? u.avatar_url ?? null,
 });
@@ -38,6 +42,17 @@ export const toMe = (ctx: AppContext, u: UserRow): Schemas["Me"] => ({
   created_at: iso(u.createdAt),
 });
 
+/**
+ * A federated donor's credentials work only while their home instance is a peer that is
+ * active and trusted for identities: pausing or removing the peer cuts its donors off at once.
+ */
+async function homeStillTrusted(ctx: AppContext, user: UserRow): Promise<boolean> {
+  if (user.homeId === null) return true;
+  if (!ctx.config.federation || user.peerId === null) return false;
+  const [peer] = await ctx.db.select({ status: peers.status, acceptIdentities: peers.acceptIdentities }).from(peers).where(eq(peers.id, user.peerId));
+  return Boolean(peer && peer.status === "active" && peer.acceptIdentities);
+}
+
 /** Resolves a bearer token to a principal, or null. Tokens are compared by SHA-256 hash only. */
 export async function authenticate(ctx: AppContext, token: string): Promise<Principal | null> {
   const now = ctx.clock.now();
@@ -49,6 +64,7 @@ export async function authenticate(ctx: AppContext, token: string): Promise<Prin
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(and(eq(sessions.tokenHash, hash), isNull(sessions.revokedAt)));
     if (!row || row.session.expiresAt.getTime() <= now.getTime()) return null;
+    if (!(await homeStillTrusted(ctx, row.user))) return null;
     const sealed = row.session.githubTokenSealed;
     return { user: row.user, kind: "session", sessionId: row.session.id, githubToken: () => (sealed ? openGithubToken(token, sealed) : null) };
   }
@@ -59,6 +75,7 @@ export async function authenticate(ctx: AppContext, token: string): Promise<Prin
       .innerJoin(users, eq(users.id, apiKeys.userId))
       .where(and(eq(apiKeys.keyHash, hash), isNull(apiKeys.revokedAt)));
     if (!row) return null;
+    if (!(await homeStillTrusted(ctx, row.user))) return null;
     if (!row.key.lastUsedAt || now.getTime() - row.key.lastUsedAt.getTime() > 60_000) {
       await ctx.db.update(apiKeys).set({ lastUsedAt: now }).where(eq(apiKeys.id, row.key.id));
     }
@@ -110,10 +127,10 @@ export async function revokeSession(ctx: AppContext, sessionId: number): Promise
   await ctx.db.update(sessions).set({ revokedAt: ctx.clock.now() }).where(eq(sessions.id, sessionId));
 }
 
-/** Role a user must hold given instance config: configured admin handles, else the first user. */
+/** Role a user must hold given instance config: configured admin handles, else the first local user. */
 async function bootstrapRole(ctx: AppContext, q: Queryable, handle: string): Promise<Role | null> {
   if (ctx.config.adminHandles.length > 0) return ctx.config.adminHandles.includes(handle) ? "admin" : null;
-  const [{ n } = { n: "0" }] = await rows<{ n: string }>(q, sql`SELECT count(*)::text AS n FROM users`);
+  const [{ n } = { n: "0" }] = await rows<{ n: string }>(q, sql`SELECT count(*)::text AS n FROM users WHERE home_id IS NULL`);
   return n === "0" ? "admin" : null;
 }
 

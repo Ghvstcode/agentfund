@@ -32,7 +32,10 @@ const PAGES = [
   ['project-back-dialog', '/gridrs', { auth: true, act: (page) => page.getByRole('button', { name: 'Back this project' }).click() }],
   ['project-back-dialog-behaviour', '/gridrs', { auth: true, act: async (page) => { await page.getByRole('button', { name: 'Back this project' }).click(); await page.getByRole('heading', { name: 'It never' }).scrollIntoViewIfNeeded(); } }],
   ['command-palette', '/', { act: async (page) => { await page.keyboard.press('Control+k'); await page.getByPlaceholder(/Jump to/).waitFor(); } }],
+  ['federated-back-dialog', '/', { auth: true, act: (page) => page.getByRole('button', { name: /How to back fjord-db/ }).click() }],
+  ['federated-back-dialog-account-needed', '/', { act: (page) => page.getByRole('button', { name: /How to back openspectra/ }).click() }],
   ['donor', '/u/ada'],
+  ['donor-remote', `/u/${encodeURIComponent('jun@lab.hackerspace.example:8443')}`],
   ['leaderboard', '/donors'],
   ['maintain', '/maintain', { auth: true }],
   ['maintain-webhook', '/maintain', { auth: true, act: (page) => page.getByRole('button', { name: 'CI webhook' }).first().click() }],
@@ -44,6 +47,8 @@ const PAGES = [
   ['admin-users', '/admin', { auth: true }],
   ['admin-projects', '/admin/projects', { auth: true }],
   ['admin-instance', '/admin/instance', { auth: true }],
+  ['admin-federation', '/admin/federation', { auth: true }],
+  ['admin-federation-add-peer-dialog', '/admin/federation', { auth: true, act: (page) => previewPeer(page, 'https://fund.rustbridge.example') }],
   ['styleguide', '/styleguide'],
   ['not-found', '/no/such/page'],
   ['project-not-found', '/no-such-project'],
@@ -62,6 +67,13 @@ async function reviewRepository(page, url) {
   await page.getByLabel('Repository URL').fill(url);
   await page.getByRole('button', { name: 'Check repository' }).click();
   await page.getByRole('heading', { name: /^Review/ }).waitFor();
+}
+
+async function previewPeer(page, url) {
+  await page.getByRole('button', { name: 'Add peer' }).click();
+  await page.getByLabel('Instance URL').fill(url);
+  await page.getByRole('button', { name: 'Look up instance' }).click();
+  await page.getByRole('heading', { name: 'Compare its key fingerprint' }).waitFor();
 }
 
 async function createKey(page) {

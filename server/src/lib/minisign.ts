@@ -1,5 +1,5 @@
 /**
- * Minisign verification (prehashed variant only), pure and dependency-free.
+ * Minisign verification and signing (prehashed variant only), pure and dependency-free.
  *
  * Public key:  base64( "Ed" || key_id[8] || ed25519_pk[32] )                       (42 bytes)
  * Signature file (4 lines):
@@ -9,7 +9,7 @@
  *   base64( global_sig[64] )                        Ed25519 over sig[64] || trusted comment bytes
  * Prehashed: sig = Ed25519( BLAKE2b-512(message) ).
  */
-import { createHash, createPublicKey, generateKeyPairSync, randomBytes, verify as edVerify, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign, verify as edVerify, type KeyObject } from "node:crypto";
 
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 export const PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
@@ -148,7 +148,7 @@ export function verifyWithRotations(message: Uint8Array, signatureText: string, 
   return resolved;
 }
 
-/* ---- key generation: the instance identity (signing lives in the test helpers only) ---- */
+/* ---- the instance identity: key generation and signing ---- */
 
 export interface KeyPair {
   publicKey: string;
@@ -163,4 +163,17 @@ export function generateKeyPair(): KeyPair {
   const seed = Buffer.from(privateKey.export({ format: "der", type: "pkcs8" })).subarray(PKCS8_PREFIX.length);
   const keyId = randomBytes(8);
   return { publicKey: encodePublicKey(keyId, pub), keyId, secretSeed: Buffer.from(seed) };
+}
+
+/**
+ * A detached prehashed minisign signature, byte-compatible with `minisign -S`. The server
+ * signs with exactly one key, its own, and only statements about itself (protocol.md §14).
+ */
+export function sign(message: Uint8Array, pair: Pick<KeyPair, "keyId" | "secretSeed">, trustedComment: string, untrustedComment = "signature from agentfund"): string {
+  if (/[\r\n]/.test(trustedComment) || /[\r\n]/.test(untrustedComment)) throw new MinisignError("comments must be single lines");
+  const key = createPrivateKey({ key: Buffer.concat([PKCS8_PREFIX, pair.secretSeed]), format: "der", type: "pkcs8" });
+  const signature = edSign(null, createHash("blake2b512").update(message).digest(), key);
+  const global = edSign(null, Buffer.concat([signature, Buffer.from(trustedComment, "utf8")]), key);
+  const sigLine = Buffer.concat([Buffer.from("ED"), pair.keyId, signature]).toString("base64");
+  return `untrusted comment: ${untrustedComment}\n${sigLine}\ntrusted comment: ${trustedComment}\n${global.toString("base64")}\n`;
 }

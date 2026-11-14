@@ -23,6 +23,7 @@ import { useSession } from '@/hooks/useSession';
 import { loginCommand, loginFromStdinCommand } from '@/lib/commands';
 import { manifestId } from '@/lib/events';
 import { formatDate, humanize } from '@/lib/format';
+import { profilePath } from '@/lib/handles';
 
 const COLUMN = 'h-9 text-xs font-medium text-muted-foreground';
 
@@ -81,7 +82,7 @@ function Account() {
             <Badge variant="outline">{humanize(user.role)}</Badge>
           </p>
           <p className="text-sm text-muted-foreground">
-            <Link to={`/u/${user.handle}`} className="link">
+            <Link to={profilePath(user.handle)} className="link">
               Your public donor profile
             </Link>
           </p>

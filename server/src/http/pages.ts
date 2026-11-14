@@ -95,7 +95,7 @@ async function headFor(ctx: AppContext, path: string): Promise<{ head: Head; ins
     return { head: { ...generic, title, noindex: !UI_PUBLIC.has(first) }, instanceName: instance.name, found: true };
   }
   if (first === "u") {
-    if (segments.length !== 2 || !second || !/^[a-z0-9][a-z0-9-]{0,38}$/.test(second)) return missing;
+    if (segments.length !== 2 || !second || !/^[a-z0-9][a-z0-9-]{0,38}(@[a-z0-9.-]{1,253}(:[0-9]{1,5})?)?$/.test(second)) return missing;
     const [user] = await rows<{ handle: string; avatar_url: string | null }>(ctx.db, sql`SELECT handle, avatar_url FROM users WHERE handle = ${second} AND NOT banned`);
     if (!user) return missing;
     const description = `${user.handle}'s delivered and merged agent work on ${instance.name}.`;
@@ -298,7 +298,9 @@ export function registerPages(app: Hono, ctx: AppContext): void {
       }
     }
     // Anything that looks like a file but is not there is a real 404, not the app shell.
-    if (extname(path) && !path.endsWith(".html")) return c.text("Not found", 404);
+    // A federated donor's profile, /u/alice@fund.example, ends in a host name, not a file extension.
+    const profile = /^\/u\/[^/]+@[^/]+$/.test(path);
+    if (extname(path) && !path.endsWith(".html") && !profile) return c.text("Not found", 404);
     const { head, instanceName, found } = await headFor(ctx, path.replace(/\/+$/, "") || "/");
     const tags = headTags(ctx, instanceName, head);
     const html = readShell();

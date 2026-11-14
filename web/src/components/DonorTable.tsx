@@ -34,7 +34,7 @@ export function DonorTable({ donors, label, startRank = 1 }: DonorTableProps) {
           <TableRow key={donor.handle} className="h-16 hover:bg-muted/40">
             <TableCell className="num pl-0 text-[0.8125rem] text-muted-foreground">{String(startRank + index).padStart(2, '0')}</TableCell>
             <TableHead scope="row" className="h-auto py-3 font-normal text-foreground">
-              <UserLink handle={donor.handle} avatar className="gap-3 text-[0.9375rem] font-semibold [&>span:first-child]:size-8 [&>span:first-child]:text-xs" />
+              <UserLink handle={donor.handle} avatar stackOnNarrow className="gap-3 text-[0.9375rem] font-semibold [&>span:first-child]:size-8 [&>span:first-child]:text-xs" />
             </TableHead>
             <TableCell className="text-right">
               <Num value={donor.delivered} className="text-[0.875rem] font-medium text-live" />

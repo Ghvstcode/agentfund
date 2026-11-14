@@ -1,4 +1,4 @@
-import { Download, FolderGit2 } from 'lucide-react';
+import { ArrowUpRight, Download, FolderGit2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '@/api/client';
@@ -6,15 +6,19 @@ import { useDonor, useMeta } from '@/api/queries';
 import type { Donor, LedgerEntry } from '@/api/types';
 import { Button } from '@/components/Button';
 import { CopyButton } from '@/components/CopyButton';
+import { Handle } from '@/components/Handle';
 import { HandleAvatar } from '@/components/HandleAvatar';
+import { InstanceBadge } from '@/components/InstanceBadge';
 import { Mark, TokenDot } from '@/components/Mark';
 import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, Skeleton, SkeletonRows } from '@/components/States';
 import { Time } from '@/components/Time';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { APP_NAME } from '@/config';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { manifestId } from '@/lib/events';
 import { formatCompact, formatDate, formatExact } from '@/lib/format';
+import { profilePath, splitHandle } from '@/lib/handles';
 import { pullRequestLabel } from '@/lib/prs';
 import { dailySeries } from '@/lib/series';
 import { cn } from '@/lib/utils';
@@ -76,7 +80,11 @@ function ShareCard({ donor, instance, cardRef }: { donor: Donor; instance: strin
           <span className="flex min-w-0 items-center gap-3">
             <HandleAvatar handle={donor.handle} className="size-[max(2.25rem,3.2cqw)] bg-white/10 text-sm text-white" />
             <span className="grid min-w-0">
-              <span className="truncate text-[clamp(1rem,1.6cqw,1.375rem)] leading-tight font-semibold tracking-[-0.02em]">{donor.handle}</span>
+              <Handle
+                handle={donor.handle}
+                className="truncate text-[clamp(1rem,1.6cqw,1.375rem)] leading-tight font-semibold tracking-[-0.02em]"
+                hostClassName="max-w-none text-zinc-400 sm:max-w-none"
+              />
               <span className="num truncate text-xs text-zinc-400">{donor.rank ? `#${donor.rank} on ${instance}` : instance}</span>
             </span>
           </span>
@@ -128,7 +136,7 @@ function useDownloadCard(cardRef: React.RefObject<HTMLElement | null>, handle: s
       const { toPng } = await import('html-to-image');
       const url = await toPng(cardRef.current, { pixelRatio: 2, cacheBust: true });
       const link = document.createElement('a');
-      link.download = `${handle}-agentfund.png`;
+      link.download = `${handle.replace(/[^\w.-]+/g, '_')}-agentfund.png`;
       link.href = url;
       link.click();
       setState('idle');
@@ -139,19 +147,118 @@ function useDownloadCard(cardRef: React.RefObject<HTMLElement | null>, handle: s
   return { state, download };
 }
 
+const SECTION_HEAD = 'flex flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-b-foreground pb-3.5';
+const COLUMN = 'h-10 text-[0.6875rem] font-medium tracking-[0.08em] text-muted-foreground uppercase';
+
+/**
+ * For a donor whose account lives on a peer: say so, and link to the profile at home. Their
+ * `id` is that profile's URL.
+ */
+function HomeInstance({ donor, host }: { donor: Donor; host: string }) {
+  const { name } = splitHandle(donor.handle);
+  const home = /^https?:/.test(donor.id) ? donor.id : null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2.5 border px-4 py-3.5 text-sm">
+      <p className="min-w-0 leading-relaxed text-pretty text-muted-foreground">
+        <InstanceBadge instance={{ host, name: host, base_url: home ? new URL(home).origin : host }} className="mr-2 align-middle" />
+        hosts {name}'s account and vouches for it. This page shows only what {name} did here.
+      </p>
+      {home && (
+        <a href={home} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 font-medium whitespace-nowrap hover:underline">
+          Profile at home
+          <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          <span className="sr-only">
+            ({name} on {host}, opens in a new tab)
+          </span>
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the donor did on peer instances, as each peer reports it. Set apart from everything
+ * else on purpose: no green (green is a token this instance counted), and the heading says it.
+ * These figures are not this instance's evidence and never enter its totals or its ranking.
+ */
+function Elsewhere({ donor }: { donor: Donor }) {
+  const standings = donor.elsewhere ?? [];
+  if (standings.length === 0) return null;
+  return (
+    <section aria-labelledby="profile-elsewhere" className="grid min-w-0 content-start">
+      <div className={SECTION_HEAD}>
+        <h2 id="profile-elsewhere" className="text-2xl font-semibold tracking-[-0.03em]">
+          On other instances
+        </h2>
+        <p className="text-xs text-muted-foreground">Not counted in the totals or rank here</p>
+      </div>
+      <p className="max-w-[40rem] py-3.5 text-[0.8125rem] text-pretty text-muted-foreground">
+        Work {donor.handle} did on peer instances with this account. Each row is that instance's own report; this
+        instance did not verify it.
+      </p>
+      <Table aria-label={`What ${donor.handle} did on other instances`} className="border-t">
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={cn(COLUMN, 'pl-0')}>Instance</TableHead>
+            <TableHead className={cn(COLUMN, 'text-right')}>Delivered</TableHead>
+            <TableHead className={cn(COLUMN, 'text-right')}>Merged</TableHead>
+            <TableHead className={cn(COLUMN, 'pr-0 text-right')}>Tasks</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody className="[&_tr:last-child]:border-b">
+          {standings.map((standing) => (
+            <TableRow key={standing.instance.host} className="hover:bg-muted/40">
+              {/* The host is the point of this row, so it wraps on a phone instead of being cut. */}
+              <TableHead scope="row" className="h-auto w-full py-3.5 pl-0 font-normal whitespace-normal text-foreground">
+                <a
+                  href={standing.profile_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex max-w-full items-center gap-1 text-[0.9375rem] font-semibold hover:underline"
+                >
+                  <span>{standing.instance.name}</span>
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+                  <span className="sr-only">(profile on {standing.instance.host}, opens in a new tab)</span>
+                </a>
+                <span className="block text-xs text-muted-foreground">
+                  as reported by <span className="num [overflow-wrap:anywhere]">{standing.instance.host}</span> · <Time value={standing.fetched_at} />
+                </span>
+              </TableHead>
+              <TableCell className="text-right align-top">
+                <Num value={standing.delivered} className="text-[0.875rem] font-medium" />
+              </TableCell>
+              <TableCell className="text-right align-top text-muted-foreground">
+                <Num value={standing.merged} className="text-[0.875rem]" />
+              </TableCell>
+              <TableCell className="pr-0 text-right align-top text-muted-foreground">
+                <span title={`${standing.tasks_delivered} delivered, ${standing.tasks_merged} merged`}>
+                  <Num value={standing.tasks_delivered} unit="" className="text-[0.875rem]" />
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </section>
+  );
+}
+
 function ProfileBody({ donor }: { donor: Donor }) {
   const meta = useMeta();
   const cardRef = useRef<HTMLElement>(null);
   const { state, download } = useDownloadCard(cardRef, donor.handle);
   const total = Math.max(1, donor.delivered);
-  const sectionHead = 'flex items-end justify-between gap-3 border-b border-b-foreground pb-3.5';
+  const home = splitHandle(donor.handle).host;
+  // A remote donor's `id` is their profile at home; the link to copy is this page.
+  const link = home && meta.data ? `${meta.data.base_url.replace(/\/+$/, '')}${profilePath(donor.handle)}` : home ? window.location.href : donor.id;
 
   return (
     <>
       <ShareCard donor={donor} instance={meta.data?.name ?? APP_NAME} cardRef={cardRef} />
+      {home && <HomeInstance donor={donor} host={home} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="num text-xs text-muted-foreground">
-          joined {formatDate(donor.joined_at)}
+          {home ? 'here since' : 'joined'} {formatDate(donor.joined_at)}
           {donor.github_login && (
             <>
               {' · '}
@@ -171,13 +278,14 @@ function ProfileBody({ donor }: { donor: Donor }) {
             <Download strokeWidth={1.5} aria-hidden="true" />
             Download PNG
           </Button>
-          <CopyButton text={donor.id} label="the link to this profile" caption="Copy link" className="h-9 rounded-none px-3" />
+          <CopyButton text={link} label="the link to this profile" caption="Copy link" className="h-9 rounded-none px-3" />
         </div>
       </div>
 
       <div className="grid gap-12 pt-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] lg:gap-14">
+        <div className="grid min-w-0 content-start gap-12">
         <section aria-labelledby="profile-projects" className="grid min-w-0 content-start">
-          <div className={sectionHead}>
+          <div className={SECTION_HEAD}>
             <h2 id="profile-projects" className="text-2xl font-semibold tracking-[-0.03em]">
               Projects backed
             </h2>
@@ -185,7 +293,11 @@ function ProfileBody({ donor }: { donor: Donor }) {
           </div>
           {donor.projects.length === 0 ? (
             <EmptyState className="mt-4" icon={FolderGit2} title="No projects backed yet" action={<Button asChild variant="primary"><Link to="/">Find a project</Link></Button>}>
-              <p>{donor.handle} has an account here but has not pledged or delivered anything so far.</p>
+              <p>
+                {home
+                  ? `${donor.handle} can work here through ${home} but has not pledged or delivered anything so far.`
+                  : `${donor.handle} has an account here but has not pledged or delivered anything so far.`}
+              </p>
             </EmptyState>
           ) : (
             <ul aria-label={`Projects backed by ${donor.handle}`}>
@@ -214,9 +326,11 @@ function ProfileBody({ donor }: { donor: Donor }) {
             </ul>
           )}
         </section>
+        <Elsewhere donor={donor} />
+        </div>
 
         <section aria-labelledby="profile-recent" className="grid min-w-0 content-start">
-          <div className={sectionHead}>
+          <div className={SECTION_HEAD}>
             <h2 id="profile-recent" className="text-2xl font-semibold tracking-[-0.03em]">
               Recent work
             </h2>
@@ -290,7 +404,7 @@ export default function DonorProfile() {
         <Link to="/donors" className="hover:text-foreground">
           Leaderboard
         </Link>{' '}
-        / <span className="text-foreground">{handle}</span>
+        / <Handle handle={handle} className="align-bottom text-foreground" hostClassName="max-w-40 sm:max-w-none" />
       </p>
       <h1 className="sr-only">
         {handle}: {donor.data ? `${formatCompact(donor.data.delivered)} tokens delivered` : 'donor profile'}

@@ -33,6 +33,7 @@ func signalContext() (context.Context, context.CancelFunc) {
 
 func loginCmd(e *env) *cobra.Command {
 	var keyStdin bool
+	var via string
 	cmd := &cobra.Command{
 		Use:   "login <server-url>",
 		Short: "Store a server API key (af_…) after checking it",
@@ -40,13 +41,29 @@ func loginCmd(e *env) *cobra.Command {
 with GET /v1/me and store it in credentials.yaml (mode 0600), keyed by server
 URL. With --key-stdin the key is read from standard input without a prompt.
 
+With --via <home-server-url> no account on the server is needed: the server
+you are already logged in to (your home) signs a short-lived statement of who
+you are, the target server exchanges it for an API key of its own, and that
+key is stored like any other. It works when both servers have federation on
+and the target's admin has peered with your home server and accepts its
+identities. There you appear as <handle>@<home host>. Your home API key is
+sent only to your home server.
+
 This is the key for the ` + app.AppName + ` server only. Credentials for the coding
 agent are never stored by this tool.`,
+		Example: "  " + app.BinaryName + " login https://fund.example\n" +
+			"  " + app.BinaryName + " login https://other.example --via https://fund.example",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			server, err := config.NormalizeServer(args[0])
 			if err != nil {
 				return exitWith(ExitUsage, "%v", err)
+			}
+			if cmd.Flags().Changed("via") {
+				if keyStdin {
+					return exitWith(ExitUsage, "--via and --key-stdin cannot be combined: a federated login reads no key")
+				}
+				return loginVia(cmd.Context(), e, server, via)
 			}
 			var key string
 			if keyStdin {
@@ -84,7 +101,83 @@ agent are never stored by this tool.`,
 		},
 	}
 	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read the API key from standard input")
+	cmd.Flags().StringVar(&via, "via", "", "log in with your account on this home server (federated login) instead of an API key")
 	return cmd
+}
+
+// loginVia is the federated login: the home server signs an identity
+// assertion for the target, the target exchanges it for an API key of its own.
+func loginVia(ctx context.Context, e *env, server, via string) error {
+	home, err := config.NormalizeServer(via)
+	if err != nil {
+		return exitWith(ExitUsage, "--via: %v", err)
+	}
+	if home == server {
+		return exitWith(ExitUsage, "--via must name a different server than the one you log in to (%s)", server)
+	}
+	creds, err := config.LoadCredentials()
+	if err != nil {
+		return err
+	}
+	homeKey := creds.Servers[home].APIKey
+	if homeKey == "" {
+		return fmt.Errorf("no stored API key for %s: run `%s login %s` first, then repeat this command", home, app.BinaryName, home)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	homeClient, target := api.New(home, homeKey), api.New(server, "")
+	for _, c := range []*api.Client{homeClient, target} {
+		meta, err := c.Negotiate(ctx, spec.SpecVersion)
+		if err != nil {
+			return err
+		}
+		if !meta.Federation() {
+			return federationOff(c.BaseURL, server)
+		}
+	}
+	as, err := homeClient.CreateIdentityAssertion(ctx, server)
+	switch {
+	case api.IsCode(err, api.CodeUnauthorized):
+		return fmt.Errorf("%s did not accept the stored key: run `%s login %s` again: %w", home, app.BinaryName, home, err)
+	case api.IsCode(err, api.CodeForbidden):
+		return fmt.Errorf("your account on %s is itself a federated one and cannot vouch for you elsewhere; pass the server your account was created on to --via: %w", home, err)
+	case api.IsCode(err, api.CodeNotFound):
+		return federationOff(home, server)
+	case err != nil:
+		return fmt.Errorf("%s did not issue an identity assertion: %w", home, err)
+	}
+	host, _ := os.Hostname()
+	label := strings.TrimSpace(app.BinaryName + " worker " + host)
+	if len(label) > 80 {
+		label = label[:80]
+	}
+	auth, err := target.AuthFederated(ctx, as.Assertion, label)
+	switch {
+	case api.IsCode(err, api.CodePeerNotTrusted):
+		return fmt.Errorf("%s does not accept identities from %s. Ask its admin to peer with %s and turn on 'accept identities', or create an account there and use `%s login %s`",
+			server, home, home, app.BinaryName, server)
+	case api.IsCode(err, api.CodeAssertionInvalid):
+		return fmt.Errorf("%s rejected the identity assertion from %s (expired, already used, or the signature does not match the key it pinned for %s). "+
+			"Try again; if it keeps failing, check this machine's clock and ask the admin of %s to re-sync the peer %s: %w", server, home, home, server, home, err)
+	case api.IsCode(err, api.CodeNotFound):
+		return federationOff(server, server)
+	case err != nil:
+		return fmt.Errorf("%s did not accept the identity assertion: %w", server, err)
+	}
+	if !strings.HasPrefix(auth.Key, "af_") || strings.ContainsAny(auth.Key, " \t\r\n") {
+		return fmt.Errorf("%s answered without a usable API key", server)
+	}
+	creds.Servers[server] = config.ServerCredential{APIKey: auth.Key}
+	if err := creds.Save(); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.out, "logged in to %s as %s (%s) via %s; key stored in %s\n", server, auth.User.Handle, auth.User.Role, home, config.CredentialsPath())
+	return nil
+}
+
+// federationOff explains that instance (the home or the target server) does not federate.
+func federationOff(instance, server string) error {
+	return fmt.Errorf("%s has federation turned off, so --via cannot be used. Create an account on %s and use `%s login %s`", instance, server, app.BinaryName, server)
 }
 
 // readAt reads a regular file at a commit by tree lookup.

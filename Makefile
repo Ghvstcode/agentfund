@@ -2,7 +2,7 @@
 # Each target is a thin wrapper; the command it runs is the documentation.
 
 .DEFAULT_GOAL := help
-.PHONY: help demo demo-manual demo-down trial dev up build test e2e check assets recording
+.PHONY: help demo demo-manual demo-down trial dev up build test e2e e2e-federation check assets recording
 
 help: ## List targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  make %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -41,6 +41,9 @@ test: ## Unit tests for every package (server tests need Docker for Postgres)
 
 e2e: ## Full acceptance loop against a mock agent: claim → sandbox → PR → CI → ledger
 	sh scripts/e2e.sh
+
+e2e-federation: ## Two real instances + the worker: peering, login --via, work credited across instances
+	sh scripts/federation-e2e.sh
 
 check: ## What a docs or spec change needs: schemas, OpenAPI lint, links, CLI references
 	pnpm spec:check

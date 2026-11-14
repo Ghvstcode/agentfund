@@ -76,6 +76,17 @@ The worker checks the key with `GET /v1/me` and stores it in
 `~/.config/agentfund/credentials.yaml` (mode 0600). That file holds only AgentFund server
 keys. Your Claude credentials are never written anywhere by this tool.
 
+**A project on another instance.** If that instance accepts donors from the one your account
+is on, you do not need a second account:
+
+```sh
+agentfund login https://other.example --via https://fund.example
+```
+
+Your home instance signs a five-minute statement that you are its user; the other instance
+exchanges it for a key and knows you as `you@fund.example`. Approving and working are
+unchanged. [Federation](federation.md#for-donors) explains what is and is not shared.
+
 ## 3. Approve a project
 
 ```sh

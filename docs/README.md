@@ -8,7 +8,7 @@ Pick the line that describes you. Each path is in reading order and none is long
 | **Understand it** | [Concepts](concepts.md), then [Security](SECURITY.md) |
 | **Back a project** with your tokens | [Quickstart](quickstart.md) → [Donor guide](donors.md) → [Security](SECURITY.md) |
 | **Fund your project** this way | [Quickstart](quickstart.md) → [Maintainer guide](maintainers.md) → [`examples/hello-project`](../examples/hello-project/) |
-| **Run an instance** | [Self-hosting](self-hosting.md) → [Security](SECURITY.md) |
+| **Run an instance** | [Self-hosting](self-hosting.md) → [Security](SECURITY.md) → [Federation](federation.md) |
 | **Run one inside your company** | [For organisations](for-organizations.md) → [Self-hosting](self-hosting.md) |
 | **Build a compatible worker, server or UI** | [`spec/manifest.md`](../spec/manifest.md) → [`spec/protocol.md`](../spec/protocol.md) → [`spec/openapi.yaml`](../spec/openapi.yaml) |
 | **Change AgentFund itself** | [CONTRIBUTING](../CONTRIBUTING.md) → the README of the package you are touching |
@@ -24,6 +24,7 @@ Pick the line that describes you. Each path is in reading order and none is long
 | [Maintainer guide](maintainers.md) | Decomposing a project into tasks, signing, keys, CI hardening, reviewing | reference |
 | [Self-hosting](self-hosting.md) | `docker compose`, configuration, GitHub login, CI confirmation, backups | reference |
 | [For organisations](for-organizations.md) | Running a private instance for a company or community: settings, networking, plan terms, limits | 5 min |
+| [Federation](federation.md) | Peering instances: discovery, working elsewhere under your home identity, what a peer can and cannot do | 5 min |
 | [Security](SECURITY.md) | The threat model, the honest limitations, how to report a vulnerability | 5 min |
 | [FAQ](faq.md) | Plans and terms, cost, safety, fake numbers, failure, naming | 5 min |
 | [Decisions](decisions.md) | The defaults we picked where the design left a choice, and how to change each | 3 min |
@@ -38,7 +39,9 @@ Package READMEs: [`worker/`](../worker/README.md) (the CLI), [`server/`](../serv
 | --- | --- |
 | **Backer**, **donor** | The same person: someone who runs the worker. The README says backer; the CLI, the API and the guides say donor. |
 | **Maintainer** | Whoever holds a project's signing key. |
-| **Instance** | One deployment of the server. Anyone can run one; they do not talk to each other yet. |
+| **Instance** | One deployment of the server. Anyone can run one. |
+| **Peer** | Another instance an admin chose to federate with, with its key pinned. |
+| **Home** | The instance a donor's account lives on. Elsewhere they appear as `handle@home-host`. |
 | **Manifest** | One task, as a YAML file under `tasks/` in the project's repository. |
 | **Lock** | `tasks/MANIFEST.lock`: the SHA-256 of every manifest. The maintainer signs this one file. |
 | **Approve**, **pin** | A donor reviewing a project once and recording its key, commit and lock hash locally. |

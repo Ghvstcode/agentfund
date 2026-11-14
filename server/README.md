@@ -42,9 +42,9 @@ command, use `make demo` from the repository root.
 src/main.ts, bootstrap.ts   process entry; wiring, migrations, background loops
 src/config.ts               every environment variable, parsed and validated once
 src/http/                   Hono app, routes (the v1 API), middleware, SPA + metadata pages
-src/services/               auth, projects, indexer, tasks, claims, ledger, ci, events, stream, og
+src/services/               auth, projects, indexer, tasks, claims, ledger, ci, events, stream, og, federation
 src/ci/                     CiAdapter implementations: github, generic; the poller
-src/lib/                    minisign verification, git, ids, problem+json errors, schemas
+src/lib/                    minisign (verify, and sign with the instance key), git, ids, problem+json errors, schemas
 src/db/                     Drizzle schema and client; migrations live in drizzle/
 spec/                       a copy of ../spec, synced by `build` and `generate`
 test/                       API, ledger and indexer tests against a real Postgres
@@ -61,4 +61,8 @@ test/                       API, ledger and indexer tests against a real Postgre
 - **Delivered needs the CI provider's word**: a webhook signed with the project's secret, or
   the server's own poll of GitHub. A worker's report alone never delivers anything.
 
+- **A peer's word is a peer's word.** Whatever federation fetches is validated, stored apart
+  (`remote_*` tables), served under the peer's name and never joined into a ledger query.
+
 The acceptance test for all of it is [`scripts/e2e.sh`](../scripts/e2e.sh): `make e2e`.
+Federation has its own, with two instances: `make e2e-federation`.

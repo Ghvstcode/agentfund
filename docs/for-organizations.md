@@ -133,9 +133,11 @@ bill](donors.md#7-whose-credentials-whose-bill) in the donor guide has the detai
   through the generic signed-JSON adapter ([Self-hosting](self-hosting.md#ci-confirmation)).
 - **Several tasks at once per worker.** `max_concurrent` defaults to 1. Values up to 16 are
   accepted but haven't been exercised yet, so plan for one task at a time per worker.
-- **Federation.** Instances are independent and don't share projects, backers or ledgers.
-  Ids and keys are designed so instances can link up later
-  ([Decisions](decisions.md#federation-what-was-decided-now-so-it-stays-possible-later)).
+- **Federation is off on a members-only instance.** Public instances can peer with each other
+  ([Federation](federation.md)). A members-only instance answers nothing anonymously and
+  admits only members of its GitHub organizations, so it neither lists itself to peers nor
+  accepts a peer's word for who someone is. `capabilities.federation` is `false` there
+  whatever `FEDERATION` says.
 - **Docker is not a VM.** The sandbox drops capabilities, runs as non-root, has no host mounts
   and has a filtered network. A container escape through a kernel or runtime bug is still out
   of scope. If that matters to you, run workers inside a VM.

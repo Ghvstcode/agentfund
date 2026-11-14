@@ -387,10 +387,13 @@ tested with a fake `api.github.com` and the fake `gh` runner only. Not yet tried
 
 Do one end-to-end run in a test organization and correct the docs where GitHub disagrees.
 
-### C5. Federation (roadmap, not v0.1)
+### C5. Federation
 
-See [decisions.md](../decisions.md#federation-what-was-decided-now-so-it-stays-possible-later).
-Don't start without the human.
+**Done 2026-11-14:** peering with a pinned instance key, discovery, portable donor identity
+(`agentfund login <server> --via <home>`) and contributions shown from peers. Guide:
+[federation.md](../federation.md); choices: [decisions.md](../decisions.md#federation-the-choices);
+normative text: `spec/protocol.md` §14. Proven by `scripts/federation-e2e.sh` between two local
+instances; not yet run between two public ones.
 
 ---
 

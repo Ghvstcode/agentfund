@@ -249,7 +249,8 @@ function ProjectReviews({ project }: { project: Project }) {
               <Link to={`/${project.slug}/tasks/${task.task_id}`} className="num truncate text-[0.8125rem] hover:underline">
                 {task.task_id}
               </Link>
-              <span className="truncate text-xs text-muted-foreground">
+              {/* A donor from a peer makes this line long; on a phone it wraps rather than hiding the time. */}
+              <span className="text-xs text-pretty text-muted-foreground sm:truncate">
                 {project.name}
                 {pr && ` · ${pullRequestLabel(pr)}`}
                 {report?.donor && ` · by ${report.donor.handle}`}

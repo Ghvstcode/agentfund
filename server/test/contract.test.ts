@@ -8,10 +8,12 @@ import { signBody } from "../src/ci/adapter.js";
 import type { OperationId, Schemas } from "../src/lib/openapi.js";
 import { indexAll } from "../src/services/indexer.js";
 import { createTestApp, projectSecret, type TestApp } from "./helpers/app.js";
+import { raw, testNetwork } from "./helpers/network.js";
 import { TestRepo } from "./helpers/repo.js";
 import { completedBody, DIGEST } from "./helpers/scenario.js";
 
 let t: TestApp;
+let peer: TestApp;
 const fakeGithub: typeof fetch = async (input) => {
   const url = String(input);
   if (url.endsWith("/login/oauth/access_token")) return Response.json({ access_token: "gho_x" });
@@ -20,16 +22,21 @@ const fakeGithub: typeof fetch = async (input) => {
 };
 
 beforeAll(async () => {
-  t = await createTestApp({ fetch: fakeGithub, env: { GITHUB_CLIENT_ID: "client", GITHUB_CLIENT_SECRET: "client-secret" } });
+  const net = testNetwork(fakeGithub);
+  t = await createTestApp({ fetch: net.fetch, env: { GITHUB_CLIENT_ID: "client", GITHUB_CLIENT_SECRET: "client-secret" } });
+  peer = await createTestApp({ fetch: net.fetch, env: { BASE_URL: "http://peer.test" } });
+  net.add("af.test", t);
+  net.add("peer.test", peer);
 });
 afterAll(async () => {
+  await peer.close();
   await t.close();
 });
 
 describe("router ↔ OpenAPI parity", () => {
   it("every operation in the document has a handler", () => {
     const documented = [...t.ctx.spec.operations.keys()].sort();
-    expect(documented.length).toBe(39);
+    expect(documented.length).toBe(50);
     expect([...t.app.operations].sort()).toEqual(documented);
   });
 
@@ -242,6 +249,54 @@ describe("every operation, validated against the document", () => {
     expect((await t.call("adminUpdateInstance", { token: admin, body: { description: "A contract-tested instance." } })).status).toBe(200);
     await t.call("adminUpdateInstance", { token: outsider, body: {} });
     expect((await t.call("authDev", { body: { handle: "x", extra: 1 } })).status).toBe(422);
+
+    // federation: peer.test is a second real instance on the same in-process network
+    const PEER = "http://peer.test";
+    const host = "peer.test";
+    const preview = (await t.call<Schemas["PeerPreview"]>("adminPreviewPeer", { token: admin, body: { base_url: `${PEER}/` } })).body;
+    expect(preview).toMatchObject({ base_url: PEER, host, federation: true });
+    await t.call("adminPreviewPeer", { token: outsider, body: { base_url: PEER } });
+    expect((await t.call("adminPreviewPeer", { token: admin, body: { base_url: "http://nowhere.test" } })).code).toBe("peer-unverifiable");
+    expect((await t.call("adminCreatePeer", { token: admin, body: { base_url: PEER, pubkey: meta.instance_pubkey } })).code).toBe("peer-unverifiable");
+    const added = await t.call<Schemas["Peer"]>("adminCreatePeer", { token: admin, body: { base_url: PEER, pubkey: preview.pubkey } });
+    expect(added.status).toBe(201);
+    expect(added.body).toMatchObject({ host, status: "active", discover: true, accept_identities: false, accepts_us: false, last_error: null });
+    expect((await t.call("adminCreatePeer", { token: admin, body: { base_url: PEER, pubkey: preview.pubkey } })).code).toBe("peer-exists");
+    await t.call("adminCreatePeer", { token: outsider, body: { base_url: PEER, pubkey: preview.pubkey } });
+
+    const visitor = await peer.login("visitor");
+    const vouch = async () => (await raw<{ assertion: Schemas["SignedDocument"] }>(peer, "POST", "/v1/federation/assertions", { token: visitor, body: { audience: "http://af.test" } })).body.assertion;
+    expect((await t.call("authFederated", { body: { assertion: await vouch() } })).code).toBe("peer-not-trusted");
+    expect((await t.call<Schemas["Peer"]>("adminUpdatePeer", { token: admin, path: { host }, body: { accept_identities: true } })).body.accept_identities).toBe(true);
+    await t.call("adminUpdatePeer", { token: outsider, path: { host }, body: {} });
+    await t.call("adminUpdatePeer", { token: admin, path: { host: "missing.test" }, body: {} });
+    const assertion = await vouch();
+    const fed = await t.call<{ key: string; user: Schemas["Me"] }>("authFederated", { body: { assertion, label: "contract" } });
+    expect(fed.status).toBe(201);
+    expect(fed.body.user).toMatchObject({ id: `${PEER}/u/visitor`, handle: "visitor@peer.test", role: "donor" });
+    expect((await t.call("authFederated", { body: { assertion } })).code).toBe("assertion-invalid");
+    expect((await t.call("authFederated", { body: {} })).status).toBe(422);
+    expect((await t.call<Schemas["Me"]>("getMe", { token: fed.body.key })).body.handle).toBe("visitor@peer.test");
+
+    expect((await t.call("createIdentityAssertion", { token: admin, body: { audience: PEER } })).status).toBe(201);
+    await t.call("createIdentityAssertion", { body: { audience: PEER } });
+    expect((await t.call("createIdentityAssertion", { token: fed.body.key, body: { audience: PEER } })).status).toBe(403);
+    expect((await t.call("createIdentityAssertion", { token: admin, body: { audience: "not a url" } })).status).toBe(422);
+
+    expect((await t.call<{ items: Schemas["Peer"][] }>("listPeers")).body.items.map((p) => p.host)).toEqual([host]);
+    await t.call("listFederatedProjects", { query: { q: "x", peer: host } });
+    await t.call("listFederatedDonors", { query: { home: PEER } });
+    expect((await t.call<{ items: Schemas["Peer"][] }>("adminListPeers", { token: admin })).body.items[0]).toMatchObject({ host, donors: 1 });
+    await t.call("adminListPeers", { token: outsider });
+    expect((await t.call<Schemas["Peer"]>("adminSyncPeer", { token: admin, path: { host } })).body.last_error).toBeNull();
+    await t.call("adminSyncPeer", { token: outsider, path: { host } });
+    await t.call("adminSyncPeer", { token: admin, path: { host: "missing.test" } });
+    await t.call("adminDeletePeer", { token: outsider, path: { host } });
+    await t.call("adminDeletePeer", { token: admin, path: { host: "missing.test" } });
+    expect((await t.call("adminDeletePeer", { token: admin, path: { host } })).status).toBe(204);
+    // With the peer gone, the donor it vouched for no longer resolves.
+    expect((await t.call("getMe", { token: fed.body.key })).status).toBe(401);
+
     expect((await t.call("authLogout", { token: admin })).status).toBe(204);
 
     // Coverage: every operation answered at least once with a documented success status,
@@ -253,8 +308,12 @@ describe("every operation, validated against the document", () => {
       }
     }
     // dev login 404 needs a differently configured instance; covered in auth.test.ts.
+    // The federation 404s are the answers of an instance with FEDERATION=false; covered in federation.test.ts.
     // The push-access 403 needs GitHub sign-in instead of dev login; covered in registration.test.ts.
-    expect(missing.sort()).toEqual(["authDev 404", "authGithubStart 404", "createProject 403", "previewProject 403"]);
+    expect(missing.sort()).toEqual([
+      "adminListPeers 404", "authDev 404", "authFederated 404", "authGithubStart 404", "createIdentityAssertion 404", "createProject 403",
+      "listFederatedDonors 404", "listFederatedProjects 404", "listPeers 404", "previewProject 403",
+    ]);
     const undocumented = [...t.seen].filter((s) => {
       const [id, status] = s.split(" ") as [OperationId, string];
       return !(status in t.ctx.spec.operation(id).raw.responses);
@@ -265,6 +324,8 @@ describe("every operation, validated against the document", () => {
       [
         "adminGetInstance 401", "adminListProjects 401", "adminListUsers 401", "adminUpdateInstance 401", "adminUpdateInstance 422",
         "adminUpdateProject 401", "adminUpdateProject 422", "adminUpdateUser 401", "adminUpdateUser 422",
+        "adminCreatePeer 401", "adminDeletePeer 401", "adminListPeers 401", "adminPreviewPeer 401", "adminSyncPeer 401", "adminUpdatePeer 401", "adminUpdatePeer 422",
+        "listFederatedDonors 422", "listFederatedProjects 422",
         "authDev 403", "authDev 422", "authGithubStart 422", "authLogout 401",
         "createPledge 422", "getLedger 422", "heartbeatClaim 422", "listDonors 422", "listEvents 422", "listProjectEvents 422",
         "listProjects 422", "listTasks 422", "releaseClaim 422", "stream 404", "updateProject 422",

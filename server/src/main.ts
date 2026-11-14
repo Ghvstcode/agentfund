@@ -6,6 +6,7 @@ import { APP_NAME, VERSION } from "./constants.js";
 import { createApp } from "./http/app.js";
 import { createLogger } from "./log.js";
 import { sweepLeases } from "./services/claims.js";
+import { syncAll as syncPeers } from "./services/federation.js";
 import { indexAll } from "./services/indexer.js";
 
 let config: Config;
@@ -51,6 +52,7 @@ function every(name: string, seconds: number, fn: () => Promise<unknown>): () =>
 
 const stops = [every("lease sweeper", config.sweepIntervalSeconds, () => sweepLeases(ctx))];
 if (config.indexIntervalSeconds > 0) stops.push(every("indexer", config.indexIntervalSeconds, () => indexAll(ctx)));
+if (config.federation && config.federationSyncIntervalSeconds > 0) stops.push(every("federation sync", config.federationSyncIntervalSeconds, () => syncPeers(ctx)));
 if (config.ciPoll) stops.push(every("ci poller", config.ciPollIntervalSeconds, () => pollOnce(ctx)));
 
 let closing = false;

@@ -108,3 +108,5 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version-file: worker/go.mod, cache-dependency-path: worker/go.sum }
       - run: sh scripts/e2e.sh
+      # Reuses the images the run above built: two instances, peering, `login --via`, one task.
+      - run: sh scripts/federation-e2e.sh

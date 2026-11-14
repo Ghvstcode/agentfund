@@ -12,7 +12,8 @@ import { Skeleton } from './States';
 
 const DAYS = 30;
 
-function taskSummary(tasks: Project['tasks']): string {
+/** `4 open · 1 in progress · 9 merged`: where a project's tasks stand, in one line. */
+export function taskSummary(tasks: Project['tasks']): string {
   const parts = [
     tasks.open > 0 && `${tasks.open} open`,
     tasks.claimed > 0 && `${tasks.claimed} in progress`,

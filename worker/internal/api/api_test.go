@@ -160,11 +160,21 @@ func TestStructsMatchOpenAPI(t *testing.T) {
 	checkStruct(t, "ClaimSummary", reflect.TypeOf(api.ClaimSummary{}), sc("ClaimSummary"), false)
 	checkStruct(t, "Report", reflect.TypeOf(api.Report{}), sc("Report"), false)
 	checkStruct(t, "Problem", reflect.TypeOf(api.Problem{}), sc("Problem"), false)
+	checkStruct(t, "SignedDocument", reflect.TypeOf(api.SignedDocument{}), sc("SignedDocument"), false)
+	checkStruct(t, "APIKeyInfo", reflect.TypeOf(api.APIKeyInfo{}), sc("ApiKey"), false)
+	item := func(path string) *openapi3.Schema {
+		return doc.Paths.Find(path).Post.Responses.Status(201).Value.Content.Get("application/json").Schema.Value
+	}
+	checkStruct(t, "IdentityAssertion", reflect.TypeOf(api.IdentityAssertion{}), item("/v1/federation/assertions"), false)
+	checkStruct(t, "FederatedAuth", reflect.TypeOf(api.FederatedAuth{}), item("/v1/auth/federated"), false)
 
 	// Request bodies the worker sends.
 	checkStruct(t, "ReportCreate", reflect.TypeOf(api.ReportCreate{}), sc("ReportCreate"), true)
 	checkStruct(t, "HeartbeatRequest", reflect.TypeOf(api.HeartbeatRequest{}), requestSchema(t, doc, "/v1/claims/{claim_id}/heartbeat"), true)
 	checkStruct(t, "ReleaseRequest", reflect.TypeOf(api.ReleaseRequest{}), requestSchema(t, doc, "/v1/claims/{claim_id}/release"), true)
+	checkStruct(t, "AssertionRequest", reflect.TypeOf(api.AssertionRequest{}), requestSchema(t, doc, "/v1/federation/assertions"), true)
+	checkStruct(t, "FederatedAuthRequest", reflect.TypeOf(api.FederatedAuthRequest{}), requestSchema(t, doc, "/v1/auth/federated"), true)
+	checkStruct(t, "SignedDocument (request)", reflect.TypeOf(api.SignedDocument{}), sc("SignedDocument"), true)
 
 	// Enumerations.
 	enum := func(s *openapi3.Schema) []string {
@@ -308,6 +318,72 @@ func TestClientAgainstSpecValidatedFake(t *testing.T) {
 				t.Errorf("%s %s sent without a bearer key", call.Method, call.Path)
 			}
 		}
+	}
+}
+
+// TestFederatedLogin drives the two federation calls between two fakes.
+func TestFederatedLogin(t *testing.T) {
+	home, target := apitest.New(t), apitest.New(t)
+	hc, tc := api.New(home.URL, home.APIKey), api.New(target.URL, "af_must_not_be_sent")
+	for _, c := range []*api.Client{hc, tc} {
+		if m, err := c.Negotiate(ctx, 1); err != nil || !m.Federation() {
+			t.Fatalf("negotiate: %+v %v", m, err)
+		}
+	}
+	if (&api.Meta{}).Federation() || (&api.Meta{Capabilities: []byte(`{"federation":"yes"}`)}).Federation() {
+		t.Fatal("federation capability read from a meta that does not state it")
+	}
+	if _, err := api.New(home.URL, "af_wrong").CreateIdentityAssertion(ctx, target.URL); !api.IsCode(err, api.CodeUnauthorized) {
+		t.Fatalf("assertion with a bad key: %v", err)
+	}
+	as, err := hc.CreateIdentityAssertion(ctx, target.URL)
+	if err != nil || as.Assertion.Payload == "" || as.Assertion.Signature == "" || as.ExpiresAt.IsZero() {
+		t.Fatalf("assertion: %+v %v", as, err)
+	}
+	if _, err := tc.AuthFederated(ctx, as.Assertion, "laptop"); !api.IsCode(err, api.CodePeerNotTrusted) {
+		t.Fatalf("exchange at an instance that has not peered: %v", err)
+	}
+	target.Lock()
+	target.AcceptIdentitiesFrom = []string{home.URL}
+	target.Unlock()
+	tampered := as.Assertion
+	tampered.Payload = strings.Replace(tampered.Payload, `"handle":"donor"`, `"handle":"admin"`, 1)
+	if _, err := tc.AuthFederated(ctx, tampered, ""); !api.IsCode(err, api.CodeAssertionInvalid) {
+		t.Fatalf("tampered assertion: %v", err)
+	}
+	fa, err := tc.AuthFederated(ctx, as.Assertion, "laptop")
+	host := strings.TrimPrefix(home.URL, "http://")
+	if err != nil || !strings.HasPrefix(fa.Key, "af_") || fa.APIKey.Label != "laptop" || fa.User.Handle != "donor@"+host || fa.User.ID != home.URL+"/u/donor" || fa.User.Role != "donor" {
+		t.Fatalf("federated auth: %+v %v", fa, err)
+	}
+	if calls := target.Calls("/v1/auth/federated"); calls[len(calls)-1].Auth != "" {
+		t.Fatalf("the exchange carried an Authorization header: %q", calls[len(calls)-1].Auth)
+	}
+	if _, err := tc.AuthFederated(ctx, as.Assertion, ""); !api.IsCode(err, api.CodeAssertionInvalid) {
+		t.Fatalf("replayed assertion: %v", err)
+	}
+	fc := api.New(target.URL, fa.Key)
+	if me, err := fc.Me(ctx); err != nil || me.Handle != "donor@"+host {
+		t.Fatalf("me with the federated key: %+v %v", me, err)
+	}
+	if _, err := fc.CreateIdentityAssertion(ctx, home.URL); !api.IsCode(err, api.CodeForbidden) {
+		t.Fatalf("a federated account minted an assertion: %v", err)
+	}
+	other, err := hc.CreateIdentityAssertion(ctx, "https://elsewhere.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tc.AuthFederated(ctx, other.Assertion, ""); !api.IsCode(err, api.CodeAssertionInvalid) {
+		t.Fatalf("assertion for another audience: %v", err)
+	}
+	home.Lock()
+	home.Federation = false
+	home.Unlock()
+	if m, err := hc.Meta(ctx); err != nil || m.Federation() {
+		t.Fatalf("meta with federation off: %+v %v", m, err)
+	}
+	if _, err := hc.CreateIdentityAssertion(ctx, target.URL); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("assertion with federation off: %v", err)
 	}
 }
 

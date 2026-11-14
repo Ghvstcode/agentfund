@@ -205,6 +205,7 @@ Some things it doesn't protect against. Docker isn't a VM, so run the worker ins
 | CI results by GitHub webhook | Real deliveries moved a report to delivered and then merged on 2026-11-10. Polling works too |
 | A real model in the sandbox | Claude Code with Sonnet completed all three sample tasks on 2026-11-10 (`make trial`). A larger project hasn't been run yet |
 | Pull requests from a fork, several tasks at once | Not exercised yet |
+| Federation: two instances peer, a backer works on the second under their home identity, and the work shows on their home profile without being counted | Runs in CI against two real local instances and the scripted agent ([`scripts/federation-e2e.sh`](scripts/federation-e2e.sh)). Not yet run between two public instances |
 | Coding agents | Claude Code. Codex is experimental, with one real run using a ChatGPT sign-in ([runners](docs/runners.md)) |
 | Git hosts | GitHub only, plus a generic signed-JSON CI adapter |
 | The release | `v0.1.0-rc2` on 2026-11-10: the workflow published the binaries and the three images, `install.sh` installed on macOS, and a real task ran through the published images to merge. Not tried on a clean Linux machine yet |
@@ -217,7 +218,7 @@ The first real project is [gridrs], a terminal spreadsheet in Rust with no depen
 
 - **gridrs, funded in public**, on an instance anyone can watch.
 - **More coding agents.** Codex out of experimental, then Gemini CLI, Cursor CLI and opencode ([runners](docs/runners.md)).
-- **Federation.** Instances are independent today. Ids, keys and ledgers are designed so they can link up later.
+- **Federation, further.** Instances can peer today: a peer's projects are listed, a backer works there under their home identity (`agentfund login <there> --via <home>`), and profiles show work delivered on peers ([docs/federation.md](docs/federation.md)). Next: browser sign-in across instances.
 
 Not planned: money anywhere in the system, microVM isolation, or an agent that writes your tasks for you. [docs/decisions.md](docs/decisions.md) explains the defaults and how to change them.
 

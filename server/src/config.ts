@@ -70,6 +70,8 @@ const envSchema = z.object({
   AUTH_DEV_LOGIN: optional,
   ALLOW_FILE_REPOS: bool(false),
   CI_POLL: bool(false),
+  FEDERATION: bool(true),
+  FEDERATION_SYNC_INTERVAL_SECONDS: int(300, 0, 86_400),
   DATA_DIR: optional,
   WEB_DIST: optional,
   INDEX_INTERVAL_SECONDS: int(60, 0, 86_400),
@@ -111,6 +113,9 @@ export interface Config {
   authDevLogin: boolean;
   allowFileRepos: boolean;
   ciPoll: boolean;
+  /** Serve the federation operations. With no peers added, nothing is fetched or accepted. */
+  federation: boolean;
+  federationSyncIntervalSeconds: number;
   dataDir: string;
   webDist: string;
   indexIntervalSeconds: number;
@@ -238,6 +243,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     authDevLogin,
     allowFileRepos: e.ALLOW_FILE_REPOS,
     ciPoll: e.CI_POLL,
+    // A members-only instance answers nothing anonymously and admits only its organizations'
+    // members, so it can neither be read by a peer nor take a peer's word for who someone is.
+    federation: e.FEDERATION && e.INSTANCE_ACCESS !== "members",
+    federationSyncIntervalSeconds: e.FEDERATION_SYNC_INTERVAL_SECONDS,
     dataDir: e.DATA_DIR ?? "./data",
     webDist: e.WEB_DIST ?? "../web/dist",
     indexIntervalSeconds: e.INDEX_INTERVAL_SECONDS,

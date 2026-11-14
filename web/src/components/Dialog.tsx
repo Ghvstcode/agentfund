@@ -33,7 +33,7 @@ export function Dialog({ title, onClose, variant = 'modal', subtitle, children }
       <Sheet open onOpenChange={onOpenChange}>
         <SheetContent className="w-full gap-0 rounded-none p-0 sm:max-w-[37.5rem]" onCloseAutoFocus={restoreFocus}>
           <SheetHeader className="gap-2.5 border-b px-6 pt-7 pb-6 pr-14 sm:px-8">
-            <SheetTitle className="text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.035em] text-balance">{title}</SheetTitle>
+            <SheetTitle className="text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.035em] text-balance [overflow-wrap:anywhere]">{title}</SheetTitle>
             {subtitle ? <SheetDescription className="order-first">{subtitle}</SheetDescription> : <SheetDescription className="sr-only">{title}</SheetDescription>}
           </SheetHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
@@ -49,7 +49,7 @@ export function Dialog({ title, onClose, variant = 'modal', subtitle, children }
         onCloseAutoFocus={restoreFocus}
       >
         <DialogHeader className="gap-2.5 border-b px-6 pt-7 pb-6 pr-14 text-left sm:px-8">
-          <DialogTitle className="text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.035em] text-balance">{title}</DialogTitle>
+          <DialogTitle className="text-[1.75rem] leading-[1.15] font-semibold tracking-[-0.035em] text-balance [overflow-wrap:anywhere]">{title}</DialogTitle>
           {subtitle ? <DialogDescription className="order-first">{subtitle}</DialogDescription> : <DialogDescription className="sr-only">{title}</DialogDescription>}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>

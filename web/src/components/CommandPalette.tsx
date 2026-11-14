@@ -1,19 +1,22 @@
-import { BookOpen, Compass, FolderGit2, KeyRound, LayoutDashboard, type LucideIcon, Palette, Shield, Trophy } from 'lucide-react';
+import { BookOpen, Compass, FolderGit2, KeyRound, LayoutDashboard, type LucideIcon, Network, Palette, Shield, Trophy } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { flatItems, useDonors, useMe, useProjects } from '@/api/queries';
+import { flatItems, useDonors, useFederationEnabled, useMe, useProjects } from '@/api/queries';
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { profilePath } from '@/lib/handles';
+import { Handle } from './Handle';
 import { HandleAvatar } from './HandleAvatar';
 import { Num } from './Num';
 
-const PAGES: { to: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
+const PAGES: { to: string; label: string; icon: LucideIcon; admin?: boolean; federation?: boolean }[] = [
   { to: '/', label: 'Discover projects', icon: Compass },
   { to: '/donors', label: 'Donor leaderboard', icon: Trophy },
   { to: '/maintain', label: 'Maintain your projects', icon: LayoutDashboard },
   { to: '/maintain/new', label: 'Register a project', icon: FolderGit2 },
   { to: '/settings', label: 'Settings and API keys', icon: KeyRound },
   { to: '/admin', label: 'Instance admin', icon: Shield, admin: true },
+  { to: '/admin/federation', label: 'Federation peers', icon: Network, admin: true, federation: true },
   { to: '/styleguide', label: 'Styleguide', icon: Palette },
 ];
 
@@ -23,6 +26,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('');
   const q = useDebouncedValue(search.trim(), 150);
   const me = useMe();
+  const federation = useFederationEnabled();
   // The server searches projects; cmdk then filters whatever is on screen as you type.
   const projects = flatItems(useProjects({ q: q || undefined, limit: 8 }));
   const donors = flatItems(useDonors()).slice(0, 50);
@@ -63,9 +67,9 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
         {donors.length > 0 && (
           <CommandGroup heading="Donors">
             {donors.map((donor) => (
-              <CommandItem key={donor.handle} value={`donor ${donor.handle}`} onSelect={() => go(`/u/${donor.handle}`)}>
+              <CommandItem key={donor.handle} value={`donor ${donor.handle}`} onSelect={() => go(profilePath(donor.handle))}>
                 <HandleAvatar handle={donor.handle} className="size-4 text-[0.5rem]" />
-                <span className="flex-1 truncate">{donor.handle}</span>
+                <Handle handle={donor.handle} hostClassName="max-w-none sm:max-w-none" className="flex-1 truncate" />
                 <span className="text-xs text-muted-foreground">
                   <Num value={donor.delivered} /> delivered
                 </span>
@@ -74,7 +78,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
           </CommandGroup>
         )}
         <CommandGroup heading="Pages">
-          {PAGES.filter((page) => !page.admin || me.data?.role === 'admin').map((page) => (
+          {PAGES.filter((page) => (!page.admin || me.data?.role === 'admin') && (!page.federation || federation)).map((page) => (
             <CommandItem key={page.to} value={`page ${page.label}`} onSelect={() => go(page.to)}>
               <page.icon strokeWidth={1.5} aria-hidden="true" />
               {page.label}

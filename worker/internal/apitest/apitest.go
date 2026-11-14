@@ -6,11 +6,14 @@ package apitest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -114,11 +117,28 @@ type Server struct {
 	ReportProblem string
 	// RejectLateReports makes reports for expired claims fail with 409 instead of being stored flagged_late.
 	RejectLateReports bool
+	// Federation is capabilities.federation; when false the federation endpoints answer 404.
+	Federation bool
+	// AcceptIdentitiesFrom lists the base URLs of peers whose identity assertions this instance accepts.
+	AcceptIdentitiesFrom []string
+	// FederatedAccount makes the APIKey account a federated one, which cannot mint assertions (403 forbidden).
+	FederatedAccount bool
 
+	fedUsers   map[string]fedUser // federated API key -> user
+	assertions int
+	seenJTI    map[string]bool
 	calls      []Call
 	claims     map[string]*claimState
 	nextClaim  int
 	heartbeats int
+}
+
+type fedUser struct{ id, handle string }
+
+// assertionSig is the fake's stand-in for a minisign signature over payload.
+func assertionSig(payload string) string {
+	sum := sha256.Sum256([]byte(payload))
+	return "untrusted comment: fixture signature\n" + hex.EncodeToString(sum[:])
 }
 
 type claimState struct {
@@ -139,6 +159,7 @@ func New(t testing.TB) *Server {
 		T: t, doc: LoadSpec(t), APIKey: "af_test_key_0123456789", Slug: "hello-project",
 		TrustTier: "established", ProtocolVersions: []string{"v1"}, SpecVersions: []int{1},
 		HeartbeatSeconds: 1, claims: map[string]*claimState{},
+		Federation: true, fedUsers: map[string]fedUser{}, seenJTI: map[string]bool{},
 	}
 	s.srv = httptest.NewServer(http.HandlerFunc(s.serve))
 	s.URL = s.srv.URL
@@ -211,13 +232,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.calls = append(s.calls, Call{Method: r.Method, Path: r.URL.Path, Auth: r.Header.Get("Authorization"), Body: body})
 
+	user := fedUser{id: s.URL + "/u/donor", handle: "donor"}
 	authed := r.Header.Get("Authorization") == "Bearer "+s.APIKey
+	if fu, ok := s.fedUsers[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]; ok {
+		user, authed = fu, true
+	}
 	switch {
 	case r.Method == "GET" && r.URL.Path == "/v1/meta":
 		s.reply(w, r, "/v1/meta", 200, map[string]any{
 			"app": "AgentFund", "name": "test instance", "version": "0.0.0-test", "base_url": s.URL,
 			"protocol_versions": s.ProtocolVersions, "spec_versions": s.SpecVersions,
-			"capabilities": map[string]any{"github_oauth": false, "dev_login": true, "sse": true, "ci_providers": []string{"github", "generic"}, "ci_poll": false, "federation": false},
+			"capabilities": map[string]any{"github_oauth": false, "dev_login": true, "sse": true, "ci_providers": []string{"github", "generic"}, "ci_poll": false, "federation": s.Federation},
 			"defaults":     map[string]any{"lease_seconds": 7200, "heartbeat_interval_seconds": s.HeartbeatSeconds},
 		})
 	case r.Method == "GET" && r.URL.Path == "/v1/me":
@@ -225,7 +250,85 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, 401, "unauthorized", "missing or invalid API key")
 			return
 		}
-		s.reply(w, r, "/v1/me", 200, map[string]any{"id": s.URL + "/u/donor", "handle": "donor", "role": "donor", "created_at": now()})
+		s.reply(w, r, "/v1/me", 200, map[string]any{"id": user.id, "handle": user.handle, "role": "donor", "created_at": now()})
+	case r.Method == "POST" && r.URL.Path == "/v1/federation/assertions":
+		const tmpl = "/v1/federation/assertions"
+		switch {
+		case !s.Federation:
+			s.problem(w, 404, "not-found", "federation is disabled on this instance")
+			return
+		case !authed:
+			s.problem(w, 401, "unauthorized", "missing or invalid API key")
+			return
+		case s.FederatedAccount || user.id != s.URL+"/u/donor":
+			s.problem(w, 403, "forbidden", "only users whose home is this instance can mint assertions")
+			return
+		}
+		if err := s.validateRequest(tmpl, raw); err != nil {
+			s.T.Errorf("worker sent an assertion request that violates openapi.yaml: %v\n%s", err, raw)
+			s.problem(w, 422, "validation", err.Error())
+			return
+		}
+		s.assertions++
+		exp := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339)
+		payload, _ := json.Marshal(map[string]any{
+			"iss": s.URL, "aud": body["audience"], "sub": user.id, "handle": user.handle,
+			"exp": exp, "jti": fmt.Sprintf("%s#%d", s.URL, s.assertions),
+		})
+		s.reply(w, r, tmpl, 201, map[string]any{
+			"assertion": map[string]any{"payload": string(payload), "signature": assertionSig(string(payload))}, "expires_at": exp,
+		})
+	case r.Method == "POST" && r.URL.Path == "/v1/auth/federated":
+		const tmpl = "/v1/auth/federated"
+		if !s.Federation {
+			s.problem(w, 404, "not-found", "federation is disabled on this instance")
+			return
+		}
+		if err := s.validateRequest(tmpl, raw); err != nil {
+			s.T.Errorf("worker sent a federated auth request that violates openapi.yaml: %v\n%s", err, raw)
+			s.problem(w, 422, "validation", err.Error())
+			return
+		}
+		doc, _ := body["assertion"].(map[string]any)
+		payload, _ := doc["payload"].(string)
+		var a struct{ Iss, Aud, Sub, Handle, Exp, Jti string }
+		iss, _ := url.Parse("")
+		if json.Unmarshal([]byte(payload), &a) == nil {
+			iss, _ = url.Parse(a.Iss)
+		}
+		exp, _ := time.Parse(time.RFC3339, a.Exp)
+		trusted := false
+		for _, peer := range s.AcceptIdentitiesFrom {
+			trusted = trusted || (a.Iss != "" && strings.TrimRight(peer, "/") == a.Iss)
+		}
+		switch {
+		case iss == nil || iss.Host == "" || a.Handle == "":
+			s.problem(w, 401, "assertion-invalid", "the assertion is malformed")
+		case !trusted:
+			s.problem(w, 403, "peer-not-trusted", "this instance does not accept identities from "+iss.Host)
+		case doc["signature"] != assertionSig(payload):
+			s.problem(w, 401, "assertion-invalid", "the signature does not verify")
+		case a.Aud != s.URL:
+			s.problem(w, 401, "assertion-invalid", "the assertion is for another audience")
+		case !time.Now().Before(exp):
+			s.problem(w, 401, "assertion-invalid", "the assertion has expired")
+		case s.seenJTI[a.Jti]:
+			s.problem(w, 401, "assertion-invalid", "the assertion was already used")
+		default:
+			s.seenJTI[a.Jti] = true
+			key := fmt.Sprintf("af_fed_key_%010d", len(s.fedUsers)+1)
+			fu := fedUser{id: a.Sub, handle: a.Handle + "@" + iss.Host}
+			s.fedUsers[key] = fu
+			label, _ := body["label"].(string)
+			if label == "" {
+				label = "federated login"
+			}
+			s.reply(w, r, tmpl, 201, map[string]any{
+				"key":     key,
+				"api_key": map[string]any{"id": fmt.Sprintf("key_%d", len(s.fedUsers)), "label": label, "prefix": key[:10], "created_at": now()},
+				"user":    map[string]any{"id": fu.id, "handle": fu.handle, "role": "donor", "created_at": now()},
+			})
+		}
 	case r.Method == "GET" && r.URL.Path == "/v1/me/claims":
 		if !authed {
 			s.problem(w, 401, "unauthorized", "missing or invalid API key")
@@ -369,7 +472,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			c.status, c.report, c.late = "reported", body, late
 			rep := map[string]any{
 				"id": "rep_" + m[1][4:], "claim_id": m[1], "task_id": c.fullTask, "project": s.Slug,
-				"donor":  map[string]any{"id": s.URL + "/u/donor", "handle": "donor"},
+				"donor":  map[string]any{"id": user.id, "handle": user.handle},
 				"status": body["status"], "tokens_in": body["tokens_in"], "tokens_out": body["tokens_out"],
 				"cost_estimate": body["cost_estimate"], "log_digest": body["log_digest"], "flagged_late": late,
 				"delivery": map[bool]string{true: "pending_ci", false: "none"}[body["status"] == "completed" && !late], "created_at": now(),

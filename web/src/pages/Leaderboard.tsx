@@ -5,11 +5,13 @@ import { flatItems, useDonors } from '@/api/queries';
 import type { DonorStanding } from '@/api/types';
 import { ButtonLink } from '@/components/Button';
 import { DonorTable } from '@/components/DonorTable';
+import { Handle } from '@/components/Handle';
 import { HandleAvatar } from '@/components/HandleAvatar';
 import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, LoadMore, SkeletonRows } from '@/components/States';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { formatCompact } from '@/lib/format';
+import { isRemoteHandle, profilePath } from '@/lib/handles';
 import { cn } from '@/lib/utils';
 
 /** The first three donors, large: the board's headline. */
@@ -23,8 +25,12 @@ function Podium({ donors }: { donors: DonorStanding[] }) {
               <HandleAvatar handle={donor.handle} className="size-10 text-sm" />
               <div className="grid min-w-0">
                 {/* The whole cell is the link target; the handle carries the accessible name. */}
-                <Link to={`/u/${donor.handle}`} className="truncate text-lg font-semibold tracking-[-0.02em] after:absolute after:inset-0 focus-visible:outline-none">
-                  {donor.handle}
+                <Link
+                  to={profilePath(donor.handle)}
+                  aria-label={isRemoteHandle(donor.handle) ? donor.handle : undefined}
+                  className="flex min-w-0 text-lg font-semibold tracking-[-0.02em] after:absolute after:inset-0 focus-visible:outline-none"
+                >
+                  <Handle handle={donor.handle} className="truncate" hostClassName="max-w-none sm:max-w-none" />
                 </Link>
                 <span className="num text-xs text-muted-foreground">
                   {donor.tasks_merged} merged · {donor.tasks_delivered} delivered

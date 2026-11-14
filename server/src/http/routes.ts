@@ -7,11 +7,13 @@ import { PayloadError, verifySignature, type CiAdapter } from "../ci/adapter.js"
 import { APP_NAME, HEARTBEAT_INTERVAL_SECONDS, PROTOCOL_VERSIONS, SPEC_VERSIONS, VERSION } from "../constants.js";
 import type { AppContext } from "../context.js";
 import { formatErrors, type OperationId, type ResponseOf, type Schemas } from "../lib/openapi.js";
+import { fingerprint } from "../lib/minisign.js";
 import { Problem } from "../lib/problem.js";
 import * as auth from "../services/auth.js";
 import * as claims from "../services/claims.js";
 import { projectsForRepo, recordEvidence } from "../services/ci.js";
 import { listEvents } from "../services/events.js";
+import * as federation from "../services/federation.js";
 import * as indexer from "../services/indexer.js";
 import { getInstance, toInstanceConfig, updateInstance } from "../services/instance.js";
 import * as ledger from "../services/ledger.js";
@@ -39,6 +41,7 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
       protocol_versions: PROTOCOL_VERSIONS,
       spec_versions: SPEC_VERSIONS,
       instance_pubkey: instance.pubkey,
+      instance_pubkey_fingerprint: fingerprint(instance.pubkey),
       capabilities: {
         github_oauth: Boolean(ctx.config.githubClientId && ctx.config.githubClientSecret),
         dev_login: ctx.config.authDevLogin,
@@ -46,7 +49,7 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
         sse: ctx.config.instanceAccess !== "members",
         ci_providers: ["github", "generic"],
         ci_poll: ctx.config.ciPoll,
-        federation: false,
+        federation: ctx.config.federation,
         members_only: ctx.config.instanceAccess === "members",
       },
       links: {
@@ -251,6 +254,68 @@ export function registerApi(app: Hono, ctx: AppContext): Set<OperationId> {
   op("adminGetInstance", async ({ c }) => json<ResponseOf<"adminGetInstance", 200>>(c, 200, toInstanceConfig(await getInstance(ctx.db))));
 
   op("adminUpdateInstance", async ({ c, body }) => json<ResponseOf<"adminUpdateInstance", 200>>(c, 200, toInstanceConfig(await updateInstance(ctx, body))));
+
+  /* ---- federation ---- */
+
+  op("listPeers", async ({ c }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"listPeers", 200>>(c, 200, { items: await federation.listPeers(ctx, { admin: false }) });
+  });
+
+  op("listFederatedProjects", async ({ c, query }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"listFederatedProjects", 200>>(
+      c,
+      200,
+      await federation.listFederatedProjects(ctx, { q: query.q, peer: query.peer, language: query.language, limit: query.limit ?? 50, cursor: query.cursor }),
+    );
+  });
+
+  op("listFederatedDonors", async ({ c, query }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"listFederatedDonors", 200>>(c, 200, await federation.listFederatedDonors(ctx, { home: query.home, limit: query.limit ?? 50, cursor: query.cursor }));
+  });
+
+  op("createIdentityAssertion", async ({ c, body, who }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"createIdentityAssertion", 201>>(c, 201, await federation.createAssertion(ctx, who, body.audience));
+  });
+
+  op("authFederated", async ({ c, body }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"authFederated", 201>>(c, 201, await federation.redeemAssertion(ctx, body));
+  });
+
+  op("adminListPeers", async ({ c }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"adminListPeers", 200>>(c, 200, { items: await federation.listPeers(ctx, { admin: true }) });
+  });
+
+  op("adminPreviewPeer", async ({ c, body }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"adminPreviewPeer", 200>>(c, 200, await federation.previewPeer(ctx, body.base_url));
+  });
+
+  op("adminCreatePeer", async ({ c, body, who }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"adminCreatePeer", 201>>(c, 201, await federation.createPeer(ctx, who, body));
+  });
+
+  op("adminUpdatePeer", async ({ c, path, body, who }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"adminUpdatePeer", 200>>(c, 200, await federation.updatePeer(ctx, who, path.host, body));
+  });
+
+  op("adminDeletePeer", async ({ c, path, who }) => {
+    federation.requireFederation(ctx);
+    await federation.deletePeer(ctx, who, path.host);
+    return noContent(c);
+  });
+
+  op("adminSyncPeer", async ({ c, path }) => {
+    federation.requireFederation(ctx);
+    return json<ResponseOf<"adminSyncPeer", 200>>(c, 200, await federation.syncPeerByHost(ctx, path.host));
+  });
 
   /* ---- webhooks ---- */
 

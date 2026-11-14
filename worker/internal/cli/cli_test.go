@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghvstcode/agentfund/worker/internal/api"
 	"github.com/ghvstcode/agentfund/worker/internal/apitest"
 	"github.com/ghvstcode/agentfund/worker/internal/config"
 	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
@@ -275,6 +276,103 @@ func TestLogin(t *testing.T) {
 	}
 	if k, err := config.APIKey(h.Server.URL, nil); err != nil || k != h.Server.APIKey {
 		t.Fatalf("stored key: %q %v", k, err)
+	}
+}
+
+func TestLoginVia(t *testing.T) {
+	isolate(t)
+	home, target := apitest.New(t), apitest.New(t)
+	homeHost := strings.TrimPrefix(home.URL, "http://")
+
+	// No credential for the home server yet.
+	code, _, errOut := run(t, "", "login", target.URL, "--via", home.URL)
+	if code == 0 || !strings.Contains(errOut, "run `agentfund login "+home.URL+"` first") {
+		t.Fatalf("login --via without a home credential: %d %s", code, errOut)
+	}
+	if len(home.Calls("/v1/")) != 0 || len(target.Calls("/v1/")) != 0 {
+		t.Fatal("servers were contacted before the home credential was found")
+	}
+	mustRun(t, home.APIKey+"\n", "login", home.URL, "--key-stdin")
+
+	// Usage errors.
+	for _, args := range [][]string{
+		{"login", home.URL + "/", "--via", home.URL},
+		{"login", target.URL, "--via", "not-a-url"},
+		{"login", target.URL, "--via", home.URL, "--key-stdin"},
+	} {
+		if code, _, errOut := run(t, "", args...); code != ExitUsage || errOut == "" {
+			t.Errorf("%v: exit %d, stderr %q", args, code, errOut)
+		}
+	}
+
+	// The target has not peered with home.
+	code, _, errOut = run(t, "", "login", target.URL, "--via", home.URL)
+	if code == 0 || !strings.Contains(errOut, target.URL+" does not accept identities from "+home.URL) ||
+		!strings.Contains(errOut, "turn on 'accept identities'") || !strings.Contains(errOut, "`agentfund login "+target.URL+"`") {
+		t.Fatalf("login --via an untrusted peer: %d %s", code, errOut)
+	}
+	if _, err := config.APIKey(target.URL, nil); err == nil {
+		t.Fatal("a key was stored after a refused federated login")
+	}
+
+	// Federation off on either side: refused before anything is minted.
+	for _, off := range []*apitest.Server{home, target} {
+		before := len(home.Calls("/v1/federation/assertions"))
+		off.Lock()
+		off.Federation = false
+		off.Unlock()
+		code, _, errOut = run(t, "", "login", target.URL, "--via", home.URL)
+		if code == 0 || !strings.Contains(errOut, off.URL+" has federation turned off") {
+			t.Fatalf("login --via with federation off on %s: %d %s", off.URL, code, errOut)
+		}
+		if len(home.Calls("/v1/federation/assertions")) != before || len(target.Calls("/v1/auth/federated")) != 1 {
+			t.Fatal("an assertion was minted or presented although federation is off")
+		}
+		off.Lock()
+		off.Federation = true
+		off.Unlock()
+	}
+
+	// Happy path.
+	target.Lock()
+	target.AcceptIdentitiesFrom = []string{home.URL}
+	target.Unlock()
+	out := mustRun(t, "", "login", target.URL+"/", "--via", home.URL+"/")
+	want := "logged in to " + target.URL + " as donor@" + homeHost + " (donor) via " + home.URL + "; key stored in " + config.CredentialsPath() + "\n"
+	if out != want {
+		t.Fatalf("login --via output:\n got %q\nwant %q", out, want)
+	}
+	key, err := config.APIKey(target.URL, nil)
+	if err != nil || !strings.HasPrefix(key, "af_") || key == home.APIKey || strings.Contains(out, key) {
+		t.Fatalf("stored federated key: %q %v", key, err)
+	}
+	if k, _ := config.APIKey(home.URL, nil); k != home.APIKey {
+		t.Fatalf("the home credential changed: %q", k)
+	}
+	me, err := api.New(target.URL, key).Me(context.Background())
+	if err != nil || me.Handle != "donor@"+homeHost || me.ID != home.URL+"/u/donor" {
+		t.Fatalf("the stored key does not work on the target: %+v %v", me, err)
+	}
+	mint := home.Calls("/v1/federation/assertions")
+	if last := mint[len(mint)-1]; last.Auth != "Bearer "+home.APIKey || last.Body["audience"] != target.URL {
+		t.Fatalf("assertion request: %+v", last)
+	}
+	for _, c := range target.Calls("/v1/") {
+		if c.Auth != "" && c.Path != "/v1/me" {
+			t.Fatalf("%s %s on the target carried credentials (%q)", c.Method, c.Path, c.Auth)
+		}
+	}
+	ex := target.Calls("/v1/auth/federated")
+	if label, _ := ex[len(ex)-1].Body["label"].(string); !strings.HasPrefix(label, "agentfund worker") || len(label) > 80 {
+		t.Fatalf("key label %q", label)
+	}
+
+	// A federated account cannot vouch for itself elsewhere.
+	home.Lock()
+	home.FederatedAccount = true
+	home.Unlock()
+	if code, _, errOut := run(t, "", "login", target.URL, "--via", home.URL); code == 0 || !strings.Contains(errOut, "is itself a federated one") {
+		t.Fatalf("login --via a federated home account: %d %s", code, errOut)
 	}
 }
 

@@ -7,6 +7,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-14
+
+### Added
+- **Federation** — instances peer by admin decision with a pinned instance key: a peer's
+  projects are listed (`/v1/federation/projects`), a donor works on a peer under their home
+  identity via a minisign-signed, single-use assertion (`agentfund login <server> --via
+  <home>`, `POST /v1/auth/federated`), and donor profiles show work delivered on peers.
+  Numbers from a peer are attributed and never summed. `FEDERATION=false` turns it off.
+- `make e2e-federation` — two real instances and the worker: peering, `login --via`, one task
+  run under the home identity, and the work shown at home without being counted. Runs in CI.
+- `Meta.instance_pubkey_fingerprint`, so an admin can read their instance's key fingerprint
+  out to a peer's admin (Admin → Federation shows it).
+
+### Changed
+- The server now signs as well as verifies minisign: identity assertions, with the instance
+  key that `/v1/meta` has always published. That key is no longer "reserved".
+- A profile URL may end in a host name (`/u/alice@fund.example`); the server no longer treats
+  it as a missing file.
+- Database migration `0006_federation` (new tables `peers`, `remote_projects`,
+  `remote_standings`, `assertion_nonces`; two nullable columns on `users`). Applied at boot.
+
+### Notes
+- Federation is on by default and inert until an admin adds a peer. `FEDERATION=false`
+  removes it; a members-only instance (`INSTANCE_ACCESS=members`) never federates.
+- Proven between two local instances, not yet between two public ones.
+
 ## [0.1.3] - 2026-11-12
 
 ### Added
@@ -123,7 +149,8 @@ All notable changes to this project are documented here. The format follows
   outside the egress proxy, and tools that create scheduled cloud agents on the backer's
   account.
 
-[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/ghvstcode/agentfund/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ghvstcode/agentfund/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/ghvstcode/agentfund/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/ghvstcode/agentfund/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ghvstcode/agentfund/compare/v0.1.0...v0.1.1

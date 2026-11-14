@@ -62,6 +62,7 @@ public's ability to **verify** every number the system shows.
 | Preview used to read a private repository | Preview and create first check, through the GitHub App, that the caller can write to the repository. Every failure reads the same, so preview tells nobody that a repository exists. |
 | The instance's GitHub App key is stolen | The app is read-only (Contents, Metadata, Checks, Pull requests; Members on the org) and installed on selected repositories. A thief can read those repositories, not change them. Tokens are minted per repository for one hour and kept in memory only. |
 | A server tricks a backer into using their GitHub login elsewhere | The backer agrees per project, at `approve`, to fetch with `gh` (`git_auth: gh`); the server cannot set it. The credential helper is scoped to `https://github.com` and redirects are off. Pushing and opening PRs already used `gh` on the host; none of it enters the sandbox. |
+| A peer instance lies, or its key is stolen | A peer is added by an admin who confirms its key fingerprint, and the key is pinned. Its numbers are shown under its name and never added to a local total. Admitting its donors is a separate, off-by-default switch; an admitted donor still needs passing CI to count. A changed key quarantines the peer until an admin acts. See [Federation](federation.md). |
 | Tampering with history | The `events` table is append-only (enforced in the database) and public; ledgers are computed from evidence rows, not stored totals. |
 
 ## Honest limitations

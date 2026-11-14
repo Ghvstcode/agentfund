@@ -90,7 +90,7 @@ in a locked-down sandbox on your machine, under your own coding-agent
 credentials and within the caps you set. Results arrive as pull requests.
 
 To back a project:
-  ` + app.BinaryName + ` login <server-url>              store the server's API key
+  ` + app.BinaryName + ` login <server-url>              store the server's API key (or --via <home-server-url>)
   ` + app.BinaryName + ` approve <server-url>/<project>  read every task, pin the maintainer's key
   ` + app.BinaryName + ` dry-run <project>               see what would run, and why not
   ` + app.BinaryName + ` work <project>                  run tasks (Ctrl-C releases them)

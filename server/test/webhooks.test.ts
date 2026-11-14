@@ -433,6 +433,6 @@ describe("poller (ci_poll)", () => {
 
   it("meta advertises the capability", async () => {
     const meta = (await t.call<Schemas["Meta"]>("getMeta")).body;
-    expect(meta.capabilities).toMatchObject({ ci_poll: true, ci_providers: ["github", "generic"], sse: true, dev_login: true, github_oauth: false, federation: false });
+    expect(meta.capabilities).toMatchObject({ ci_poll: true, ci_providers: ["github", "generic"], sse: true, dev_login: true, github_oauth: false, federation: true });
   });
 });

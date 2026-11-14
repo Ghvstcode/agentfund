@@ -17,6 +17,10 @@ export type ProblemCode =
   | "repo-already-registered"
   | "repo-unverifiable"
   | "bad-signature"
+  | "peer-exists"
+  | "peer-unverifiable"
+  | "peer-not-trusted"
+  | "assertion-invalid"
   | "rate-limited"
   | "internal";
 
@@ -38,6 +42,10 @@ const DEFAULTS: Record<ProblemCode, { status: number; title: string }> = {
   "repo-already-registered": { status: 409, title: "Repository is already registered" },
   "repo-unverifiable": { status: 422, title: "Repository could not be verified" },
   "bad-signature": { status: 401, title: "Bad webhook signature" },
+  "peer-exists": { status: 409, title: "Peer already exists" },
+  "peer-unverifiable": { status: 422, title: "Peer could not be verified" },
+  "peer-not-trusted": { status: 403, title: "Issuing instance is not a trusted peer" },
+  "assertion-invalid": { status: 401, title: "Identity assertion is not valid" },
   "rate-limited": { status: 429, title: "Too many requests" },
   internal: { status: 500, title: "Internal error" },
 };
