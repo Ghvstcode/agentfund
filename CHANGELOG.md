@@ -23,3 +23,8 @@ All notable changes to this project are documented here. The format follows
 - **Demo project** — `gridrs`, a std-only terminal spreadsheet in Rust decomposed into signed
   manifests with pre-committed acceptance tests.
 - `docker compose up` self-hosting, GoReleaser packaging, install script, CI.
+- **Federation** — instances peer by admin decision with a pinned instance key: a peer's
+  projects are listed (`/v1/federation/projects`), a donor works on a peer under their home
+  identity via a minisign-signed, single-use assertion (`agentfund login <server> --via
+  <home>`, `POST /v1/auth/federated`), and donor profiles show work delivered on peers.
+  Numbers from a peer are attributed and never summed. `FEDERATION=false` turns it off.

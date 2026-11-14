@@ -9,6 +9,7 @@ import { decodeCursor, encodeCursor, offsetOf, pageByOffset } from "../lib/curso
 import type { Schemas } from "../lib/openapi.js";
 import { Problem, validation } from "../lib/problem.js";
 import { toUserRef } from "./auth.js";
+import { standingsElsewhere } from "./federation.js";
 
 type Totals = Schemas["Totals"];
 type TaskCounts = Schemas["TaskCounts"];
@@ -84,6 +85,7 @@ export async function stats(ctx: AppContext): Promise<Schemas["Stats"]> {
 interface StandingRow {
   handle: string;
   avatar_url: string | null;
+  home_id: string | null;
   pledged: string;
   reported: string;
   delivered: string;
@@ -103,9 +105,10 @@ const toStanding = (ctx: AppContext, r: StandingRow): Schemas["DonorStanding"] =
 });
 
 /** Leaderboard: delivered desc. `projectId` scopes it to one project, otherwise all listed projects. */
-function standingsSql(projectId: number | undefined): SQL {
-  const scope = projectId !== undefined ? sql`s.project_id = ${projectId}` : sql`s.project_id IN (SELECT id FROM projects WHERE ${LISTED})`;
-  return sql`SELECT u.id AS user_id, u.handle, u.avatar_url,
+function standingsSql(projectId: number | undefined, peerId?: number): SQL {
+  const project = projectId !== undefined ? sql`s.project_id = ${projectId}` : sql`s.project_id IN (SELECT id FROM projects WHERE ${LISTED})`;
+  const scope = peerId !== undefined ? sql`${project} AND u.peer_id = ${peerId}` : project;
+  return sql`SELECT u.id AS user_id, u.handle, u.avatar_url, u.home_id,
         sum(s.pledged)::text AS pledged, sum(s.reported)::text AS reported, sum(s.delivered)::text AS delivered, sum(s.merged)::text AS merged,
         sum(s.tasks_delivered)::text AS tasks_delivered, sum(s.tasks_merged)::text AS tasks_merged
       FROM donor_project_standings s JOIN users u ON u.id = s.user_id
@@ -124,6 +127,13 @@ export async function listDonors(ctx: AppContext, opts: { limit: number; cursor?
   return pageByOffset(list.map((r) => toStanding(ctx, r)), opts.limit, offset);
 }
 
+/** Standings of the donors whose home is one peer: what that peer pulls to show their work here. */
+export async function peerDonors(ctx: AppContext, peerId: number, opts: { limit: number; cursor?: string }): Promise<{ items: Schemas["DonorStanding"][]; next_cursor: string | null }> {
+  const offset = offsetOf(opts.cursor);
+  const list = await rows<StandingRow>(ctx.db, sql`${standingsSql(undefined, peerId)} LIMIT ${opts.limit + 1} OFFSET ${offset}`);
+  return pageByOffset(list.map((r) => toStanding(ctx, r)), opts.limit, offset);
+}
+
 /* ---- ledger entries ---- */
 
 interface EntryRow {
@@ -133,6 +143,7 @@ interface EntryRow {
   tokens: string;
   handle: string;
   avatar_url: string | null;
+  home_id: string | null;
   slug: string;
   manifest_id: string | null;
   title: string | null;
@@ -171,7 +182,7 @@ async function entries(ctx: AppContext, where: SQL, limit: number, cursor?: stri
   const list = await rows<EntryRow & { at_exact: string }>(
     ctx.db,
     sql`SELECT e.id, e.type, e.at, to_char(e.at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at_exact, e.tokens::text AS tokens,
-          u.handle, u.avatar_url, p.slug, m.manifest_id, m.title, e.report_status, e.pr_url, e.ci_run_url, e.branch, e.head_sha, e.delivery
+          u.handle, u.avatar_url, u.home_id, p.slug, m.manifest_id, m.title, e.report_status, e.pr_url, e.ci_run_url, e.branch, e.head_sha, e.delivery
         FROM ledger_entries e
         JOIN users u ON u.id = e.user_id
         JOIN projects p ON p.id = e.project_id
@@ -215,9 +226,9 @@ export function streakDays(days: string[], today: string): number {
 }
 
 export async function donorProfile(ctx: AppContext, handle: string): Promise<Schemas["Donor"]> {
-  const user = await one<{ id: string; handle: string; avatar_url: string | null; github_login: string | null; created_at: string; banned: boolean }>(
+  const user = await one<{ id: string; handle: string; avatar_url: string | null; home_id: string | null; github_login: string | null; created_at: string; banned: boolean }>(
     ctx.db,
-    sql`SELECT id, handle, avatar_url, github_login, created_at, banned FROM users WHERE handle = ${handle}`,
+    sql`SELECT id, handle, avatar_url, home_id, github_login, created_at, banned FROM users WHERE handle = ${handle}`,
   );
   if (!user || user.banned) throw new Problem("not-found", `No donor ${handle}.`);
   const uid = Number(user.id);
@@ -263,5 +274,6 @@ export async function donorProfile(ctx: AppContext, handle: string): Promise<Sch
     rank,
     projects: perProject.map((r) => ({ slug: r.slug, name: r.name, pledged: num(r.pledged), delivered: num(r.delivered), merged: num(r.merged) })),
     recent: recent.items,
+    elsewhere: ctx.config.federation ? await standingsElsewhere(ctx, uid) : [],
   };
 }

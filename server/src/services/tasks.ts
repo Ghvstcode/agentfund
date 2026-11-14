@@ -19,6 +19,7 @@ export interface ReportViewRow {
   slug: string;
   handle: string;
   avatar_url: string | null;
+  home_id: string | null;
   status: Schemas["ReportStatus"];
   tokens_in: string;
   tokens_out: string;
@@ -43,7 +44,7 @@ export interface ReportViewRow {
 
 export const REPORT_VIEW = sql`
   SELECT r.id, r.public_id, c.public_id AS claim_public_id, r.manifest_id AS manifest_pk, m.manifest_id AS mid, p.slug,
-         u.handle, u.avatar_url, r.status, r.tokens_in, r.tokens_out, r.cost_estimate, r.branch, r.pr_url, r.head_sha,
+         u.handle, u.avatar_url, u.home_id, r.status, r.tokens_in, r.tokens_out, r.cost_estimate, r.branch, r.pr_url, r.head_sha,
          r.verify_exit_code, r.log_digest, r.duration_seconds, r.runner, r.model, r.message, r.flagged_late, r.delivery,
          r.ci_provider, r.ci_conclusion, r.ci_run_url, r.ci_received_at, r.created_at, r.claim_id
   FROM reports r
@@ -103,6 +104,7 @@ interface TaskRow {
   burn_runs: string;
   ac_handle: string | null;
   ac_avatar: string | null;
+  ac_home: string | null;
   ac_claimed_at: string | null;
   ac_lease: string | null;
   ac_tokens: string | null;
@@ -116,7 +118,7 @@ const TASK_VIEW = sql`
                WHERE NOT EXISTS (SELECT 1 FROM manifests x WHERE x.project_id = m.project_id AND x.manifest_id = d.dep AND x.state = 'merged')) AS blocked_by,
          (m.state = 'open' AND p.status = 'active' AND ${DEPS_MERGED}) AS claimable,
          b.burn_in, b.burn_out, b.burn_runs,
-         cu.handle AS ac_handle, cu.avatar_url AS ac_avatar, ac.claimed_at AS ac_claimed_at, ac.lease_expires_at AS ac_lease,
+         cu.handle AS ac_handle, cu.avatar_url AS ac_avatar, cu.home_id AS ac_home, ac.claimed_at AS ac_claimed_at, ac.lease_expires_at AS ac_lease,
          (ac.tokens_in + ac.tokens_out) AS ac_tokens, ac.phase AS ac_phase
   FROM manifests m
   JOIN projects p ON p.id = m.project_id
@@ -155,7 +157,7 @@ async function hydrate(ctx: AppContext, q: Queryable, list: TaskRow[]): Promise<
     burn: { tokens_in: num(t.burn_in), tokens_out: num(t.burn_out), total: num(t.burn_in) + num(t.burn_out), runs: num(t.burn_runs) },
     active_claim:
       t.ac_handle && t.ac_claimed_at && t.ac_lease
-        ? { donor: toUserRef(ctx, { handle: t.ac_handle, avatar_url: t.ac_avatar }), claimed_at: iso(t.ac_claimed_at), lease_expires_at: iso(t.ac_lease), tokens_so_far: num(t.ac_tokens), phase: t.ac_phase }
+        ? { donor: toUserRef(ctx, { handle: t.ac_handle, avatar_url: t.ac_avatar, home_id: t.ac_home }), claimed_at: iso(t.ac_claimed_at), lease_expires_at: iso(t.ac_lease), tokens_so_far: num(t.ac_tokens), phase: t.ac_phase }
         : null,
     latest_report: latest.get(String(t.id)) ?? null,
     updated_at: iso(t.updated_at),

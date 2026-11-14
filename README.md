@@ -331,6 +331,7 @@ What has and has not been proven, as of 2026-10-06:
 | | State |
 | --- | --- |
 | Full loop against a mock agent: claim → verify → sandbox → branch → CI → delivered → merged | **Proven.** Runs in CI on every push ([`scripts/e2e.sh`](scripts/e2e.sh)) |
+| Federation: two instances peer, a backer works on the second under their home identity, the work shows on their home profile uncounted | **Proven** against two real local instances and the mock agent ([`scripts/federation-e2e.sh`](scripts/federation-e2e.sh)). Not yet run between two public instances |
 | Real GitHub path: push, PR via `gh`, GitHub Actions, delivery confirmed by polling, merge, re-pin | **Proven once**, by hand, with the mock agent, on a public throwaway repository |
 | A real model inside the sandbox | **Not yet run.** gridrs's `verify` passes offline in the real sandbox image with the reference build |
 | Pull request from a fork (backer does not own the repository) | **Not yet exercised.** The test backer owned the repository |
@@ -346,11 +347,10 @@ Treat a first real run as a test: `--once`, a small `--budget`, and read `agentf
 - **A real-model run, then a release.** Tagged binaries, published sandbox and proxy images,
   and the install script pointing at them.
 - **gridrs, funded in public.** The first campaign, on an instance anyone can watch.
-- **Federation.** Instances are independent islands today. Five decisions keep the door open:
-  global ids (`<instance>/<slug>`), a keypair per instance, ledgers computed from evidence
-  anyone can re-check, capability flags in `/v1/meta`, and read endpoints that need no login.
-  Cross-instance discovery, backing a project on another instance and a portable backer
-  identity are roadmap, not code.
+- **Federation, further.** Instances can already peer: a peer's projects are listed, a backer
+  works elsewhere under their home identity (`agentfund login <there> --via <home>`), and
+  profiles show work delivered on peers ([docs/federation.md](docs/federation.md)). Next:
+  browser sign-in across instances, and a second implementation to federate with.
 - **Harder sandbox edges.** TLS server-name pinning in the egress proxy.
 - **Second implementations.** Another coding agent behind `Runner`, another host behind
   `GitHost` and `CiAdapter`. The interfaces exist; nothing is promised.

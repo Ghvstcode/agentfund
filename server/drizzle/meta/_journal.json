@@ -29,6 +29,13 @@
       "when": 1791312198397,
       "tag": "0003_project_webhook_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794643734515,
+      "tag": "0004_federation",
+      "breakpoints": true
     }
   ]
 }

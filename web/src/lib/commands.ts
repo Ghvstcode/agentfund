@@ -1,4 +1,4 @@
-import type { Meta } from '../api/types';
+import type { FederatedProject, Meta } from '../api/types';
 import { CLI_NAME, FALLBACK_INSTALL_COMMAND, FALLBACK_SOURCE_URL } from '../config';
 
 export interface CommandLine {
@@ -58,6 +58,40 @@ export function backCommands(meta: Pick<Meta, 'base_url' | 'links'>, slug: strin
       label: 'Start working',
       note: 'Stops at the budget, and only runs inside the schedule.',
       command: `${CLI_NAME} work ${project} --budget 200m --schedule "02:00-06:00"`,
+    },
+  ];
+}
+
+/** `fund.example.org` or `localhost:8787`: how an instance is named in handles and peer lists. */
+export function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return trimBase(baseUrl).replace(/^https?:\/\//, '');
+  }
+}
+
+/**
+ * The lines a donor with an account here runs to work on a project hosted on a peer: sign in
+ * there through this instance, then approve as usual. Only meaningful when the peer accepts
+ * this instance's identities.
+ */
+export function federatedBackCommands(
+  meta: Pick<Meta, 'base_url'>,
+  project: Pick<FederatedProject, 'instance' | 'slug'>,
+): CommandLine[] {
+  const there = trimBase(project.instance.base_url);
+  const here = trimBase(meta.base_url);
+  return [
+    {
+      label: `Sign in to ${project.instance.host} with your account here`,
+      note: `Uses the sign-in your worker already has for ${hostOf(here)}. You need no account and no API key on ${project.instance.host}.`,
+      command: `${CLI_NAME} login ${there} --via ${here}`,
+    },
+    {
+      label: 'Review and approve',
+      note: 'Shows the key fingerprint and every task in a pager, then asks you to confirm.',
+      command: `${CLI_NAME} approve ${there}/${project.slug}`,
     },
   ];
 }

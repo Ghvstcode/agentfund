@@ -9,6 +9,12 @@
 // The SSE stream simulates workers: in_flight climbs, then delivered and merged jump.
 //
 // Sessions: `POST /v1/auth/dev` works for any handle; `ada` is the instance admin.
+//
+// Federation is on in `many` (three peers: one healthy, one that does not accept this instance's
+// donors and whose last sync failed, one whose key changed) and in `empty` (no peers yet); it is
+// off in `one`. In the add-peer preview, a host containing `unreachable` cannot be verified and
+// one containing `legacy` has federation turned off.
+import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -82,6 +88,145 @@ const TASK_TITLES = [
   ['man-page', 'Generate the man page'],
 ];
 
+/** An instance key in minisign encoding: "Ed", an 8-byte key id, a 32-byte Ed25519 key. */
+const instanceKey = (rnd) =>
+  Buffer.concat([Buffer.from('Ed'), Buffer.from(hex(rnd, 16), 'hex'), Buffer.from(hex(rnd, 64), 'hex')]).toString('base64');
+/** `SHA256:<hex>` over the decoded key bytes, as the reference server computes it. */
+const fingerprintOf = (key) => `SHA256:${createHash('sha256').update(Buffer.from(key, 'base64')).digest('hex')}`;
+const stringSeed = (text) => [...text].reduce((seed, char) => (Math.imul(seed, 31) + char.charCodeAt(0)) >>> 0, 7);
+
+// [host, name, description, version, status, discover, accept_identities, accepts_us, synced minutes ago, last_error]
+const PEERS = [
+  ['fund.nordic-oss.example', 'Nordic OSS Fund', 'Inference for open-source infrastructure maintained in the Nordics.', '0.4.2', 'active', true, true, true, 4, null],
+  ['tokens.libre-science.example', 'Libre Science Compute', 'Donated inference for research software.', '0.4.0', 'active', true, false, false, 26 * 60,
+    'GET https://tokens.libre-science.example/v1/projects: 503 Service Unavailable. The cached copy from the last good sync is still listed.'],
+  ['lab.hackerspace.example:8443', 'Hackerspace Lab', 'A members-run instance for the hackerspace projects.', '0.3.9', 'key_mismatch', true, true, true, 3 * 24 * 60, null],
+];
+
+// [peer host, slug, description, language, tags, goal, progress, status, open tasks, merged tasks, donors]
+const FEDERATED_PROJECTS = [
+  ['fund.nordic-oss.example', 'fjord-db', 'An embedded time-series store for sensor data, in one file.', 'rust', ['database', 'embedded'], 240e6, 0.71, 'active', 6, 19, 23],
+  ['fund.nordic-oss.example', 'wasm-sandbox', 'Run untrusted WebAssembly with capability-based I/O.', 'rust', ['wasm', 'security'], 180e6, 0.38, 'active', 11, 8, 14],
+  ['tokens.libre-science.example', 'openspectra', 'Read, convert and plot mass-spectrometry files without vendor software.', 'python', ['science', 'file-formats'], 90e6, 0.52, 'active', 4, 12, 9],
+  ['fund.nordic-oss.example', 'sami-nlp', 'Tokenisers and spell-checking for the Sámi languages.', 'python', ['nlp', 'languages'], 60e6, 0.44, 'active', 7, 6, 8],
+  ['tokens.libre-science.example', 'pdbfold-lite', 'Protein structure alignment that fits on a laptop.', 'c++', ['bioinformatics'], 320e6, 0.09, 'active', 15, 2, 4],
+  ['fund.nordic-oss.example', 'icebreaker-ci', 'A self-hosted CI runner that needs nothing but SSH.', 'go', ['ci', 'self-hosted'], 75e6, 0.9, 'paused', 0, 14, 11],
+  ['fund.nordic-oss.example', 'ferry-times', 'Timetables and live positions for coastal ferries, offline first.', 'kotlin', ['transit', 'offline'], 35e6, 0.16, 'active', 9, 1, 3],
+  ['lab.hackerspace.example:8443', 'doorbot', 'Member access control for shared workshops.', 'rust', ['hardware', 'access'], 20e6, 0.6, 'active', 3, 5, 6],
+  ['lab.hackerspace.example:8443', 'laser-queue', 'A fair queue for the laser cutter.', 'elixir', ['scheduling'], 12e6, 0.25, 'active', 4, 1, 2],
+];
+
+/** Projects a freshly added peer turns out to have, so peering changes Discover at once. */
+const NEW_PEER_PROJECTS = [
+  ['tessera', 'Perceptual image diffing for visual regression tests.', 'rust', ['testing', 'images'], 48e6, 0.33, 'active', 5, 4, 5],
+  ['lumen-docs', 'Documentation sites from plain Markdown folders.', 'typescript', ['docs', 'static-site'], 30e6, 0.58, 'active', 3, 7, 6],
+];
+
+// Donors whose home is a peer, and the share of seeded runs each one takes over.
+const REMOTE_DONORS = [
+  ['freja@fund.nordic-oss.example', 9, 2],
+  ['olafur@fund.nordic-oss.example', 23, 5],
+  ['jun@lab.hackerspace.example:8443', 14, 6],
+];
+
+// What local donors did on peers, as those peers report it: [handle, peer host, delivered, merged share, tasks].
+const ELSEWHERE = [
+  ['ada', 'fund.nordic-oss.example', 18_420_000, 0.82, 7],
+  ['ada', 'lab.hackerspace.example:8443', 3_150_000, 1, 2],
+  ['grace', 'fund.nordic-oss.example', 6_904_000, 0.64, 3],
+  ['ken', 'fund.nordic-oss.example', 1_280_000, 0, 1],
+];
+
+function federatedProject(world, [host, slug, description, language, tags, goal, progress, status, open, merged, donors]) {
+  const delivered = Math.round((goal * progress) / 1e4) * 1e4;
+  return {
+    host,
+    slug,
+    name: slug,
+    description,
+    repo_url: `https://codeberg.org/${host.split('.')[1] ?? 'example'}/${slug}`,
+    language,
+    tags,
+    status,
+    token_goal: goal,
+    totals: {
+      pledged: Math.round((goal * Math.min(1.1, progress + 0.25)) / 1e5) * 1e5,
+      reported: Math.round(delivered * 1.18),
+      delivered,
+      merged: Math.round((delivered * 0.84) / 1e4) * 1e4,
+      in_flight: 0,
+    },
+    tasks: { open, claimed: status === 'active' && open > 4 ? 1 : 0, delivered: merged > 3 ? 2 : 0, merged, failed: 0, claimable: status === 'active' ? Math.max(0, open - 2) : 0 },
+    donors,
+    trust_tier: merged >= world.config.established_after_merged_tasks ? 'established' : 'new',
+  };
+}
+
+function seedFederation(world) {
+  const rnd = prng(20261114);
+  const { now } = world;
+  world.peers = PEERS.map(([host, name, description, version, status, discover, acceptIdentities, acceptsUs, syncedMinutesAgo, lastError], index) => {
+    const pubkey = instanceKey(rnd);
+    const observed = status === 'key_mismatch' ? instanceKey(rnd) : null;
+    return {
+      base_url: `https://${host}`,
+      host,
+      name,
+      description,
+      version,
+      pubkey,
+      pubkey_fingerprint: fingerprintOf(pubkey),
+      status,
+      discover,
+      accept_identities: acceptIdentities,
+      accepts_us: acceptsUs,
+      added_at: iso(now - (40 - index * 9) * DAY),
+      last_synced_at: iso(now - syncedMinutesAgo * 60_000),
+      last_error: observed
+        ? `The instance key changed: pinned ${fingerprintOf(pubkey).slice(0, 23)}…, now publishes ${fingerprintOf(observed).slice(0, 23)}…`
+        : lastError,
+      observed_pubkey: observed,
+    };
+  });
+  world.federatedProjects = FEDERATED_PROJECTS.map((definition) => federatedProject(world, definition));
+
+  // Hand a share of the seeded runs to donors who arrived from peers, so they show up on
+  // leaderboards, in ledgers and in the activity feed like anyone else.
+  REMOTE_DONORS.forEach(([handle, every, offset], index) => {
+    world.users.set(handle, { handle, role: 'donor', github_login: null, email: null, banned: false, created_at: iso(now - (21 - index * 6) * DAY) });
+    world.reports.forEach((report, position) => {
+      if (position % every !== offset) return;
+      for (const record of world.events) {
+        if (record.task_id === report.task_id && record.actor === report.donor && (record.payload?.claim_id === report.claim_id || record.action === 'report.received')) {
+          record.actor = handle;
+        }
+      }
+      report.donor = handle;
+    });
+  });
+
+  world.elsewhere = new Map();
+  for (const [handle, host, delivered, mergedShare, tasks] of ELSEWHERE) {
+    if (!world.users.has(handle)) continue;
+    const peer = world.peers.find((p) => p.host === host);
+    const merged = Math.round(delivered * mergedShare);
+    world.elsewhere.set(handle, [
+      ...(world.elsewhere.get(handle) ?? []),
+      {
+        instance: peerRef(peer),
+        profile_url: `${peer.base_url}/u/${handle}@${new URL(BASE_URL).host}`,
+        pledged: Math.round((delivered * 1.4) / 1e6) * 1e6,
+        reported: Math.round(delivered * 1.12),
+        delivered,
+        merged,
+        tasks_delivered: tasks,
+        tasks_merged: Math.round(tasks * mergedShare),
+        fetched_at: peer.last_synced_at,
+      },
+    ]);
+  }
+}
+
 function manifestFor(index, [suffix, title], rnd, dependsOn) {
   const id = `${String(index + 1).padStart(4, '0')}-${suffix}`;
   const module = suffix.replace(/-/g, '_');
@@ -137,6 +282,11 @@ function buildWorld(scenario) {
       max_active_claims_per_donor: 2,
     },
     seq: 0,
+    // Federation: on with peers in `many`, on with none yet in `empty`, off in `one`.
+    federation: scenario !== 'one',
+    peers: [],
+    federatedProjects: [],
+    elsewhere: new Map(),
   };
 
   const userCount = scenario === 'empty' ? 0 : scenario === 'one' ? 4 : HANDLES.length;
@@ -153,6 +303,7 @@ function buildWorld(scenario) {
 
   const projectCount = scenario === 'empty' ? 0 : scenario === 'one' ? 1 : PROJECTS.length;
   PROJECTS.slice(0, projectCount).forEach((definition, index) => seedProject(world, definition, index));
+  if (scenario === 'many') seedFederation(world);
   world.events.sort((a, b) => b.at.localeCompare(a.at));
   return world;
 }
@@ -343,7 +494,37 @@ function event(world, at, actor, action, project, taskId, payload) {
 
 // ───────────────────────────── views (OpenAPI shapes) ─────────────────────────────
 
-const userRef = (handle) => ({ id: `${BASE_URL}/u/${handle}`, handle, avatar_url: null });
+/** A user's global id is rooted at their home instance: for `name@host`, that is the peer. */
+const userRef = (handle) => {
+  const at = handle.indexOf('@');
+  const id = at === -1 ? `${BASE_URL}/u/${handle}` : `https://${handle.slice(at + 1)}/u/${handle.slice(0, at)}`;
+  return { id, handle, avatar_url: null };
+};
+const peerRef = (peer) => ({ base_url: peer.base_url, host: peer.host, name: peer.name });
+
+/** `last_error` and `observed_pubkey` are for admins; the public listing leaves them null. */
+function peerView(world, peer, { admin = false } = {}) {
+  return {
+    ...peer,
+    projects: world.federatedProjects.filter((p) => p.host === peer.host).length,
+    donors: [...world.users.keys()].filter((handle) => handle.endsWith(`@${peer.host}`)).length,
+    last_error: admin ? peer.last_error : null,
+    observed_pubkey: admin ? peer.observed_pubkey : null,
+  };
+}
+
+function federatedProjectView(world, project) {
+  const peer = world.peers.find((p) => p.host === project.host);
+  const { host: _host, ...fields } = project;
+  return {
+    id: `${peer.base_url}/${project.slug}`,
+    url: `${peer.base_url}/${project.slug}`,
+    instance: peerRef(peer),
+    ...fields,
+    accepts_local_identities: peer.accepts_us === true,
+    fetched_at: peer.last_synced_at,
+  };
+}
 const meView = (user) => ({ ...userRef(user.handle), ...user });
 const tokensOf = (report) => report.tokens_in + report.tokens_out;
 const sum = (items, pick) => items.reduce((total, item) => total + pick(item), 0);
@@ -529,6 +710,7 @@ function donorView(world, handle) {
     rank: rank === -1 ? null : rank + 1,
     projects,
     recent: ledgerEntries(world, (r) => mine(r)).filter((e) => e.type !== 'pledge').slice(0, 12),
+    ...(world.elsewhere.has(handle) ? { elsewhere: world.elsewhere.get(handle) } : {}),
   };
 }
 
@@ -722,7 +904,8 @@ async function readBody(req) {
 
 function sessionUser(world, req, { required = true, role } = {}) {
   const token = /^Bearer (afs_mock_([a-z0-9-]+))$/.exec(req.headers.authorization ?? '');
-  const user = token ? world.users.get(token[2]) : undefined;
+  // The mock's sign-in is not tied to a scenario, so a session works in all of them.
+  const user = token ? (world.users.get(token[2]) ?? (token[2] === 'ada' ? ensureUser(world, 'ada') : undefined)) : undefined;
   if (!user && required) throw new Problem(401, 'unauthorized', 'Sign in required');
   if (user?.banned) throw new Problem(403, 'banned', 'This account is banned');
   if (user && role && user.role !== role) throw new Problem(403, 'forbidden', `Requires the ${role} role`);
@@ -807,6 +990,8 @@ function previewOf(repoUrl, rnd) {
   };
 }
 
+const INSTANCE_PUBKEY = instanceKey(prng(8788));
+
 // ───────────────────────────── routes ─────────────────────────────
 
 const routes = [];
@@ -823,8 +1008,8 @@ route('GET', '/v1/meta', ({ world }) => ({
   base_url: BASE_URL,
   protocol_versions: ['v1'],
   spec_versions: [1],
-  instance_pubkey: 'RWTmock0000000000000000000000000000000000000000000000000',
-  capabilities: { github_oauth: true, dev_login: true, sse: true, ci_providers: ['github', 'generic'], ci_poll: true, federation: false },
+  instance_pubkey: INSTANCE_PUBKEY,
+  capabilities: { github_oauth: true, dev_login: true, sse: true, ci_providers: ['github', 'generic'], ci_poll: true, federation: world.federation },
   links: {
     source_url: 'https://github.com/agentfund/agentfund',
     install_command: 'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images',
@@ -1155,6 +1340,179 @@ route('PATCH', '/v1/admin/instance', ({ world, req, body }) => {
   sessionUser(world, req, { role: 'admin' });
   Object.assign(world.config, body);
   return world.config;
+});
+
+// ── federation ──
+
+function requireFederation(world) {
+  if (!world.federation) throw new Problem(404, 'not-found', 'Not found', 'Federation is turned off on this instance.');
+}
+
+function findPeer(world, host) {
+  const peer = world.peers.find((p) => p.host === host);
+  if (!peer) throw new Problem(404, 'not-found', 'No such peer', `This instance does not peer with "${host}".`);
+  return peer;
+}
+
+/** What an instance says about itself when looked up. Deterministic per host. */
+function previewPeer(world, baseUrl) {
+  let url;
+  try {
+    url = new URL(String(baseUrl ?? ''));
+  } catch {
+    throw new Problem(422, 'validation', 'Invalid instance URL', undefined, [
+      { path: 'base_url', message: 'Expected a URL like https://fund.example.org' },
+    ]);
+  }
+  if (!/^https?:$/.test(url.protocol) || !url.hostname.includes('.')) {
+    throw new Problem(422, 'validation', 'Invalid instance URL', undefined, [
+      { path: 'base_url', message: 'Expected a URL like https://fund.example.org' },
+    ]);
+  }
+  const host = url.host;
+  if (host.includes('unreachable')) {
+    throw new Problem(422, 'peer-unverifiable', 'The instance could not be verified', `${host} did not answer GET /v1/meta within 10 seconds.`);
+  }
+  if (host === new URL(BASE_URL).host) {
+    throw new Problem(422, 'peer-unverifiable', 'The instance could not be verified', 'That is this instance. An instance cannot peer with itself.');
+  }
+  const known = world.peers.find((p) => p.host === host);
+  const rnd = prng(stringSeed(host));
+  const pubkey = known ? (known.observed_pubkey ?? known.pubkey) : instanceKey(rnd);
+  const label = host.split('.').find((part) => !['fund', 'www', 'tokens', 'agentfund'].includes(part)) ?? host;
+  return {
+    base_url: `${url.protocol}//${host}`,
+    host,
+    name: known?.name ?? `${label.charAt(0).toUpperCase()}${label.slice(1).replace(/-/g, ' ')} Fund`,
+    description: known?.description ?? 'Inference for open source, donated and audited in the open.',
+    version: known?.version ?? '0.4.2',
+    pubkey,
+    pubkey_fingerprint: fingerprintOf(pubkey),
+    federation: !host.includes('legacy'),
+  };
+}
+
+route('GET', '/v1/federation/peers', ({ world }) => {
+  requireFederation(world);
+  return { items: world.peers.filter((p) => p.status !== 'paused').map((p) => peerView(world, p)) };
+});
+
+route('GET', '/v1/federation/projects', ({ world, query }) => {
+  requireFederation(world);
+  const q = (query.get('q') ?? '').toLowerCase();
+  const listed = new Set(world.peers.filter((p) => p.status === 'active' && p.discover).map((p) => p.host));
+  const items = world.federatedProjects
+    .filter((p) => listed.has(p.host))
+    .filter((p) => !query.get('peer') || p.host === query.get('peer'))
+    .filter((p) => !q || `${p.name} ${p.description} ${p.tags.join(' ')}`.toLowerCase().includes(q))
+    .filter((p) => !query.get('language') || p.language === query.get('language'))
+    .map((p) => federatedProjectView(world, p))
+    .sort((a, b) => b.totals.delivered - a.totals.delivered);
+  return paginate(items, query);
+});
+
+route('GET', '/v1/federation/donors', ({ world, query }) => {
+  requireFederation(world);
+  const home = query.get('home');
+  if (!home) throw new Problem(422, 'validation', 'A home instance is required', undefined, [{ path: 'home', message: 'Required' }]);
+  let host;
+  try {
+    host = new URL(home).host;
+  } catch {
+    throw new Problem(422, 'validation', 'Invalid home instance', undefined, [{ path: 'home', message: 'Expected a base URL' }]);
+  }
+  return paginate(standings(world, () => true).filter((row) => row.handle.endsWith(`@${host}`)), query);
+});
+
+route('GET', '/v1/admin/federation/peers', ({ world, req }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  return { items: world.peers.map((p) => peerView(world, p, { admin: true })) };
+});
+
+route('POST', '/v1/admin/federation/peers/preview', ({ world, req, body }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  return previewPeer(world, body.base_url);
+});
+
+route('POST', '/v1/admin/federation/peers', ({ world, req, body }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  const preview = previewPeer(world, body.base_url);
+  if (world.peers.some((p) => p.host === preview.host)) {
+    throw new Problem(409, 'peer-exists', 'Already a peer', `This instance already peers with ${preview.host}.`);
+  }
+  if (!preview.federation) {
+    throw new Problem(422, 'peer-unverifiable', 'The instance could not be verified', `${preview.host} has federation turned off.`);
+  }
+  if (body.pubkey !== preview.pubkey) {
+    throw new Problem(422, 'peer-unverifiable', 'The instance could not be verified', `${preview.host} publishes a different key than the one you confirmed. Nothing was saved.`);
+  }
+  const now = Date.now();
+  const peer = {
+    base_url: preview.base_url,
+    host: preview.host,
+    name: preview.name,
+    description: preview.description,
+    version: preview.version,
+    pubkey: preview.pubkey,
+    pubkey_fingerprint: preview.pubkey_fingerprint,
+    status: 'active',
+    discover: body.discover ?? true,
+    accept_identities: body.accept_identities ?? false,
+    accepts_us: null,
+    added_at: iso(now),
+    last_synced_at: iso(now),
+    last_error: null,
+    observed_pubkey: null,
+  };
+  world.peers.push(peer);
+  for (const [slug, ...rest] of NEW_PEER_PROJECTS) world.federatedProjects.push(federatedProject(world, [peer.host, slug, ...rest]));
+  return [201, peerView(world, peer, { admin: true })];
+});
+
+route('PATCH', '/v1/admin/federation/peers/:host', ({ world, req, params, body }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  const peer = findPeer(world, params.host);
+  if (typeof body.discover === 'boolean') peer.discover = body.discover;
+  if (typeof body.accept_identities === 'boolean') peer.accept_identities = body.accept_identities;
+  if (body.pubkey) {
+    peer.pubkey = body.pubkey;
+    peer.pubkey_fingerprint = fingerprintOf(body.pubkey);
+    // Pinning the key the peer publishes ends the mismatch; anything else leaves it standing.
+    if (!peer.observed_pubkey || peer.observed_pubkey === body.pubkey) {
+      peer.observed_pubkey = null;
+      peer.last_error = null;
+      peer.last_synced_at = iso(Date.now());
+      if (peer.status === 'key_mismatch') peer.status = 'active';
+    }
+  }
+  if (['active', 'paused'].includes(body.status) && peer.status !== 'key_mismatch') peer.status = body.status;
+  return peerView(world, peer, { admin: true });
+});
+
+route('DELETE', '/v1/admin/federation/peers/:host', ({ world, req, params }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  const peer = findPeer(world, params.host);
+  world.peers.splice(world.peers.indexOf(peer), 1);
+  world.federatedProjects = world.federatedProjects.filter((p) => p.host !== peer.host);
+  return [204, null];
+});
+
+route('POST', '/v1/admin/federation/peers/:host/sync', ({ world, req, params }) => {
+  sessionUser(world, req, { role: 'admin' });
+  requireFederation(world);
+  const peer = findPeer(world, params.host);
+  // A changed key stays an error until an admin decides; any other sync succeeds here.
+  if (peer.status === 'active') {
+    peer.last_synced_at = iso(Date.now());
+    peer.last_error = null;
+    if (peer.accepts_us === null) peer.accepts_us = false;
+  }
+  return peerView(world, peer, { admin: true });
 });
 
 // ───────────────────────────── server ─────────────────────────────

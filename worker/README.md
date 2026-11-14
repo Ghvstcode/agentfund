@@ -63,6 +63,7 @@ The signature verifies with the stock tool:
 
 ```sh
 agentfund login https://fund.example                 # stores the server's af_… key (0600)
+agentfund login https://other.example --via https://fund.example   # or: use your fund.example account on a peer
 agentfund approve https://fund.example/gridrs        # review prompts, pin key + commit
 agentfund dry-run gridrs                             # what would run, and why not
 export CLAUDE_CODE_OAUTH_TOKEN=…                     # or ANTHROPIC_API_KEY=…  (see below)
@@ -73,6 +74,7 @@ agentfund status
 | Command | What it does |
 | --- | --- |
 | `login <server-url> [--key-stdin]` | Reads the server API key, checks it with `GET /v1/me`, stores it in `credentials.yaml`. |
+| `login <server-url> --via <home-server-url>` | Federated login, no account on `<server-url>` needed. Your home server (where you already ran `login`) signs a short-lived identity assertion (`POST /v1/federation/assertions`), the target exchanges it for an API key of its own (`POST /v1/auth/federated`), and that key is stored in `credentials.yaml` like any other. There you appear as `<handle>@<home host>`. Both servers need federation on, and the target's admin must have peered with your home server with "accept identities" on. Your home API key is sent only to your home server. |
 | `approve <server-url>/<project> [--yes] [--no-pager] [--pubkey KEY] [--commit SHA] [--follow-unchanged-lock \| --no-follow-unchanged-lock]` | Negotiates the protocol, clones the repo, verifies the lock at the server's pinned commit, prints the **key fingerprint** (compare it with the server's Audit tab) and whether the key in the repo's `agentfund.yaml` equals the key the server publishes, shows every manifest in full through `$PAGER`, then the server's trust tier and caps next to yours and which one binds, asks, then pins `{pubkey, approved_commit, approved_lock_sha256}`. Refuses when the two key channels disagree (and no valid rotation chain connects them) unless you pass the key you trust with `--pubkey`. Run again to approve a newer commit; re-approving also clears the `retry_failed_after` cooldown of that project's earlier failed runs. It also asks whether to keep working when the project moves to a newer commit whose signed task list is byte-identical (stored per project as `follow_unchanged_lock`; `--follow-unchanged-lock` / `--no-follow-unchanged-lock` non-interactively, `--yes` alone leaves it off): the prompts cannot change, the repository's code may have, and it runs only inside the sandbox. |
 | `dry-run <project> [-n 5]` | Fetches and verifies like `work`, evaluates your policy, prints the next N open tasks with full signed prompts and the reason for every skip. No claims, no execution. |
 | `work <project> [--budget 200m] [--schedule "02:00-06:00"] [--max-concurrent 1] [--once] [--task ID] [--json] [--poll 30s] [--sandbox-image REF] [--egress-proxy-image REF]` | The loop described below. SIGINT/SIGTERM stops the sandbox and releases active claims. |

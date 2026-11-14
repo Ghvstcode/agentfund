@@ -4,7 +4,7 @@ import { type CSSProperties, type FormEvent, type ReactNode, useState } from 're
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { api, unwrap } from '@/api/client';
-import { flatItems, queryKeys, useAdminProjects, useAdminUsers, useInstanceConfig, useMe } from '@/api/queries';
+import { flatItems, queryKeys, useAdminProjects, useAdminUsers, useFederationEnabled, useInstanceConfig, useMe } from '@/api/queries';
 import type { InstanceConfig, InstanceConfigUpdate, Me, Project, ProjectStatus, Role } from '@/api/types';
 import { Button } from '@/components/Button';
 import { SelectField, TextField } from '@/components/Field';
@@ -13,7 +13,6 @@ import { SignInRequired } from '@/components/SignIn';
 import { describeError, EmptyState, ErrorState, Loading, LoadMore, Notice, SkeletonRows } from '@/components/States';
 import { Tabs } from '@/components/Tabs';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { UserLink } from '@/components/UserLink';
@@ -21,53 +20,11 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSession } from '@/hooks/useSession';
 import { formatDate } from '@/lib/format';
+import { splitHandle } from '@/lib/handles';
+import { Federation } from './admin/Federation';
+import { COLUMN, ConfirmDialog, RowError } from './admin/shared';
 
 const ROLES: Role[] = ['donor', 'maintainer', 'admin'];
-const COLUMN = 'h-9 text-xs font-medium text-muted-foreground';
-
-interface ConfirmDialogProps {
-  title: string;
-  /** What happens if the admin goes ahead. */
-  consequence: ReactNode;
-  confirmLabel: string;
-  onConfirm: () => void;
-  onClose: () => void;
-}
-
-/** The second step of a destructive action: says what will happen before it does. */
-function ConfirmDialog({ title, consequence, confirmLabel, onConfirm, onClose }: ConfirmDialogProps) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent showCloseButton={false} className="shadow-raised">
-        <DialogHeader>
-          <DialogTitle className="text-base font-semibold tracking-tight">{title}</DialogTitle>
-          <DialogDescription className="text-pretty">{consequence}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              onClose();
-              onConfirm();
-            }}
-          >
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function RowError({ error }: { error: unknown }) {
-  return (
-    <span className="mt-1 block text-xs font-medium whitespace-normal text-destructive" role="alert">
-      {describeError(error)}
-    </span>
-  );
-}
-
 function UserRow({ user, self }: { user: Me; self: boolean }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
@@ -76,10 +33,13 @@ function UserRow({ user, self }: { user: Me; self: boolean }) {
       unwrap(api.PATCH('/v1/admin/users/{handle}', { params: { path: { handle: user.handle } }, body })),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
+  // A donor who arrived from a peer signs in through it; there is no local sign-in to name.
+  const home = splitHandle(user.handle).host;
   return (
     <TableRow className="hover:bg-muted/40">
-      <TableHead scope="row" className="pl-5 font-normal">
-        <span className="flex items-center gap-2">
+      {/* On a phone the handle takes what the controls leave; a remote donor's host is cut first. */}
+      <TableHead scope="row" className="pl-5 font-normal max-sm:w-full max-sm:max-w-0">
+        <span className="flex min-w-0 items-center gap-2">
           <UserLink handle={user.handle} avatar />
           {user.banned && <Badge variant="secondary">Banned</Badge>}
         </span>
@@ -100,7 +60,9 @@ function UserRow({ user, self }: { user: Me; self: boolean }) {
           ))}
         </SelectField>
       </TableCell>
-      <TableCell className="hidden md:table-cell">{user.github_login ?? <span className="text-muted-foreground">dev login</span>}</TableCell>
+      <TableCell className="hidden md:table-cell">
+        {user.github_login ?? <span className="text-muted-foreground">{home ? `via ${home}` : 'dev login'}</span>}
+      </TableCell>
       <TableCell className="hidden md:table-cell text-muted-foreground tabular-nums">{formatDate(user.created_at)}</TableCell>
       <TableCell className="pr-5 text-right">
         {self ? (
@@ -485,6 +447,7 @@ export default function Admin() {
   const { section } = useParams();
   const token = useSession();
   const me = useMe();
+  const federation = useFederationEnabled();
 
   if (!token) return <SignInRequired title="Admin" reason="Sign in with an admin account to manage this instance." />;
 
@@ -492,7 +455,7 @@ export default function Admin() {
     <div className="container-page py-10">
       <header className="rise mb-8 grid gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">Users, projects and configuration of this instance.</p>
+        <p className="max-w-prose text-sm text-muted-foreground">Users, projects, configuration and peers of this instance.</p>
       </header>
       <div className="rise grid gap-6" style={{ '--i': 1 } as CSSProperties}>
         {me.isPending ? (
@@ -515,9 +478,19 @@ export default function Admin() {
                 { to: '/admin', label: 'Users', end: true },
                 { to: '/admin/projects', label: 'Projects' },
                 { to: '/admin/instance', label: 'Instance' },
+                // Only where the instance serves the federation operations.
+                ...(federation ? [{ to: '/admin/federation', label: 'Federation' }] : []),
               ]}
             />
-            {section === 'projects' ? <Projects /> : section === 'instance' ? <Instance /> : <Users me={me.data} />}
+            {section === 'projects' ? (
+              <Projects />
+            ) : section === 'instance' ? (
+              <Instance />
+            ) : section === 'federation' ? (
+              <Federation />
+            ) : (
+              <Users me={me.data} />
+            )}
           </>
         )}
       </div>

@@ -35,6 +35,8 @@ const (
 	CodeAlreadyReported   = "already-reported"
 	CodeRateLimited       = "rate-limited"
 	CodeInternal          = "internal"
+	CodePeerNotTrusted    = "peer-not-trusted"
+	CodeAssertionInvalid  = "assertion-invalid"
 )
 
 // Error is a non-2xx response.
@@ -189,6 +191,22 @@ func (c *Client) Negotiate(ctx context.Context, specVersion int) (*Meta, error) 
 func (c *Client) Me(ctx context.Context) (*Me, error) {
 	var m Me
 	return &m, c.do(ctx, http.MethodGet, "/v1/me", nil, nil, &m)
+}
+
+// CreateIdentityAssertion asks this instance (the caller's home) for a
+// short-lived signed identity assertion that only audience will accept.
+func (c *Client) CreateIdentityAssertion(ctx context.Context, audience string) (*IdentityAssertion, error) {
+	var a IdentityAssertion
+	return &a, c.do(ctx, http.MethodPost, "/v1/federation/assertions", nil, AssertionRequest{Audience: audience}, &a)
+}
+
+// AuthFederated exchanges a peer's identity assertion for an API key on this
+// instance. The request is sent without an Authorization header.
+func (c *Client) AuthFederated(ctx context.Context, assertion SignedDocument, label string) (*FederatedAuth, error) {
+	anon := *c
+	anon.APIKey = ""
+	var f FederatedAuth
+	return &f, anon.do(ctx, http.MethodPost, "/v1/auth/federated", nil, FederatedAuthRequest{Assertion: assertion, Label: label}, &f)
 }
 
 // Project fetches a project.

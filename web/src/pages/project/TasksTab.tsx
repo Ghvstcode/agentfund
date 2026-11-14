@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { flatItems, useTasks } from '@/api/queries';
 import type { Task } from '@/api/types';
+import { Handle } from '@/components/Handle';
 import { HandleAvatar } from '@/components/HandleAvatar';
 import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, Skeleton } from '@/components/States';
@@ -35,7 +36,7 @@ function ClaimLine({ task }: { task: Task }) {
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-live">
       <HandleAvatar handle={handle} className="size-4 text-[0.5rem]" />
-      <span className="truncate">{handle}</span>
+      <Handle handle={handle} className="truncate" />
       <TokenCounter value={claim.tokens_so_far ?? 0} label="tokens so far" size="sm" tone="accent" />
     </span>
   );

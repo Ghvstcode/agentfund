@@ -1,4 +1,4 @@
-import { Download, Flame, FolderGit2, GitMerge, Medal } from 'lucide-react';
+import { ArrowUpRight, Download, Flame, FolderGit2, GitMerge, Medal } from 'lucide-react';
 import { type CSSProperties, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError } from '@/api/client';
@@ -6,7 +6,9 @@ import { useDonor, useMeta } from '@/api/queries';
 import type { Donor, LedgerEntry } from '@/api/types';
 import { Button } from '@/components/Button';
 import { CopyButton } from '@/components/CopyButton';
+import { Handle } from '@/components/Handle';
 import { HandleAvatar } from '@/components/HandleAvatar';
+import { InstanceBadge } from '@/components/InstanceBadge';
 import { Num } from '@/components/Num';
 import { EmptyState, ErrorState, Loading, Skeleton, SkeletonRows } from '@/components/States';
 import { Time } from '@/components/Time';
@@ -15,6 +17,7 @@ import { APP_NAME } from '@/config';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { manifestId } from '@/lib/events';
 import { digitGroups, formatCompact, formatDate, formatExact } from '@/lib/format';
+import { profilePath, splitHandle } from '@/lib/handles';
 import { pullRequestLabel } from '@/lib/prs';
 import { dailySeries } from '@/lib/series';
 import { cn } from '@/lib/utils';
@@ -81,7 +84,11 @@ function ShareCard({ donor, instance, cardRef }: { donor: Donor; instance: strin
           <span className="flex min-w-0 items-center gap-2.5">
             <HandleAvatar handle={donor.handle} className="size-8 text-sm ring-white/20" />
             <span className="grid min-w-0">
-              <span className="truncate text-[0.9375rem] leading-tight font-semibold tracking-tight">{donor.handle}</span>
+              <Handle
+                handle={donor.handle}
+                className="truncate text-[0.9375rem] leading-tight font-semibold tracking-tight"
+                hostClassName="max-w-none text-zinc-400 sm:max-w-none"
+              />
               <span className="truncate text-xs text-zinc-400">{instance}</span>
             </span>
           </span>
@@ -160,18 +167,119 @@ function useDownloadCard(cardRef: React.RefObject<HTMLElement | null>, handle: s
   return { state, download };
 }
 
+/**
+ * For a donor whose account lives on a peer: say so, and link to the profile at home. Their
+ * `id` is that profile's URL.
+ */
+function HomeInstance({ donor, host }: { donor: Donor; host: string }) {
+  const { name } = splitHandle(donor.handle);
+  const home = /^https?:/.test(donor.id) ? donor.id : null;
+  return (
+    <div className="grid items-center gap-x-6 gap-y-2 rounded-lg border bg-muted/30 px-3.5 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]">
+      <p className="min-w-0 leading-relaxed text-pretty text-muted-foreground">
+        <InstanceBadge instance={{ host, name: host, base_url: home ? new URL(home).origin : host }} className="mr-1.5 align-middle" />
+        hosts {name}'s account and vouches for it. This page shows only what {name} did here.
+      </p>
+      {home && (
+        <a href={home} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 justify-self-start font-medium whitespace-nowrap">
+          Profile at home
+          <ArrowUpRight className="size-3.5 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+          <span className="sr-only">
+            ({name} on {host}, opens in a new tab)
+          </span>
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the donor did on peer instances, as each peer reports it. Set apart from everything
+ * above on purpose (no card, a dashed edge): these figures are not this instance's evidence
+ * and never enter its totals or its ranking.
+ */
+function Elsewhere({ donor }: { donor: Donor }) {
+  const standings = donor.elsewhere ?? [];
+  if (standings.length === 0) return null;
+  return (
+    <section aria-labelledby="profile-elsewhere" className="grid min-w-0 gap-3 pt-4">
+      <div className="grid gap-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 id="profile-elsewhere" className="text-base font-semibold tracking-tight">
+            On other instances
+          </h2>
+          <p className="text-xs font-medium text-muted-foreground">Not counted in the totals or rank here</p>
+        </div>
+        <p className="max-w-prose text-sm text-pretty text-muted-foreground">
+          Work {donor.handle} did on peer instances with this account. Each row is that instance's own report; this
+          instance did not verify it.
+        </p>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-dashed">
+        <Table aria-label={`What ${donor.handle} did on other instances`}>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-4">Instance</TableHead>
+              <TableHead className="text-right sm:w-28">Delivered</TableHead>
+              <TableHead className="text-right sm:w-28">Merged</TableHead>
+              <TableHead className="pr-4 text-right sm:w-28">Tasks</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {standings.map((standing) => (
+              <TableRow key={standing.instance.host} className="hover:bg-muted/40">
+                {/* The host is the point of this row, so it wraps on a phone instead of being cut. */}
+                <TableHead scope="row" className="h-auto py-2.5 pl-4 font-normal whitespace-normal">
+                  <a
+                    href={standing.profile_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex max-w-full items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
+                  >
+                    <span>{standing.instance.name}</span>
+                    <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+                    <span className="sr-only">(profile on {standing.instance.host}, opens in a new tab)</span>
+                  </a>
+                  <span className="block text-xs text-muted-foreground">
+                    as reported by <span className="num [overflow-wrap:anywhere]">{standing.instance.host}</span> · <Time value={standing.fetched_at} />
+                  </span>
+                </TableHead>
+                <TableCell className="text-right font-medium">
+                  <Num value={standing.delivered} />
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  <Num value={standing.merged} />
+                </TableCell>
+                <TableCell className="pr-4 text-right text-muted-foreground">
+                  <span title={`${standing.tasks_delivered} delivered, ${standing.tasks_merged} merged`}>
+                    <Num value={standing.tasks_delivered} unit="" />
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
+}
+
 function ProfileBody({ donor }: { donor: Donor }) {
   const meta = useMeta();
   const cardRef = useRef<HTMLElement>(null);
   const { state, download } = useDownloadCard(cardRef, donor.handle);
   const largest = Math.max(1, ...donor.projects.map((project) => project.delivered));
+  const home = splitHandle(donor.handle).host;
+  // A remote donor's `id` is their profile at home; the link to copy is this page.
+  const link = home && meta.data ? `${meta.data.base_url.replace(/\/+$/, '')}${profilePath(donor.handle)}` : home ? window.location.href : donor.id;
 
   return (
     <>
       <ShareCard donor={donor} instance={meta.data?.name ?? APP_NAME} cardRef={cardRef} />
+      {home && <HomeInstance donor={donor} host={home} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Joined {formatDate(donor.joined_at)}
+          {home ? 'Here since' : 'Joined'} {formatDate(donor.joined_at)}
           {donor.github_login && (
             <>
               {' · '}
@@ -193,7 +301,7 @@ function ProfileBody({ donor }: { donor: Donor }) {
             <Download strokeWidth={1.5} aria-hidden="true" />
             Download PNG
           </Button>
-          <CopyButton text={donor.id} label="the link to this profile" caption="Copy link" />
+          <CopyButton text={link} label="the link to this profile" caption="Copy link" />
         </div>
       </div>
 
@@ -203,7 +311,11 @@ function ProfileBody({ donor }: { donor: Donor }) {
         </h2>
         {donor.projects.length === 0 ? (
           <EmptyState icon={FolderGit2} title="No projects backed yet" action={<Button asChild variant="primary"><Link to="/">Find a project</Link></Button>}>
-            <p>{donor.handle} has an account here but has not pledged or delivered anything so far.</p>
+            <p>
+              {home
+                ? `${donor.handle} can work here through ${home} but has not pledged or delivered anything so far.`
+                : `${donor.handle} has an account here but has not pledged or delivered anything so far.`}
+            </p>
           </EmptyState>
         ) : (
           <div className="surface overflow-hidden">
@@ -248,6 +360,8 @@ function ProfileBody({ donor }: { donor: Donor }) {
           </div>
         )}
       </section>
+
+      <Elsewhere donor={donor} />
 
       <section aria-labelledby="profile-recent" className="grid min-w-0 gap-3 pt-4">
         <h2 id="profile-recent" className="text-base font-semibold tracking-tight">

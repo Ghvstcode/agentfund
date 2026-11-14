@@ -1,10 +1,22 @@
 import { Activity as ActivityIcon, ArrowRight, FolderGit2, Search, SearchX, Zap } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { flatItems, type ProjectFilters, useDeliveryEvents, useEvents, useProjects, useStats } from '@/api/queries';
-import type { AuditEvent } from '@/api/types';
+import {
+  flatItems,
+  type ProjectFilters,
+  useDeliveryEvents,
+  useEvents,
+  useFederatedProjects,
+  useFederationEnabled,
+  usePeers,
+  useProjects,
+  useStats,
+} from '@/api/queries';
+import type { AuditEvent, FederatedProject } from '@/api/types';
 import { Button, ButtonLink } from '@/components/Button';
 import { EventLine } from '@/components/EventLine';
+import { FederatedBackDialog } from '@/components/FederatedBackDialog';
+import { FederatedProjectCard, FederatedProjectCardSkeleton } from '@/components/FederatedProjectCard';
 import { SelectField, SwitchField } from '@/components/Field';
 import { InFlight } from '@/components/InFlight';
 import { LiveIndicator } from '@/components/LiveIndicator';
@@ -31,6 +43,7 @@ const SORTS = [
 type Sort = (typeof SORTS)[number]['value'];
 const FEED_LENGTH = 10;
 const PAGE_SIZE = 12;
+const FEDERATED_PAGE_SIZE = 6;
 const CHART_DAYS = 14;
 
 function useFilters() {
@@ -321,6 +334,86 @@ function Projects() {
   );
 }
 
+/**
+ * Projects hosted on peer instances, under the local list. Absent unless federation is on and
+ * at least one peer has projects to list, so a fresh instance shows no empty box. The search
+ * box and the language filter above apply here too; status, sort and "needs donors" do not,
+ * because the peers rank and gate their own projects.
+ */
+function FederatedProjects() {
+  const { filters } = useFilters();
+  const enabled = useFederationEnabled();
+  const peers = usePeers();
+  const [peer, setPeer] = useState('');
+  const [backing, setBacking] = useState<FederatedProject | null>(null);
+  const sources = (peers.data?.items ?? []).filter((item) => item.status === 'active' && item.discover && item.projects > 0);
+  const selected = sources.some((item) => item.host === peer) ? peer : '';
+  const projects = useFederatedProjects(
+    { q: filters.q || undefined, language: filters.language || undefined, peer: selected || undefined, limit: FEDERATED_PAGE_SIZE },
+    enabled && sources.length > 0,
+  );
+  const items = flatItems(projects);
+  const grid = 'grid gap-4 sm:grid-cols-2';
+
+  if (!enabled || peers.isPending || (!peers.isError && sources.length === 0)) return null;
+
+  return (
+    <section id="other-instances" aria-labelledby="other-instances-title" className="grid min-w-0 scroll-mt-20 content-start gap-4 border-t pt-10">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="grid min-w-0 gap-1">
+          <h2 id="other-instances-title" className="text-lg font-semibold tracking-tight">
+            On other instances
+          </h2>
+          <p className="max-w-prose text-xs text-pretty text-muted-foreground">
+            Projects hosted by instances this one peers with. They open on their home instance, and the figures are
+            that instance's own, as of its last sync.
+          </p>
+        </div>
+        {sources.length > 1 && (
+          <SelectField label="Instance" hideLabel value={selected} onChange={(event) => setPeer(event.target.value)} className="min-w-44">
+            <option value="">Any instance</option>
+            {sources.map((item) => (
+              <option key={item.host} value={item.host}>
+                {item.host}
+              </option>
+            ))}
+          </SelectField>
+        )}
+      </div>
+      {peers.isError ? (
+        <ErrorState title="Couldn't load projects on other instances" error={peers.error} onRetry={() => void peers.refetch()} />
+      ) : projects.isPending ? (
+        <Loading label="projects on other instances" className={grid}>
+          {Array.from({ length: 2 }, (_, index) => (
+            <FederatedProjectCardSkeleton key={index} />
+          ))}
+        </Loading>
+      ) : projects.isError ? (
+        <ErrorState title="Couldn't load projects on other instances" error={projects.error} onRetry={() => void projects.refetch()} />
+      ) : items.length === 0 ? (
+        <p className="rounded-xl border border-dashed px-5 py-4 text-sm text-muted-foreground">
+          {filters.q ? `No project on ${selected || 'another instance'} matches “${filters.q}”.` : `No project on ${selected || 'another instance'} matches these filters.`}
+        </p>
+      ) : (
+        <>
+          <div className={items.length === 1 ? 'grid gap-4' : grid}>
+            {items.map((project) => (
+              <FederatedProjectCard key={project.id} project={project} onBack={() => setBacking(project)} />
+            ))}
+          </div>
+          <LoadMore
+            hasMore={projects.hasNextPage}
+            loading={projects.isFetchingNextPage}
+            onLoad={() => void projects.fetchNextPage()}
+            label="Load more from other instances"
+          />
+        </>
+      )}
+      {backing && <FederatedBackDialog project={backing} onClose={() => setBacking(null)} />}
+    </section>
+  );
+}
+
 function Activity({ liveEvents }: { liveEvents: AuditEvent[] }) {
   const events = useEvents(FEED_LENGTH);
   const fetched = flatItems(events);
@@ -368,7 +461,10 @@ export default function Discover() {
     <>
       <Hero onEvent={onEvent} />
       <div className="container-page grid gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_21rem]">
-        <Projects />
+        <div className="grid min-w-0 content-start gap-10">
+          <Projects />
+          <FederatedProjects />
+        </div>
         <Activity liveEvents={liveEvents} />
       </div>
     </>

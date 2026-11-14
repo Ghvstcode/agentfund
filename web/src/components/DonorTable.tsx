@@ -35,7 +35,7 @@ export function DonorTable({ donors, label }: DonorTableProps) {
             <TableRow key={donor.handle} className="hover:bg-muted/40">
               <TableCell className={cn('num pl-5 text-muted-foreground', index < 3 && 'font-medium text-foreground')}>{index + 1}</TableCell>
               <TableHead scope="row" className="h-auto py-2.5 font-normal text-foreground">
-                <UserLink handle={donor.handle} avatar />
+                <UserLink handle={donor.handle} avatar stackOnNarrow />
               </TableHead>
               <TableCell className="text-right font-medium">
                 <Num value={donor.delivered} />

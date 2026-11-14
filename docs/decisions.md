@@ -20,19 +20,22 @@ page lists them, why, and where to change your mind.
 
 ## Non-goals
 
-Money anywhere in the system. Cross-instance features (see the roadmap in the
-[README](../README.md#roadmap)). MicroVM isolation. An agent that decomposes your project
+Money anywhere in the system. A ledger merged across instances. MicroVM isolation. An agent that decomposes your project
 into manifests for you. Mobile apps. Analytics beyond the ledger.
 
-## Federation: what was decided now so it stays possible later
+## Federation: the choices
 
-Instances are independent islands today. Five cheap decisions keep the door open:
+Five early decisions made it cheap: global ids are `<instance>/<slug>`, every instance has a
+keypair in `/v1/meta`, ledgers are computed from evidence, capabilities are negotiated, and
+reads need no authentication. On top of those, [federation](federation.md) made these calls:
 
-1. Global ids are `<instance>/<slug>`, never database ids.
-2. Every instance has its own keypair, published in `/v1/meta`.
-3. Ledgers are computed from evidence anyone can re-check, not from stored totals.
-4. Capability flags in `/v1/meta` let clients negotiate.
-5. Read endpoints need no authentication.
-
-Cross-instance discovery, backing a project hosted on another instance and a portable donor
-identity are roadmap, not code.
+| Choice | Default | Why, and how to change it |
+| --- | --- | --- |
+| Pull, not push | Each instance reads its peers' public API on a timer | No inbox to defend, no delivery queue, and an instance behind NAT can still follow others. `FEDERATION_SYNC_INTERVAL_SECONDS` |
+| Peering is manual and one-directional | An admin adds each peer and confirms its key fingerprint | Trust is a decision, not a crawl. There is no peer-of-peer discovery |
+| Listing a peer's projects ≠ admitting its donors | `discover` on, `accept_identities` off | The first costs nothing; the second makes their sign-up policy yours. Per peer, in Admin → Federation |
+| Numbers from a peer are shown, never summed | Leaderboards and rank are local | An instance cannot check another's CI evidence, so it does not vouch for it |
+| A federated donor is `handle@host` | `@` is not valid in a local handle | No collision with, or impersonation of, a local account is possible |
+| Identity yields an API key, not a web session | Workers only | The worker is what needs to act elsewhere; a browser can just visit the other instance |
+| A changed peer key stops everything | `key_mismatch` until an admin acts | Silent re-keying is exactly what an impostor would need |
+| On unless switched off | `FEDERATION=true`, inert with no peers | Set `FEDERATION=false` to remove the capability |

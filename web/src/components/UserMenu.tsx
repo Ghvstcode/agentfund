@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { profilePath } from '@/lib/handles';
 import { session } from '@/lib/session';
 import { UserPill } from './UserPill';
 
@@ -31,7 +32,7 @@ export default function UserMenu({ handle, admin }: { handle: string; admin: boo
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Signed in as {handle}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void navigate(`/u/${handle}`)}>
+        <DropdownMenuItem onSelect={() => void navigate(profilePath(handle))}>
           <User strokeWidth={1.5} aria-hidden="true" /> Your profile
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void navigate('/settings')}>

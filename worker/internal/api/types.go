@@ -26,6 +26,15 @@ type Meta struct {
 	Defaults         *MetaDefaults   `json:"defaults,omitempty"`
 }
 
+// Federation reports capabilities.federation: the instance serves
+// POST /v1/federation/assertions and POST /v1/auth/federated.
+func (m *Meta) Federation() bool {
+	var c struct {
+		Federation bool `json:"federation"`
+	}
+	return json.Unmarshal(m.Capabilities, &c) == nil && c.Federation
+}
+
 // MetaLinks are operator-configured pointers.
 type MetaLinks struct {
 	SourceURL      string `json:"source_url,omitempty"`
@@ -250,4 +259,45 @@ type Problem struct {
 type ProblemError struct {
 	Path    string `json:"path,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+// SignedDocument is a statement signed with an instance key. The worker
+// carries it from one instance to another and never alters payload.
+type SignedDocument struct {
+	Payload   string `json:"payload"`
+	Signature string `json:"signature"`
+}
+
+// AssertionRequest is the body of POST /v1/federation/assertions.
+type AssertionRequest struct {
+	Audience string `json:"audience"`
+}
+
+// IdentityAssertion is the response of POST /v1/federation/assertions.
+type IdentityAssertion struct {
+	Assertion SignedDocument `json:"assertion"`
+	ExpiresAt time.Time      `json:"expires_at"`
+}
+
+// FederatedAuthRequest is the body of POST /v1/auth/federated.
+type FederatedAuthRequest struct {
+	Assertion SignedDocument `json:"assertion"`
+	Label     string         `json:"label,omitempty"`
+}
+
+// APIKeyInfo describes an API key (never the secret itself).
+type APIKeyInfo struct {
+	ID         string     `json:"id"`
+	Label      string     `json:"label"`
+	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+}
+
+// FederatedAuth is the response of POST /v1/auth/federated. Key is the secret, shown once.
+type FederatedAuth struct {
+	Key    string     `json:"key"`
+	APIKey APIKeyInfo `json:"api_key"`
+	User   Me         `json:"user"`
 }

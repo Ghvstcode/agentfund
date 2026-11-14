@@ -7,12 +7,13 @@ knows nothing about any server beyond a base URL.
 ## 1. Identity and identifiers
 
 - Every externally referenced entity has a **global id** rooted at the instance base URL:
-  projects `<base_url>/<slug>`, users `<base_url>/u/<handle>`. Database ids never appear on the
-  wire. Opaque ids that do appear carry a type prefix: `clm_` claims, `rep_` reports, `plg_`
+  projects `<base_url>/<slug>`, users `<base_url>/u/<handle>`. The root is the entity's **home**
+  instance: a donor who arrived from a peer (§14) keeps the id their home gave them. Database
+  ids never appear on the wire. Opaque ids that do appear carry a type prefix: `clm_` claims, `rep_` reports, `plg_`
   pledges, `key_` API keys, `evt_` events.
 - A **task** is addressed as `<slug>:<manifest id>` (e.g. `gridrs:0042-csv-parser`).
 - Each instance generates an Ed25519 keypair on first boot and publishes the public half as
-  `meta.instance_pubkey`. Nothing in v1 uses it; it is the reserved basis for federation.
+  `meta.instance_pubkey`. It signs identity assertions, and it is what a peer pins (§14).
 
 ## 2. Negotiation
 
@@ -25,7 +26,7 @@ clients ignore keys they do not know. Breaking changes ship under `/v2/`.
 | Credential | Prefix | Obtained | Used for |
 | --- | --- | --- | --- |
 | Session token | `afs_` | GitHub OAuth (`/v1/auth/github/start`) or dev login | Browser UIs: everything a human does |
-| API key | `af_` | `POST /v1/me/api-keys` (session required) | Workers: pledge, claim, heartbeat, report, release |
+| API key | `af_` | `POST /v1/me/api-keys` (session required), or `POST /v1/auth/federated` for a donor vouched for by a peer (§14) | Workers: pledge, claim, heartbeat, report, release |
 
 Both travel as `Authorization: Bearer …`. API keys and session tokens are stored only as
 SHA-256 hashes. Operations marked `donorKey` accept an API key; where the OpenAPI lists both
@@ -191,7 +192,8 @@ the trailing `<code>`. Codes used by v1:
 `project-not-active` · `claim-limit` · `project-task-cap` · `project-daily-cap` ·
 `claim-not-active` · `already-reported` · `slug-taken` · `repo-already-registered` (all 409) ·
 `repo-unverifiable` (422; signature/schema failure when creating or re-pinning) ·
-`bad-signature` (401, webhooks) · `rate-limited` (429) · `internal` (500).
+`bad-signature` (401, webhooks) · `peer-exists` (409) · `peer-unverifiable` (422) ·
+`peer-not-trusted` (403) · `assertion-invalid` (401) · `rate-limited` (429) · `internal` (500).
 
 ## 12. Non-API public routes
 
@@ -240,3 +242,111 @@ Readings fixed while building the reference server; they are normative.
   never sign results for another project. An operator may additionally configure an
   instance-wide secret (`WEBHOOK_SECRET`) for organisation-level hooks; it is never shown to
   maintainers. A webhook whose project cannot be determined is rejected `401 bad-signature`.
+
+## 14. Federation
+
+Optional; advertised as `capabilities.federation`. An instance without it answers every
+operation in this section `404 not-found`. Three things cross instance boundaries, and only
+these: a peer's public project list, a donor's identity, and what a peer says that donor did.
+
+### 14.1 Peers
+
+Peering is one-directional and made by an admin. To peer with the instance at `B`, an admin
+of `A` supplies `B`'s base URL and the `instance_pubkey` they confirmed for it; `A` reads
+`B/v1/meta` and refuses (`422 peer-unverifiable`) unless that document validates, its
+`base_url` equals the URL being added, `capabilities.federation` is true and its
+`instance_pubkey` is the confirmed key. The key is then **pinned**. Nothing about `B` is taken
+on its own word before that, and nothing is ever taken from an instance that is not a peer.
+
+A peer has two independent switches:
+
+| Switch | Default | Effect on `A` |
+| --- | --- | --- |
+| `discover` | on | `B`'s active projects are listed under `GET /v1/federation/projects` |
+| `accept_identities` | **off** | `B`'s donors may obtain an API key on `A` (§14.3) |
+
+and a status: `active`, `paused` (nothing fetched, nothing accepted) or `key_mismatch`.
+`GET /v1/federation/peers` lists active peers publicly, which is how `B` learns whether `A`
+accepts its donors.
+
+A peer is addressed by the **host** of its base URL (`fund.example.org`, with the port when
+it is not the default). Two peers cannot share a host.
+
+### 14.2 Sync
+
+On a timer and on request, `A` pulls from each peer that is not paused, using only public
+reads, refusing redirects, with bounded response sizes:
+
+1. `GET /v1/meta`. If `base_url` no longer matches, the sync fails. If `instance_pubkey` is
+   not the pinned key the peer becomes `key_mismatch`: its cached projects stop being listed,
+   its assertions are refused and its donors' credentials stop resolving, until an admin pins
+   the new key (`PATCH …/peers/{host}` with `pubkey`) or removes the peer. A peer whose key
+   matches again returns to `active` by itself.
+2. `GET /v1/federation/peers`, to record whether the peer accepts `A`'s donors.
+3. With `discover` on: `GET /v1/projects?status=active`, paged. Each item must validate as a
+   `Project`; anything else is dropped. The result replaces the cache for that peer.
+4. `GET /v1/federation/donors?home=<A>`, paged: the standings on the peer of donors whose home
+   is `A`. Only items whose `id` is `<A>/u/<handle>` for an existing local user are kept.
+
+A failed sync changes nothing but `last_error`; the previous cache stands.
+
+Everything obtained this way is **the peer's statement**. It is served attributed to the peer
+(`FederatedProject.instance`, `Donor.elsewhere[].instance`) and is never added to a local
+total, leaderboard or rank. The ledger rule of §6 is unchanged: an instance counts only
+evidence it received itself.
+
+### 14.3 Portable donor identity
+
+A donor whose home is `A` works on a project hosted on `B` without an account on `B`:
+
+1. **Assertion.** `POST A/v1/federation/assertions {"audience": "<B>"}` (session or API key)
+   returns a `SignedDocument`: `payload` is the JSON text
+
+   ```json
+   {"type":"agentfund-identity-v1","iss":"<A>","sub":"<A>/u/<handle>","handle":"<handle>",
+    "avatar_url":null,"aud":"<B>","iat":"<RFC 3339>","exp":"<RFC 3339>","jti":"<nonce>"}
+   ```
+
+   and `signature` is a minisign signature (prehashed) over the UTF-8 bytes of `payload`
+   under `A`'s `instance_pubkey`. Lifetime is 300 seconds. An instance vouches only for
+   accounts that are its own: a user whose home is elsewhere gets `403 forbidden`.
+
+2. **Exchange.** `POST B/v1/auth/federated {"assertion": …}` (no credential). `B` checks, in
+   this order, and believes nothing in the payload before the signature step passes:
+
+   | Check | Failure |
+   | --- | --- |
+   | `payload` parses and is an `agentfund-identity-v1` statement with every field | `401 assertion-invalid` |
+   | `aud` is `B`'s own base URL | `401 assertion-invalid` |
+   | `iss` is a peer of `B` that is `active` with `accept_identities` on | `403 peer-not-trusted` |
+   | `signature` verifies under the key **pinned** for that peer | `401 assertion-invalid` |
+   | `sub` equals `<iss>/u/<handle>` and `handle` is a valid local handle | `401 assertion-invalid` |
+   | `exp` is in the future, `iat` at most 60 s ahead, `exp − iat` ≤ 600 s | `401 assertion-invalid` |
+   | `(iss, jti)` has not been redeemed before | `401 assertion-invalid` |
+
+   On success `B` finds or creates the user with `id = sub` and handle
+   `<handle>@<peer host>`, role `donor`, and returns a new API key. `@` cannot occur in a local
+   handle, so a federated handle never collides with, or shadows, a local account.
+
+3. **Work.** The key is an ordinary API key. Claim, heartbeat, report and release are
+   exactly §4–§5; delivery still requires CI evidence (§7); trust caps still apply (§8).
+
+The federated donor is `B`'s user in every other respect: `B`'s admins can ban them, and a ban
+on `B` is unaffected by anything `A` says. Their credentials on `B` resolve only while their
+home is a peer that is `active` with `accept_identities` on: pausing or removing the peer, or
+a `key_mismatch`, cuts all of its donors off at the next request. A federated user never
+receives the first-user admin role and cannot hold a browser session on `B`.
+
+### 14.4 What a peer can and cannot do
+
+A peer `B`, by being added to `A`, gains the ability to: have its project list shown on `A`
+(marked as `B`'s); if `accept_identities` is on, introduce users to `A` under handles ending
+in `@<B host>`; and say what `A`'s own donors did on `B`. It cannot create or alter a local
+account, mint a handle without its own host in it, change any local total, or make `A` fetch
+from an address other than its own base URL. A compromised peer key lets an attacker introduce
+donors as `…@<B host>` until an admin pauses the peer; those donors still cannot count a token
+as delivered without passing the project's CI.
+
+Workers need nothing new from the manifest spec. A project found through a peer is approved
+and worked on **at its home instance**, with the full verification chain of the manifest spec
+against the maintainer key pinned there.

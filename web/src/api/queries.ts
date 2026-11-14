@@ -38,6 +38,11 @@ export function flatItems<T>(query: UseInfiniteQueryResult<InfiniteData<Page<T>>
 
 export type ProjectFilters = Omit<NonNullable<paths['/v1/projects']['get']['parameters']['query']>, 'cursor'>;
 
+export type FederatedProjectFilters = Omit<
+  NonNullable<paths['/v1/federation/projects']['get']['parameters']['query']>,
+  'cursor'
+>;
+
 export const queryKeys = {
   meta: ['meta'] as const,
   stats: ['stats'] as const,
@@ -59,6 +64,11 @@ export const queryKeys = {
   adminUsers: (q: string) => ['admin', 'users', q] as const,
   adminProjects: ['admin', 'projects'] as const,
   instance: ['admin', 'instance'] as const,
+  // Everything under `federation` is refetched together when an admin changes a peer.
+  federation: ['federation'] as const,
+  peers: ['federation', 'peers'] as const,
+  federatedProjects: (filters: FederatedProjectFilters) => ['federation', 'projects', filters] as const,
+  adminPeers: ['admin', 'federation', 'peers'] as const,
 };
 
 export function useMeta() {
@@ -241,4 +251,42 @@ export function useAdminProjects() {
 
 export function useInstanceConfig() {
   return useQuery({ queryKey: queryKeys.instance, queryFn: () => unwrap(api.GET('/v1/admin/instance')) });
+}
+
+/** Whether this instance serves the federation operations; false until `/v1/meta` says so. */
+export function useFederationEnabled(): boolean {
+  return useMeta().data?.capabilities.federation === true;
+}
+
+/** The public peer list. Only asked for when the instance has federation on. */
+export function usePeers() {
+  const enabled = useFederationEnabled();
+  return useQuery({
+    queryKey: queryKeys.peers,
+    queryFn: () => unwrap(api.GET('/v1/federation/peers')),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Projects hosted on peers, as this instance last fetched them. */
+export function useFederatedProjects(filters: FederatedProjectFilters, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.federatedProjects(filters),
+    queryFn: ({ pageParam }) =>
+      unwrap(api.GET('/v1/federation/projects', { params: { query: { ...filters, cursor: pageParam } } })),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: nextCursor,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useAdminPeers() {
+  const enabled = useFederationEnabled();
+  return useQuery({
+    queryKey: queryKeys.adminPeers,
+    queryFn: () => unwrap(api.GET('/v1/admin/federation/peers')),
+    enabled,
+  });
 }

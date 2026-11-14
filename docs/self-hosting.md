@@ -51,6 +51,8 @@ with a message naming the variable. `.env.example` documents each one line by li
 | `CI_POLL` | `false` | Poll GitHub for check runs / PR state (capability `ci_poll`) |
 | `CI_POLL_INTERVAL_SECONDS` | `30` | Poll period |
 | `GITHUB_TOKEN` | – | Raises the poller's GitHub rate limit |
+| `FEDERATION` | `true` | Serve the federation operations (capability `federation`). Inert until an admin adds a peer; see [Federation](federation.md) |
+| `FEDERATION_SYNC_INTERVAL_SECONDS` | `300` | Seconds between pulls from each peer; `0` disables the timer |
 | `DATA_DIR` | `./data` (`/data` in the image) | Bare clones live in `DATA_DIR/repos` |
 | `INDEX_INTERVAL_SECONDS` | `60` | Re-index period; `0` disables the timer |
 | `ALLOW_FILE_REPOS` | `false` | Accept `file://` repos (tests, local e2e) |
@@ -198,6 +200,9 @@ starting; `seed` (dev login only) creates a user and prints an API key, and regi
   system/global config and every other transport disabled, with timeouts. The host check is
   syntactic (it does not resolve DNS); if your instance can reach sensitive internal https
   services, restrict egress at the network level.
+- Federation fetches only from the base URLs of peers an admin added, never from an address a
+  peer supplies, and refuses redirects. Adding a peer is therefore the one place an admin
+  points the server at a URL of their choosing: do not add one you would not `curl`.
 - The registered maintainer key of a project never changes except through a valid rotation
   chain in a signed lock. A head commit whose lock does not verify is never indexed: the pin
   stays, `index_error` says why, and the audit log records `project.index_failed`.

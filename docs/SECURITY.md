@@ -54,6 +54,7 @@ public's ability to **verify** every number the system shows.
 | Donor reports fake token numbers | Tokens count as **delivered** only when the CI provider confirms a passing run on the reported branch + commit. Leaderboards rank by delivered, never reported. |
 | Sybil donors inflating leaderboards | GitHub identity + delivered-only ranking: inflation costs real tokens and real passing work. |
 | New project farming trust | Per-task and per-day caps for projects with no merge history; they lift only with CI-passing merged work. Reputation is computed from the ledger. |
+| A peer instance lies, or its key is stolen | A peer is added by an admin who confirms its key fingerprint, and the key is pinned. Its numbers are shown under its name and never added to a local total. Admitting its donors is a separate, off-by-default switch; an admitted donor still needs passing CI to count. A changed key quarantines the peer until an admin acts. See [Federation](federation.md). |
 | Tampering with history | The `events` table is append-only (enforced in the database) and public; ledgers are computed from evidence rows, not stored totals. |
 
 ## Honest limitations

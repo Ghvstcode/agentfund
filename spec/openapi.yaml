@@ -33,6 +33,8 @@ tags:
     description: Instance administration
   - name: webhooks
     description: CI result ingestion
+  - name: federation
+    description: Peering between instances - discovery, portable donor identity, contributions made elsewhere
 
 security: []
 
@@ -822,6 +824,256 @@ paths:
               schema: { $ref: "#/components/schemas/InstanceConfig" }
         "403": { $ref: "#/components/responses/Problem" }
 
+  /v1/federation/peers:
+    get:
+      tags: [federation]
+      operationId: listPeers
+      summary: Instances this one has peered with
+      description: Public, so a peer can see whether its donors are accepted here (`accept_identities`).
+      responses:
+        "200":
+          description: Active peers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Peer" } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/federation/projects:
+    get:
+      tags: [federation]
+      operationId: listFederatedProjects
+      summary: Projects hosted on peer instances, as last fetched from them
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Substring search over name, description and tags" }
+        - { name: peer, in: query, schema: { type: string, maxLength: 260 }, description: Only projects of the peer with this host }
+        - { name: language, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of federated projects, most delivered first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/FederatedProject" } }
+                  next_cursor: { type: [string, "null"] }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/federation/donors:
+    get:
+      tags: [federation]
+      operationId: listFederatedDonors
+      summary: Standings of donors whose home is the given instance
+      description: |
+        What a home instance pulls to show its donors' work here. `id` of every item is the
+        donor's global id at home (`<home>/u/<handle>`).
+      parameters:
+        - { name: home, in: query, required: true, schema: { type: string, maxLength: 2048 }, description: Base URL of the home instance }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of standings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DonorStanding" } }
+                  next_cursor: { type: [string, "null"] }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/federation/assertions:
+    post:
+      tags: [federation]
+      operationId: createIdentityAssertion
+      summary: Mint a short-lived identity assertion for one other instance
+      description: |
+        Signed with this instance's key. The caller presents it to `audience` at
+        `POST /v1/auth/federated`. Only users whose home is this instance can mint one.
+      security: [{ session: [] }, { donorKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [audience]
+              properties:
+                audience: { type: string, maxLength: 2048, description: Base URL of the instance the assertion is for }
+      responses:
+        "201":
+          description: Assertion
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assertion, expires_at]
+                properties:
+                  assertion: { $ref: "#/components/schemas/SignedDocument" }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/federated:
+    post:
+      tags: [auth]
+      operationId: authFederated
+      summary: Exchange a peer's identity assertion for a worker API key
+      description: |
+        Accepted only when the issuer is a peer with `accept_identities` on and the signature
+        verifies under the key pinned for that peer. The donor appears here as
+        `<handle>@<peer host>`; no account is created by hand.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [assertion]
+              properties:
+                assertion: { $ref: "#/components/schemas/SignedDocument" }
+                label: { type: string, minLength: 1, maxLength: 80, description: Label of the API key that is created }
+      responses:
+        "201":
+          description: API key for the federated donor
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, api_key, user]
+                properties:
+                  key: { type: string, description: "The secret, `af_` prefix. Shown once." }
+                  api_key: { $ref: "#/components/schemas/ApiKey" }
+                  user: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/federation/peers:
+    get:
+      tags: [admin]
+      operationId: adminListPeers
+      summary: Every peer, with sync state
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Peers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Peer" } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [admin]
+      operationId: adminCreatePeer
+      summary: Peer with another instance, pinning the key the admin confirmed
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PeerCreate" }
+      responses:
+        "201":
+          description: Peer added and synced once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Peer" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/federation/peers/preview:
+    post:
+      tags: [admin]
+      operationId: adminPreviewPeer
+      summary: Look an instance up before peering, to compare its key fingerprint out of band
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [base_url]
+              properties:
+                base_url: { type: string, maxLength: 2048 }
+      responses:
+        "200":
+          description: What the instance says about itself
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PeerPreview" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/federation/peers/{host}:
+    parameters:
+      - { $ref: "#/components/parameters/PeerHost" }
+    patch:
+      tags: [admin]
+      operationId: adminUpdatePeer
+      summary: Pause or resume a peer, change what it is trusted for, or pin a new key
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PeerUpdate" }
+      responses:
+        "200":
+          description: Updated peer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Peer" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [admin]
+      operationId: adminDeletePeer
+      summary: Stop peering. Cached projects go; donors who arrived from the peer keep their history but can no longer authenticate
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/admin/federation/peers/{host}/sync:
+    parameters:
+      - { $ref: "#/components/parameters/PeerHost" }
+    post:
+      tags: [admin]
+      operationId: adminSyncPeer
+      summary: Fetch from the peer now instead of waiting for the timer
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Peer after the attempt (`last_error` says how it went)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Peer" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
   /v1/webhooks/ci:
     post:
       tags: [webhooks]
@@ -881,7 +1133,14 @@ components:
       name: handle
       in: path
       required: true
-      schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,38}$" }
+      description: "A local handle, or `<handle>@<host>` for a donor whose home is a peer instance."
+      schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,38}(@[a-z0-9.-]{1,253}(:[0-9]{1,5})?)?$" }
+    PeerHost:
+      name: host
+      in: path
+      required: true
+      description: "Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`."
+      schema: { type: string, pattern: "^[a-z0-9.-]{1,253}(:[0-9]{1,5})?$" }
     TaskId:
       name: task_id
       in: path
@@ -965,7 +1224,8 @@ components:
         base_url: { type: string, description: Canonical base URL; the prefix of every global id }
         protocol_versions: { type: array, items: { type: string }, examples: [["v1"]] }
         spec_versions: { type: array, items: { type: integer }, examples: [[1]] }
-        instance_pubkey: { type: string, description: Instance Ed25519 identity (minisign encoding). Unused in v1; reserved for federation. }
+        instance_pubkey: { type: string, description: Instance Ed25519 identity (minisign encoding). Signs identity assertions; peers pin it when they add this instance. }
+        instance_pubkey_fingerprint: { type: string, description: "`SHA256:<hex>` of `instance_pubkey`: what an admin reads out to a peer's admin" }
         capabilities:
           type: object
           description: Feature flags. Unknown keys MUST be ignored by clients.
@@ -976,7 +1236,7 @@ components:
             sse: { type: boolean }
             ci_providers: { type: array, items: { type: string, enum: [github, generic] } }
             ci_poll: { type: boolean, description: "Server also polls the CI provider, so webhooks need not reach it" }
-            federation: { type: boolean }
+            federation: { type: boolean, description: "The `/v1/federation/*` operations and `POST /v1/auth/federated` are served" }
           additionalProperties: true
         links:
           type: object
@@ -1005,8 +1265,8 @@ components:
       type: object
       required: [id, handle]
       properties:
-        id: { type: string, description: "Global id `<base_url>/u/<handle>`" }
-        handle: { type: string }
+        id: { type: string, description: "Global id `<base_url>/u/<handle>`, rooted at the user's home instance. For a donor who arrived from a peer it is the peer's URL, not this instance's." }
+        handle: { type: string, description: "Unique on this instance. `<handle>@<host>` when the user's home is a peer instance." }
         avatar_url: { type: [string, "null"] }
 
     Me:
@@ -1360,6 +1620,13 @@ components:
                   delivered: { type: integer }
                   merged: { type: integer }
             recent: { type: array, items: { $ref: "#/components/schemas/LedgerEntry" } }
+            elsewhere:
+              type: array
+              description: |
+                What this donor did on peer instances under an identity this instance vouched for,
+                as each peer reports it. Shown next to the local numbers, never added to them:
+                `delivered`, `rank` and every leaderboard count local evidence only.
+              items: { $ref: "#/components/schemas/RemoteStanding" }
 
     Event:
       type: object
@@ -1449,3 +1716,119 @@ components:
         new_project_max_tokens_per_day: { type: integer, minimum: 1 }
         established_after_merged_tasks: { type: integer, minimum: 0 }
         max_active_claims_per_donor: { type: integer, minimum: 1 }
+
+    SignedDocument:
+      type: object
+      description: |
+        A statement signed with an instance key. `payload` is the exact JSON text that was
+        signed; `signature` is a minisign signature (prehashed, Ed25519) over its UTF-8 bytes.
+        Save both to files and `minisign -Vm payload -x signature -P <instance_pubkey>` checks it.
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload: { type: string, minLength: 2, maxLength: 8192 }
+        signature: { type: string, minLength: 1, maxLength: 1024 }
+
+    PeerRef:
+      type: object
+      required: [base_url, host, name]
+      properties:
+        base_url: { type: string }
+        host: { type: string }
+        name: { type: string }
+
+    Peer:
+      allOf:
+        - { $ref: "#/components/schemas/PeerRef" }
+        - type: object
+          required: [pubkey, pubkey_fingerprint, status, discover, accept_identities, projects, donors, added_at]
+          properties:
+            description: { type: string }
+            version: { type: [string, "null"], description: Server software version the peer last reported }
+            pubkey: { type: string, description: The peer's instance key as pinned here (minisign encoding) }
+            pubkey_fingerprint: { type: string, description: "`SHA256:<hex>` of the pinned key" }
+            status:
+              type: string
+              enum: [active, paused, key_mismatch]
+              description: |
+                `key_mismatch`: the peer now publishes a key other than the pinned one. Nothing
+                is fetched from it and none of its assertions are accepted until an admin pins
+                the new key or removes the peer.
+            discover: { type: boolean, description: Its projects are listed under `/v1/federation/projects` }
+            accept_identities: { type: boolean, description: Its donors may work here via `POST /v1/auth/federated` }
+            accepts_us: { type: [boolean, "null"], description: "Whether the peer accepts this instance's donors, as it last said; null = unknown" }
+            projects: { type: integer, description: Projects of the peer cached here }
+            donors: { type: integer, description: Users here whose home is the peer }
+            added_at: { type: string, format: date-time }
+            last_synced_at: { type: [string, "null"], format: date-time, description: Last successful fetch }
+            last_error: { type: [string, "null"], description: Why the last fetch failed. Admin listing only; null elsewhere }
+            observed_pubkey: { type: [string, "null"], description: "The unpinned key the peer published, while `key_mismatch`. Admin listing only" }
+            observed_pubkey_fingerprint: { type: [string, "null"], description: "`SHA256:<hex>` of `observed_pubkey`. Admin listing only" }
+
+    PeerCreate:
+      type: object
+      additionalProperties: false
+      required: [base_url, pubkey]
+      properties:
+        base_url: { type: string, maxLength: 2048 }
+        pubkey: { type: string, maxLength: 128, description: "The instance key the admin confirmed (from the preview). Refused with `peer-unverifiable` if the peer publishes another." }
+        discover: { type: boolean, default: true }
+        accept_identities: { type: boolean, default: false }
+
+    PeerUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [active, paused] }
+        discover: { type: boolean }
+        accept_identities: { type: boolean }
+        pubkey: { type: string, maxLength: 128, description: Pin this key instead (after a `key_mismatch` the admin has verified out of band) }
+
+    PeerPreview:
+      allOf:
+        - { $ref: "#/components/schemas/PeerRef" }
+        - type: object
+          required: [pubkey, pubkey_fingerprint, federation]
+          properties:
+            description: { type: string }
+            version: { type: [string, "null"] }
+            pubkey: { type: string }
+            pubkey_fingerprint: { type: string }
+            federation: { type: boolean, description: Whether the instance serves the federation operations }
+
+    FederatedProject:
+      type: object
+      description: A project on a peer instance. Numbers are the peer's own, as of `fetched_at`.
+      required: [id, url, instance, slug, name, description, repo_url, status, token_goal, totals, tasks, donors, trust_tier, accepts_local_identities, fetched_at]
+      properties:
+        id: { type: string, description: "Global id `<peer base_url>/<slug>`" }
+        url: { type: string, description: The project's page on its home instance }
+        instance: { $ref: "#/components/schemas/PeerRef" }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        repo_url: { type: string }
+        language: { type: [string, "null"] }
+        tags: { type: array, items: { type: string } }
+        status: { type: string, enum: [active, paused] }
+        token_goal: { type: integer }
+        totals: { $ref: "#/components/schemas/Totals" }
+        tasks: { $ref: "#/components/schemas/TaskCounts" }
+        donors: { type: integer }
+        trust_tier: { type: string, enum: [new, established] }
+        accepts_local_identities: { type: boolean, description: This instance's donors can work on it without an account there }
+        fetched_at: { type: string, format: date-time }
+
+    RemoteStanding:
+      type: object
+      required: [instance, profile_url, pledged, reported, delivered, merged, tasks_delivered, tasks_merged, fetched_at]
+      properties:
+        instance: { $ref: "#/components/schemas/PeerRef" }
+        profile_url: { type: string, description: The donor's profile on the peer }
+        pledged: { type: integer }
+        reported: { type: integer }
+        delivered: { type: integer }
+        merged: { type: integer }
+        tasks_delivered: { type: integer }
+        tasks_merged: { type: integer }
+        fetched_at: { type: string, format: date-time }

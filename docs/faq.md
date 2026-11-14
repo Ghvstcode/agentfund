@@ -157,8 +157,11 @@ compute. [Decisions](decisions.md) has the other defaults.
 
 ### Do instances talk to each other?
 
-Not yet. Federation is on the roadmap, and five decisions were made to keep it possible;
-see the [README](../README.md#roadmap).
+Only when their admins say so. An admin can peer with another instance: its projects are
+then listed here, its donors can work here under their home identity if the admin allows it,
+and profiles show work delivered elsewhere. Each instance still counts only its own
+evidence; numbers from a peer are shown under the peer's name and never added up.
+[Federation](federation.md) has the details.
 
 ### Why is it called AgentFund?
 

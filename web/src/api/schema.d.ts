@@ -265,6 +265,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
+                /** @description A local handle, or `<handle>@<host>` for a donor whose home is a peer instance. */
                 handle: components["parameters"]["Handle"];
             };
             cookie?: never;
@@ -570,6 +571,7 @@ export interface paths {
             query?: never;
             header?: never;
             path: {
+                /** @description A local handle, or `<handle>@<host>` for a donor whose home is a peer instance. */
                 handle: components["parameters"]["Handle"];
             };
             cookie?: never;
@@ -636,6 +638,183 @@ export interface paths {
         head?: never;
         /** Update instance configuration */
         patch: operations["adminUpdateInstance"];
+        trace?: never;
+    };
+    "/v1/federation/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Instances this one has peered with
+         * @description Public, so a peer can see whether its donors are accepted here (`accept_identities`).
+         */
+        get: operations["listPeers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Projects hosted on peer instances, as last fetched from them */
+        get: operations["listFederatedProjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/donors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Standings of donors whose home is the given instance
+         * @description What a home instance pulls to show its donors' work here. `id` of every item is the
+         *     donor's global id at home (`<home>/u/<handle>`).
+         */
+        get: operations["listFederatedDonors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/assertions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a short-lived identity assertion for one other instance
+         * @description Signed with this instance's key. The caller presents it to `audience` at
+         *     `POST /v1/auth/federated`. Only users whose home is this instance can mint one.
+         */
+        post: operations["createIdentityAssertion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/federated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange a peer's identity assertion for a worker API key
+         * @description Accepted only when the issuer is a peer with `accept_identities` on and the signature
+         *     verifies under the key pinned for that peer. The donor appears here as
+         *     `<handle>@<peer host>`; no account is created by hand.
+         */
+        post: operations["authFederated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/federation/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every peer, with sync state */
+        get: operations["adminListPeers"];
+        put?: never;
+        /** Peer with another instance, pinning the key the admin confirmed */
+        post: operations["adminCreatePeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/federation/peers/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Look an instance up before peering, to compare its key fingerprint out of band */
+        post: operations["adminPreviewPeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/federation/peers/{host}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+                host: components["parameters"]["PeerHost"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Stop peering. Cached projects go; donors who arrived from the peer keep their history but can no longer authenticate */
+        delete: operations["adminDeletePeer"];
+        options?: never;
+        head?: never;
+        /** Pause or resume a peer, change what it is trusted for, or pin a new key */
+        patch: operations["adminUpdatePeer"];
+        trace?: never;
+    };
+    "/v1/admin/federation/peers/{host}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+                host: components["parameters"]["PeerHost"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch from the peer now instead of waiting for the timer */
+        post: operations["adminSyncPeer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/webhooks/ci": {
@@ -724,8 +903,10 @@ export interface components {
              *     ]
              */
             spec_versions: number[];
-            /** @description Instance Ed25519 identity (minisign encoding). Unused in v1; reserved for federation. */
+            /** @description Instance Ed25519 identity (minisign encoding). Signs identity assertions; peers pin it when they add this instance. */
             instance_pubkey?: string;
+            /** @description `SHA256:<hex>` of `instance_pubkey`: what an admin reads out to a peer's admin */
+            instance_pubkey_fingerprint?: string;
             /** @description Feature flags. Unknown keys MUST be ignored by clients. */
             capabilities: {
                 github_oauth: boolean;
@@ -734,6 +915,7 @@ export interface components {
                 ci_providers: ("github" | "generic")[];
                 /** @description Server also polls the CI provider, so webhooks need not reach it */
                 ci_poll: boolean;
+                /** @description The `/v1/federation/*` operations and `POST /v1/auth/federated` are served */
                 federation: boolean;
             } & {
                 [key: string]: unknown;
@@ -760,8 +942,9 @@ export interface components {
             tasks_delivered?: number;
         };
         UserRef: {
-            /** @description Global id `<base_url>/u/<handle>` */
+            /** @description Global id `<base_url>/u/<handle>`, rooted at the user's home instance. For a donor who arrived from a peer it is the peer's URL, not this instance's. */
             id: string;
+            /** @description Unique on this instance. `<handle>@<host>` when the user's home is a peer instance. */
             handle: string;
             avatar_url?: string | null;
         };
@@ -1094,6 +1277,12 @@ export interface components {
                 merged: number;
             }[];
             recent: components["schemas"]["LedgerEntry"][];
+            /**
+             * @description What this donor did on peer instances under an identity this instance vouched for,
+             *     as each peer reports it. Shown next to the local numbers, never added to them:
+             *     `delivered`, `rank` and every leaderboard count local evidence only.
+             */
+            elsewhere?: components["schemas"]["RemoteStanding"][];
         };
         Event: {
             id: string;
@@ -1182,6 +1371,123 @@ export interface components {
             established_after_merged_tasks?: number;
             max_active_claims_per_donor?: number;
         };
+        /**
+         * @description A statement signed with an instance key. `payload` is the exact JSON text that was
+         *     signed; `signature` is a minisign signature (prehashed, Ed25519) over its UTF-8 bytes.
+         *     Save both to files and `minisign -Vm payload -x signature -P <instance_pubkey>` checks it.
+         */
+        SignedDocument: {
+            payload: string;
+            signature: string;
+        };
+        PeerRef: {
+            base_url: string;
+            host: string;
+            name: string;
+        };
+        Peer: components["schemas"]["PeerRef"] & {
+            description?: string;
+            /** @description Server software version the peer last reported */
+            version?: string | null;
+            /** @description The peer's instance key as pinned here (minisign encoding) */
+            pubkey: string;
+            /** @description `SHA256:<hex>` of the pinned key */
+            pubkey_fingerprint: string;
+            /**
+             * @description `key_mismatch`: the peer now publishes a key other than the pinned one. Nothing
+             *     is fetched from it and none of its assertions are accepted until an admin pins
+             *     the new key or removes the peer.
+             * @enum {string}
+             */
+            status: "active" | "paused" | "key_mismatch";
+            /** @description Its projects are listed under `/v1/federation/projects` */
+            discover: boolean;
+            /** @description Its donors may work here via `POST /v1/auth/federated` */
+            accept_identities: boolean;
+            /** @description Whether the peer accepts this instance's donors, as it last said; null = unknown */
+            accepts_us?: boolean | null;
+            /** @description Projects of the peer cached here */
+            projects: number;
+            /** @description Users here whose home is the peer */
+            donors: number;
+            /** Format: date-time */
+            added_at: string;
+            /**
+             * Format: date-time
+             * @description Last successful fetch
+             */
+            last_synced_at?: string | null;
+            /** @description Why the last fetch failed. Admin listing only; null elsewhere */
+            last_error?: string | null;
+            /** @description The unpinned key the peer published, while `key_mismatch`. Admin listing only */
+            observed_pubkey?: string | null;
+            /** @description `SHA256:<hex>` of `observed_pubkey`. Admin listing only */
+            observed_pubkey_fingerprint?: string | null;
+        };
+        PeerCreate: {
+            base_url: string;
+            /** @description The instance key the admin confirmed (from the preview). Refused with `peer-unverifiable` if the peer publishes another. */
+            pubkey: string;
+            /** @default true */
+            discover: boolean;
+            /** @default false */
+            accept_identities: boolean;
+        };
+        PeerUpdate: {
+            /** @enum {string} */
+            status?: "active" | "paused";
+            discover?: boolean;
+            accept_identities?: boolean;
+            /** @description Pin this key instead (after a `key_mismatch` the admin has verified out of band) */
+            pubkey?: string;
+        };
+        PeerPreview: components["schemas"]["PeerRef"] & {
+            description?: string;
+            version?: string | null;
+            pubkey: string;
+            pubkey_fingerprint: string;
+            /** @description Whether the instance serves the federation operations */
+            federation: boolean;
+        };
+        /** @description A project on a peer instance. Numbers are the peer's own, as of `fetched_at`. */
+        FederatedProject: {
+            /** @description Global id `<peer base_url>/<slug>` */
+            id: string;
+            /** @description The project's page on its home instance */
+            url: string;
+            instance: components["schemas"]["PeerRef"];
+            slug: string;
+            name: string;
+            description: string;
+            repo_url: string;
+            language?: string | null;
+            tags?: string[];
+            /** @enum {string} */
+            status: "active" | "paused";
+            token_goal: number;
+            totals: components["schemas"]["Totals"];
+            tasks: components["schemas"]["TaskCounts"];
+            donors: number;
+            /** @enum {string} */
+            trust_tier: "new" | "established";
+            /** @description This instance's donors can work on it without an account there */
+            accepts_local_identities: boolean;
+            /** Format: date-time */
+            fetched_at: string;
+        };
+        RemoteStanding: {
+            instance: components["schemas"]["PeerRef"];
+            /** @description The donor's profile on the peer */
+            profile_url: string;
+            pledged: number;
+            reported: number;
+            delivered: number;
+            merged: number;
+            tasks_delivered: number;
+            tasks_merged: number;
+            /** Format: date-time */
+            fetched_at: string;
+        };
     };
     responses: {
         /** @description Error (RFC 9457) */
@@ -1196,7 +1502,10 @@ export interface components {
     };
     parameters: {
         Slug: string;
+        /** @description A local handle, or `<handle>@<host>` for a donor whose home is a peer instance. */
         Handle: string;
+        /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+        PeerHost: string;
         /** @description Instance-unique task reference, `<project slug>:<manifest id>`, e.g. `gridrs:0042-csv-parser`. */
         TaskId: string;
         ClaimId: string;
@@ -1650,6 +1959,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description A local handle, or `<handle>@<host>` for a donor whose home is a peer instance. */
                 handle: components["parameters"]["Handle"];
             };
             cookie?: never;
@@ -2116,6 +2426,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description A local handle, or `<handle>@<host>` for a donor whose home is a peer instance. */
                 handle: components["parameters"]["Handle"];
             };
             cookie?: never;
@@ -2243,6 +2554,318 @@ export interface operations {
                 };
             };
             403: components["responses"]["Problem"];
+        };
+    };
+    listPeers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active peers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Peer"][];
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    listFederatedProjects: {
+        parameters: {
+            query?: {
+                /** @description Substring search over name, description and tags */
+                q?: string;
+                /** @description Only projects of the peer with this host */
+                peer?: string;
+                language?: string;
+                limit?: components["parameters"]["Limit"];
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of federated projects, most delivered first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FederatedProject"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    listFederatedDonors: {
+        parameters: {
+            query: {
+                /** @description Base URL of the home instance */
+                home: string;
+                limit?: components["parameters"]["Limit"];
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of standings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DonorStanding"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createIdentityAssertion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Base URL of the instance the assertion is for */
+                    audience: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Assertion */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        assertion: components["schemas"]["SignedDocument"];
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    authFederated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    assertion: components["schemas"]["SignedDocument"];
+                    /** @description Label of the API key that is created */
+                    label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description API key for the federated donor */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The secret, `af_` prefix. Shown once. */
+                        key: string;
+                        api_key: components["schemas"]["ApiKey"];
+                        user: components["schemas"]["Me"];
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    adminListPeers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Peers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Peer"][];
+                    };
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    adminCreatePeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerCreate"];
+            };
+        };
+        responses: {
+            /** @description Peer added and synced once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    adminPreviewPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    base_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What the instance says about itself */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerPreview"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    adminDeletePeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+                host: components["parameters"]["PeerHost"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    adminUpdatePeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+                host: components["parameters"]["PeerHost"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated peer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    adminSyncPeer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host (and port, when not the default) of a peer's base URL, e.g. `fund.example.org`. */
+                host: components["parameters"]["PeerHost"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Peer after the attempt (`last_error` says how it went) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Peer"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     ciWebhook: {
