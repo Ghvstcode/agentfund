@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
 // Fixed properties of the sandbox image (images/sandbox/Dockerfile).
@@ -25,6 +25,16 @@ const (
 	ProxyPort = "3128"
 	// ProxyAlias is the DNS name of the sidecar on the internal network.
 	ProxyAlias = "egress-proxy"
+
+	// The donor's extra CA certificates (Spec.ExtraCACerts) live in a
+	// root-owned tmpfs: ExtraCAFile holds them alone (NODE_EXTRA_CA_CERTS adds
+	// it to Node's roots), CABundleFile holds the image's roots plus them
+	// (some clients read SSL_CERT_FILE in place of their roots: Codex's
+	// WebSocket, OpenSSL, Go).
+	CADir          = "/etc/agentfund/ca"
+	ExtraCAFile    = CADir + "/extra.pem"
+	CABundleFile   = CADir + "/bundle.pem"
+	SystemCABundle = "/etc/ssl/certs/ca-certificates.crt"
 
 	// Labels attached to every resource the worker creates.
 	LabelRun = app.LabelPrefix + ".run"
@@ -41,6 +51,10 @@ type Spec struct {
 	PIDs       int
 	// AllowHosts is the egress allowlist, host[:port] (port defaults to 443).
 	AllowHosts []string
+	// ExtraCACerts are PEM certificates the agent trusts besides the image's
+	// roots (nil = none). They are copied in, not bind-mounted, so this works
+	// whichever host paths the Docker engine can see.
+	ExtraCACerts []byte
 }
 
 var (
@@ -64,6 +78,9 @@ func (s Spec) validate() error {
 		if !hostRE.MatchString(h) {
 			return fmt.Errorf("sandbox: bad egress allowlist entry %q", h)
 		}
+	}
+	if len(s.ExtraCACerts) > 0 && (!bytes.HasPrefix(s.ExtraCACerts, []byte("-----BEGIN CERTIFICATE-----")) || bytes.Contains(s.ExtraCACerts, []byte("PRIVATE KEY"))) {
+		return fmt.Errorf("sandbox: extra CA certificates must be PEM CERTIFICATE blocks only")
 	}
 	return nil
 }
@@ -125,6 +142,14 @@ func boxArgs(s Spec) []string {
 		"--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=4g,mode=1777",
 		"--tmpfs", AgentHome+":rw,exec,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=0700",
 		"--mount", "type=volume,src="+volume+",dst="+WorkDir,
+	)
+	if len(s.ExtraCACerts) > 0 {
+		args = append(args,
+			"--tmpfs", CADir+":rw,noexec,nosuid,nodev,size=4m,mode=0755", // root-owned: the agent can read, not write
+			"-e", "NODE_EXTRA_CA_CERTS="+ExtraCAFile, "-e", "SSL_CERT_FILE="+CABundleFile,
+		)
+	}
+	args = append(args,
 		"--user", AgentUser,
 		"--workdir", WorkDir,
 		"--init",
@@ -164,7 +189,29 @@ func Start(ctx context.Context, eng Engine, spec Spec) (*Session, error) {
 			return nil, fmt.Errorf("sandbox: %s: %w", st.what, err)
 		}
 	}
+	if len(spec.ExtraCACerts) > 0 {
+		if err := s.installCACerts(ctx); err != nil {
+			s.Close()
+			return nil, err
+		}
+	}
 	return s, nil
+}
+
+// installCACerts writes the extra certificates and the combined bundle as
+// root, before the agent runs, so the agent can read but not change them.
+func (s *Session) installCACerts(ctx context.Context) error {
+	script := "umask 022 && cat > " + ExtraCAFile + " && cat " + SystemCABundle + " " + ExtraCAFile + " > " + CABundleFile
+	var errb bytes.Buffer
+	code, err := s.eng.Stream(ctx, bytes.NewReader(s.spec.ExtraCACerts), io.Discard, &errb, nil,
+		"exec", "-i", "-u", "0:0", s.box, "sh", "-c", script)
+	if err == nil && code != 0 {
+		err = fmt.Errorf("exited %d: %s", code, strings.TrimSpace(errb.String()))
+	}
+	if err != nil {
+		return fmt.Errorf("sandbox: install extra CA certificates (the image needs %s): %w", SystemCABundle, err)
+	}
+	return nil
 }
 
 // Container returns the sandbox container name.

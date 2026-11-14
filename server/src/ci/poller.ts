@@ -29,13 +29,19 @@ interface PullRequest {
 
 class RateLimited extends Error {}
 
-async function gh<T>(ctx: AppContext, path: string): Promise<T | null> {
+/** The App's read token for the repo when it is installed there, else GITHUB_TOKEN (public repos). */
+async function tokenFor(ctx: AppContext, repo: string): Promise<string | undefined> {
+  const app = ctx.githubApp ? await ctx.githubApp.repoToken(repo).catch((err: unknown) => (ctx.log.warn("installation token failed", { repo, err }), null)) : null;
+  return app ?? ctx.config.githubToken;
+}
+
+async function gh<T>(ctx: AppContext, path: string, token: string | undefined): Promise<T | null> {
   const res = await ctx.fetch(`${API}${path}`, {
     headers: {
       accept: "application/vnd.github+json",
       "x-github-api-version": "2026-03-10",
       "user-agent": "agentfund-server",
-      ...(ctx.config.githubToken ? { authorization: `Bearer ${ctx.config.githubToken}` } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     signal: AbortSignal.timeout(15_000),
   });
@@ -81,12 +87,13 @@ export async function pollOnce(ctx: AppContext): Promise<{ checked: number; appl
   try {
     for (const r of pending) {
       const repo = r.repo_key.slice("https://github.com/".length);
+      const token = await tokenFor(ctx, repo);
       const projectId = Number(r.project_id);
       const found: Evidence[] = [];
       if (r.delivery === "pending_ci") {
         const runs: CheckRun[] = [];
         for (let page = 1; page <= 5; page++) {
-          const body = await gh<{ total_count?: number; check_runs?: CheckRun[] }>(ctx, `/repos/${repo}/commits/${r.head_sha}/check-runs?per_page=100&page=${page}`);
+          const body = await gh<{ total_count?: number; check_runs?: CheckRun[] }>(ctx, `/repos/${repo}/commits/${r.head_sha}/check-runs?per_page=100&page=${page}`, token);
           runs.push(...(body?.check_runs ?? []));
           if (!body || runs.length >= (body.total_count ?? 0) || (body.check_runs ?? []).length === 0) break;
         }
@@ -98,7 +105,7 @@ export async function pollOnce(ctx: AppContext): Promise<{ checked: number; appl
       // The PR must live in the project repo and carry the reported branch; anything else is not evidence.
       const pr = parsePrUrl(r.pr_url);
       if (pr && pr.repo === repo) {
-        const body = await gh<PullRequest>(ctx, `/repos/${repo}/pulls/${pr.number}`);
+        const body = await gh<PullRequest>(ctx, `/repos/${repo}/pulls/${pr.number}`, token);
         if (body && body.state === "closed" && body.head?.ref === r.branch && (body.base?.repo?.full_name ?? "").toLowerCase() === repo) {
           found.push({ provider: "github", source: "poll", kind: "pr", runKey: `github:pr:${pr.number}`, branch: r.branch, headSha: body.head?.sha ?? r.head_sha, conclusion: body.merged === true ? "merged" : "closed", runUrl: null, prUrl: r.pr_url });
         }

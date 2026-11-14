@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/spec"
-	"github.com/agentfund/agentfund/worker/internal/verify"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/verify"
 )
 
 // LoopOptions control Work.
@@ -273,7 +273,7 @@ func (w *Worker) DryRun(ctx context.Context, n int) ([]Preview, error) {
 			continue
 		}
 		if !fetched {
-			fetchErr = gitx.Fetch(ctx, repoDir, proj.RepoURL, t.Commit, w.Project.ApprovedCommit)
+			fetchErr = gitx.FetchAuth(ctx, repoDir, proj.RepoURL, gitx.Auth(w.Project.GitAuth), t.Commit, w.Project.ApprovedCommit)
 			fetched = true
 		}
 		if fetchErr != nil {

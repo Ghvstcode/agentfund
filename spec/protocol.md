@@ -41,6 +41,15 @@ can write to anyone's repositories.
 Roles: `donor` (default), `maintainer` (granted on first project creation), `admin` (handles
 listed in instance config, or the first user when none are configured). Banned users get `403`.
 
+**Members-only instances** (`meta.capabilities.members_only`): every operation except
+`getMeta`, `authGithubStart`, `authGithubCallback` and `ciWebhook` needs a credential, also the
+ones the OpenAPI marks public, and answers `401` without one. A credential whose user is not
+(or no longer) a member of the instance's GitHub organizations gets `403`. GitHub sign-in
+refuses non-members. Such an instance also sets `capabilities.sse` to `false`: `EventSource`
+cannot send a bearer token, so clients poll. Creating or previewing a project on GitHub needs
+write access to its repository; until that holds, every answer is the same
+"repository not found or you have no write access to it".
+
 ## 4. Task state machine
 
 ```
@@ -56,7 +65,9 @@ listed in instance config, or the first user when none are configured). Banned u
   exactly one concurrent caller wins, the rest get `409 task-not-open`.
 - A claim is refused with `409` and problem code:
   - `task-not-open` — state is not `open`;
-  - `dependencies-unmet` — some `depends_on` task is not `merged`;
+  - `dependencies-unmet` — some `depends_on` task is not `merged`, or the instance has not
+    read the base branch without error since that merge was recorded (claims start from the
+    pinned commit, which must contain the merged work);
   - `project-not-active` — project is `pending`, `paused` or `removed`;
   - `claim-limit` — the donor already holds the instance's maximum of active claims;
   - `project-task-cap` / `project-daily-cap` — new-project trust caps (§7).
@@ -200,7 +211,8 @@ the trailing `<code>`. Codes used by v1:
 Served by the reference server next to the API, for discoverability; not part of the protocol
 contract and not needed by workers: `/sitemap.xml`, `/feed.atom` (new projects + deliveries),
 `/og/<slug>.png` (generated card with the progress bar), `/healthz`, and the built SPA with
-per-route meta/OpenGraph/JSON-LD tags injected.
+per-route meta/OpenGraph/JSON-LD tags injected. On a members-only instance the sitemap, feed
+and cards answer `404`, and every path gets the same generic, `noindex` shell.
 
 ## 13. Clarifications
 
@@ -210,6 +222,10 @@ Readings fixed while building the reference server; they are normative.
   commit that contains their merged dependencies.
 - **`agentfund.yaml` `repo_url` must equal the URL being registered** (else
   `repo-unverifiable`), so a fork cannot be registered as the original.
+- **On a public instance, creating or previewing a GitHub project needs push access** to its
+  repository, asked of GitHub with the caller's own sign-in; otherwise `forbidden` (403), before
+  the repository is read. Admins are exempt. Repositories off github.com are registered by an
+  admin.
 - **`Project.pubkey` is the newest key reached through a valid rotation chain** from the key
   registered at creation; the change emits `project.key_rotated`.
 - **CI conclusions.** `success` passes. `failure`, `cancelled`, `timed_out`, `action_required`
@@ -246,7 +262,8 @@ Readings fixed while building the reference server; they are normative.
 ## 14. Federation
 
 Optional; advertised as `capabilities.federation`. An instance without it answers every
-operation in this section `404 not-found`. Three things cross instance boundaries, and only
+operation in this section `404 not-found`. An instance with `capabilities.members_only` never
+has it. Three things cross instance boundaries, and only
 these: a peer's public project list, a donor's identity, and what a peer says that donor did.
 
 ### 14.1 Peers

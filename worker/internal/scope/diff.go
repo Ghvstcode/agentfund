@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agentfund/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
 )
 
 // Kind classifies a change.

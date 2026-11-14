@@ -400,3 +400,12 @@ describe("FEDERATION=false", () => {
     }
   });
 });
+
+describe("INSTANCE_ACCESS=members", () => {
+  it("turns federation off: a private instance takes nobody's word for who its members are", async () => {
+    const { loadConfig } = await import("../src/config.js");
+    const base = { DATABASE_URL: "postgres://u:p@localhost:5432/x", GITHUB_CLIENT_ID: "c", GITHUB_CLIENT_SECRET: "s", AUTH_DEV_LOGIN: "false" };
+    expect(loadConfig(base).federation).toBe(true);
+    expect(loadConfig({ ...base, INSTANCE_ACCESS: "members", ALLOWED_GITHUB_ORGS: "acme", GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "k", FEDERATION: "true" }).federation).toBe(false);
+  });
+});

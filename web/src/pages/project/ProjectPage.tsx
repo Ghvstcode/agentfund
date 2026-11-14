@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { GitBranch, ShieldCheck, Sprout, Zap } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useOutletContext, useParams } from 'react-router';
 import { ApiError } from '@/api/client';
@@ -7,22 +7,21 @@ import { queryKeys, useLedger, useProject } from '@/api/queries';
 import type { AuditEvent, Project, TaskCounts, Totals } from '@/api/types';
 import { BackDialog } from '@/components/BackDialog';
 import { Button } from '@/components/Button';
+import { useCopy } from '@/components/CopyButton';
+import { DailyBars } from '@/components/DailyBars';
 import { FundingBar } from '@/components/FundingBar';
-import { InFlight } from '@/components/InFlight';
 import { LiveIndicator } from '@/components/LiveIndicator';
 import { Num } from '@/components/Num';
-import { Sparkline } from '@/components/Sparkline';
-import { Stat } from '@/components/Stat';
 import { ErrorState, Loading, Notice, Skeleton, SkeletonRows } from '@/components/States';
 import { Tabs } from '@/components/Tabs';
 import { TokenCounter } from '@/components/TokenCounter';
-import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { UserLink } from '@/components/UserLink';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useLive } from '@/hooks/useLive';
 import { formatCompact, formatExact, formatPercent } from '@/lib/format';
-import { cumulative, dailySeries } from '@/lib/series';
+import { dailySeries } from '@/lib/series';
+import { cn } from '@/lib/utils';
 import NotFound from '../NotFound';
 
 export interface ProjectContext {
@@ -46,118 +45,158 @@ const stagger = (index: number) => ({ '--i': index }) as CSSProperties;
 
 function Repo({ url }: { url: string }) {
   const label = url.replace(/^[a-z]+:\/\//, '').replace(/\.git$/, '');
-  const content = (
-    <>
-      <GitBranch className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-      <span className="num max-w-72 truncate text-[0.8125rem]" title={label}>
-        {label}
-      </span>
-    </>
-  );
   // Only web URLs are worth a link; a local path is shown as text.
   return /^https?:\/\//.test(url) ? (
-    <a href={url} rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground">
-      {content}
+    <a href={url} rel="noreferrer" className="num inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground">
+      <span className="max-w-72 truncate" title={label}>
+        {label}
+      </span>
+      <ArrowUpRight className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
     </a>
   ) : (
-    <span className="inline-flex min-w-0 items-center gap-1.5">{content}</span>
+    <span className="num max-w-72 truncate" title={label}>
+      {label}
+    </span>
   );
 }
 
-function Header({ project, onBack }: { project: Project; onBack: () => void }) {
+function ShareButton() {
+  const { copied, copy } = useCopy(typeof window === 'undefined' ? '' : window.location.href);
+  return (
+    <Button size="lg" onClick={() => void copy()} className="rounded-none">
+      {copied ? 'Link copied' : 'Share'}
+    </Button>
+  );
+}
+
+function Header({ project, running, onBack }: { project: Project; running: boolean; onBack: () => void }) {
   const status = STATUS_NOTES[project.status];
   const established = project.trust.tier === 'established';
-  const Tier = established ? ShieldCheck : Sprout;
   return (
-    <header className="rise flex flex-wrap items-start justify-between gap-x-8 gap-y-5">
-      <div className="flex min-w-0 gap-4">
-        <span
-          aria-hidden="true"
-          className="num hidden size-12 shrink-0 items-center justify-center rounded-xl border bg-card text-lg font-semibold uppercase shadow-card sm:flex"
-        >
-          {project.name.charAt(0)}
-        </span>
-        <div className="grid min-w-0 gap-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">{project.name}</h1>
-            <Badge variant="outline" className="gap-1" title={`${project.trust.merged_tasks} merged tasks. Computed from the ledger.`}>
-              <Tier className="size-3" strokeWidth={1.75} aria-hidden="true" />
-              {established ? 'Established' : 'New project'}
-            </Badge>
-            {status && <Badge variant="secondary">{status.label}</Badge>}
-          </div>
-          <p className="max-w-2xl text-[0.9375rem] text-pretty text-muted-foreground">{project.description}</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
-            <Repo url={project.repo_url} />
-            {project.language && <span className="font-medium text-foreground">{project.language}</span>}
-            {project.tags?.map((tag) => <span key={tag}>{tag}</span>)}
-            <span className="inline-flex items-center gap-1.5">
-              by <UserLink handle={project.maintainer.handle} avatar className="text-foreground" />
+    <header className="rise flex flex-wrap items-end justify-between gap-x-8 gap-y-6">
+      <div className="grid min-w-0 gap-3.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h1 className="text-[clamp(2.25rem,5vw,3.5rem)] leading-[1.05] font-semibold tracking-[-0.045em] [overflow-wrap:anywhere]">
+            {project.name}
+          </h1>
+          {running && (
+            <span className="flex h-6 items-center gap-1.5 bg-pass-tint px-2 text-xs font-medium text-live">
+              <span className="live-dot size-1.5" aria-hidden="true" />
+              Running now
             </span>
-          </div>
+          )}
+          {status && <span className="flex h-6 items-center border px-2 text-xs font-medium text-muted-foreground">{status.label}</span>}
+        </div>
+        <p className="max-w-2xl text-[1.0625rem] leading-relaxed text-pretty text-muted-foreground">{project.description}</p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.8125rem] text-muted-foreground">
+          <UserLink handle={project.maintainer.handle} className="num text-foreground" />
+          <Repo url={project.repo_url} />
+          {project.language && <span className="num">{project.language}</span>}
+          <span
+            className="num"
+            title={`${project.trust.merged_tasks} merged tasks. Computed from the ledger.`}
+          >
+            {established ? 'established' : 'new project'}
+          </span>
+          {(project.tags?.length ?? 0) > 0 && (
+            <ul aria-label="Tags" className="flex flex-wrap gap-1">
+              {project.tags?.map((tag) => (
+                <li key={tag} className="num bg-muted px-1.5 py-0.5 text-[0.6875rem]">
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
-      <Button variant="primary" size="lg" onClick={onBack} disabled={project.status === 'removed'} className="w-full sm:w-auto">
-        <Zap className="fill-current" strokeWidth={0} aria-hidden="true" />
-        Back with tokens
-      </Button>
+      <div className="flex w-full gap-2.5 sm:w-auto">
+        <ShareButton />
+        <Button variant="primary" size="lg" onClick={onBack} disabled={project.status === 'removed'} className="flex-1 rounded-none px-5 sm:flex-none">
+          Back this project
+        </Button>
+      </div>
     </header>
   );
 }
 
-/** The balance panel: delivered tokens as a live counter, progress to the goal, and the trend. */
+function Key({ swatch, label, value, accent }: { swatch: string; label: string; value: number; accent?: boolean }) {
+  return (
+    <div className="grid min-w-0 content-start gap-1.5">
+      <dt className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        <span className={cn('size-2.5 shrink-0 rounded-full', swatch)} aria-hidden="true" />
+        {label}
+      </dt>
+      <dd>
+        <Num value={Math.max(0, value)} className={cn('text-[1.375rem] leading-7 font-medium tracking-[-0.03em]', accent && 'text-live')} />
+      </dd>
+    </div>
+  );
+}
+
+/** The ledger panel: delivered tokens as a live counter, progress to the goal, and the trend. */
 function Balance({ project, totals, status }: { project: Project; totals: Totals; status: ReturnType<typeof useLive>['status'] }) {
   const ledger = useLedger(project.slug);
   const deliveries = (ledger.data?.pages[0]?.entries ?? []).filter((entry) => entry.type === 'delivery');
   const series = dailySeries(deliveries.map((entry) => ({ at: entry.at, tokens: entry.tokens })), CHART_DAYS);
   const recent = series.reduce((sum, value) => sum + value, 0);
+  const commitUrl = project.commit_url ?? (/^https?:\/\//.test(project.repo_url) ? `${project.repo_url.replace(/\.git$/, '')}/commit/${project.pinned_commit}` : null);
 
   return (
-    <section aria-label="Funding" className="surface rise grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_20rem]" style={stagger(1)}>
-      <div className="grid min-w-0 gap-5 p-5 sm:p-6">
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="label">Tokens delivered</p>
-            <LiveIndicator status={status} />
-          </div>
-          <p className="mt-3 -ml-[0.03em]">
-            <TokenCounter value={totals.delivered} label="tokens delivered" size="xl" />
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            of a <span className="num text-foreground">{formatExact(project.token_goal)}</span> token goal ·{' '}
-            <span className="num text-foreground">{formatPercent(totals.delivered, project.token_goal)}</span>
-          </p>
-          <InFlight tokens={totals.in_flight} className="mt-3" />
+    <section aria-label="Funding" className="rise grid border-t border-b border-t-foreground lg:grid-cols-[minmax(0,1fr)_25rem]" style={stagger(1)}>
+      <div className="grid min-w-0 gap-6 py-7 lg:border-r lg:pr-10">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs font-semibold tracking-[0.12em] uppercase">Delivered</p>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <LiveIndicator status={status} className="h-5 border-0 bg-transparent px-0" />
+            {totals.in_flight > 0 && (
+              <span className="num">
+                · <Num value={totals.in_flight} exact /> in flight
+              </span>
+            )}
+          </span>
         </div>
+        <p className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
+          <TokenCounter value={totals.delivered} label="tokens delivered" size="xl" />
+          <span className="num text-[0.9375rem] text-muted-foreground">
+            of {formatExact(project.token_goal)} goal · <span className="font-semibold text-foreground">{formatPercent(totals.delivered, project.token_goal)}</span>
+          </span>
+        </p>
         <FundingBar totals={totals} goal={project.token_goal} size="lg" />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4">
-          <Stat label="Pledged" swatch="bg-foreground/15 ring-1 ring-border" value={<Num value={totals.pledged} />} note="Stated intent" />
-          <Stat label="Delivered" swatch="bg-live" value={<Num value={totals.delivered} />} note="CI passed" />
-          <Stat label="Merged" swatch="bg-foreground" value={<Num value={totals.merged} />} note="PR merged" />
-          <Stat label="Reported" value={<Num value={totals.reported} />} note="Includes failed runs" />
+          <Key swatch="bg-foreground" label="Merged" value={totals.merged} />
+          <Key swatch="bg-pass" label="Delivered, awaiting merge" value={totals.delivered - totals.merged} accent />
+          <Key swatch="bg-muted-foreground" label="Reported, not delivered" value={totals.reported - totals.delivered} />
+          <Key swatch="border-[1.5px] border-input" label="Pledged" value={totals.pledged} />
         </dl>
       </div>
-      <div className="flex flex-col gap-5 border-t bg-muted/30 p-5 sm:p-6 lg:border-t-0 lg:border-l">
-        <div className="flex min-h-32 flex-1 flex-col gap-3">
+      <div className="flex flex-col justify-between gap-6 border-t py-7 lg:border-t-0 lg:pl-10">
+        <div className="grid gap-3">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="label">Delivered, last {CHART_DAYS} days</h2>
-            <span className="num text-sm font-medium">{ledger.isSuccess ? formatCompact(recent) : ' '}</span>
+            <h2 className="text-[0.8125rem] text-muted-foreground">Delivered per day, last {CHART_DAYS} days</h2>
+            <span className="num text-[0.8125rem] font-semibold">{ledger.isSuccess ? formatCompact(recent) : ' '}</span>
           </div>
-          <Sparkline
-            values={cumulative(series)}
-            className="h-auto min-h-20 flex-1 text-foreground"
-            label={`Delivery over the last ${CHART_DAYS} days: ${formatCompact(recent)} tokens`}
-          />
+          <DailyBars values={series} className="h-24" label={`Delivery over the last ${CHART_DAYS} days: ${formatCompact(recent)} tokens`} />
         </div>
-        <dl className="grid gap-2.5 text-sm">
+        <dl className="grid text-[0.8125rem]">
           {[
             ['Donors', <Num key="d" value={project.donors} unit="" />],
             ['Claimable tasks', <Num key="c" value={project.tasks.claimable ?? 0} unit="" />],
-            ['7-day delivery', <Num key="v" value={project.velocity_7d} />],
+            [
+              'Pinned commit',
+              commitUrl ? (
+                <a key="p" href={commitUrl} rel="noreferrer" className="num inline-flex items-center gap-1 hover:underline">
+                  {project.pinned_commit.slice(0, 7)} <ArrowUpRight className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+                </a>
+              ) : (
+                <span key="p" className="num">
+                  {project.pinned_commit.slice(0, 7)}
+                </span>
+              ),
+            ],
           ].map(([label, value]) => (
-            <div key={String(label)} className="flex items-baseline justify-between gap-3">
+            <div key={String(label)} className="flex items-baseline justify-between gap-3 border-t py-2.5">
               <dt className="text-muted-foreground">{label}</dt>
-              <dd className="font-medium">{value}</dd>
+              <dd>{value}</dd>
             </div>
           ))}
         </dl>
@@ -191,7 +230,7 @@ function ProjectView({ project }: { project: Project }) {
   const taskCount = counts.open + counts.claimed + counts.delivered + counts.merged + counts.failed;
 
   return (
-    <div className="container-page grid grid-cols-[minmax(0,1fr)] gap-6 py-6 sm:py-8">
+    <div className="container-page grid grid-cols-[minmax(0,1fr)] gap-8 py-8 sm:py-10">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -206,11 +245,11 @@ function ProjectView({ project }: { project: Project }) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <Header project={project} onBack={() => setBacking(true)} />
+      <Header project={project} running={totals.in_flight > 0} onBack={() => setBacking(true)} />
       {status && <Notice tone="strong">{status.note}</Notice>}
       <Balance project={project} totals={totals} status={live.status} />
 
-      <div className="rise grid grid-cols-[minmax(0,1fr)] gap-6" style={stagger(2)}>
+      <div className="rise grid grid-cols-[minmax(0,1fr)] gap-6 pt-4" style={stagger(2)}>
         <Tabs
           label="Project sections"
           items={[

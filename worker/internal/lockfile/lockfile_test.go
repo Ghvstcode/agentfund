@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentfund/agentfund/worker/internal/minisign"
-	"github.com/agentfund/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
 )
 
 func manifest(id, deps string) []byte {

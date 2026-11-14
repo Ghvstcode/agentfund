@@ -23,7 +23,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"github.com/agentfund/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
 )
 
 // LoadSpec loads spec/openapi.yaml.

@@ -50,6 +50,9 @@ play_ci() {
   HEAD1=$(git -C "$REPO" rev-parse HEAD)
   pinned() { [ "$(api GET /v1/projects/hello | json 'v.pinned_commit')" = "$HEAD1" ]; }
   wait_for "the indexer to follow main" pinned
+  # Dependents open on the first good read of the branch after the merge was recorded.
+  landed() { [ "$(api GET /v1/projects/hello/tasks | json 'v.items.every(t=>t.blocked_by.every(d=>v.items.find(x=>x.task_id===d).state!=="merged"))')" = true ]; }
+  wait_for "merged dependencies to unlock their tasks" landed
   note "merged into main; the indexer followed the signed head"; note "$(totals)"
 }
 

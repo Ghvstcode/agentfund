@@ -1,7 +1,9 @@
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { AppContext } from "../context.js";
 import { iso, isoOrNull, rows, tsParam, type Queryable } from "../db/client.js";
 import { apiKeys, oauthStates, peers, sessions, users } from "../db/schema.js";
+import { isMemberLogin } from "./members.js";
 import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { newApiKey, newId, newSecret, newSessionToken, sha256Hex } from "../lib/ids.js";
 import type { Schemas } from "../lib/openapi.js";
@@ -15,6 +17,8 @@ export interface Principal {
   kind: "session" | "donorKey";
   sessionId?: number;
   apiKeyId?: number;
+  /** The GitHub token this session signed in with, opened on demand; null if it has none. */
+  githubToken?: () => string | null;
 }
 
 export const userGlobalId = (ctx: AppContext, handle: string): string => `${ctx.config.baseUrl}/u/${handle}`;
@@ -61,7 +65,8 @@ export async function authenticate(ctx: AppContext, token: string): Promise<Prin
       .where(and(eq(sessions.tokenHash, hash), isNull(sessions.revokedAt)));
     if (!row || row.session.expiresAt.getTime() <= now.getTime()) return null;
     if (!(await homeStillTrusted(ctx, row.user))) return null;
-    return { user: row.user, kind: "session", sessionId: row.session.id };
+    const sealed = row.session.githubTokenSealed;
+    return { user: row.user, kind: "session", sessionId: row.session.id, githubToken: () => (sealed ? openGithubToken(token, sealed) : null) };
   }
   if (token.startsWith("af_")) {
     const [row] = await ctx.db
@@ -79,7 +84,33 @@ export async function authenticate(ctx: AppContext, token: string): Promise<Prin
   return null;
 }
 
-export async function createSession(ctx: AppContext, userId: number): Promise<string> {
+/*
+ * The GitHub sign-in token is kept on its session, sealed (AES-256-GCM) under a key derived from
+ * the session token. The database stores only the session token's hash, so a copy of it cannot
+ * open the GitHub token; it dies with the session (logout, ban, expiry).
+ */
+const sealKey = (sessionToken: string): Buffer => Buffer.from(hkdfSync("sha256", sessionToken, "agentfund", "session github token", 32));
+
+export function sealGithubToken(sessionToken: string, githubToken: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", sealKey(sessionToken), iv);
+  const body = Buffer.concat([cipher.update(githubToken, "utf8"), cipher.final()]);
+  return [iv, body, cipher.getAuthTag()].map((b) => b.toString("base64url")).join(".");
+}
+
+export function openGithubToken(sessionToken: string, sealed: string): string | null {
+  const [iv, body, tag] = sealed.split(".").map((p) => Buffer.from(p, "base64url"));
+  if (!iv || !body || !tag) return null;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", sealKey(sessionToken), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(body), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+export async function createSession(ctx: AppContext, userId: number, githubToken?: string): Promise<string> {
   const token = newSessionToken();
   const now = ctx.clock.now();
   await ctx.db.insert(sessions).values({
@@ -87,6 +118,7 @@ export async function createSession(ctx: AppContext, userId: number): Promise<st
     tokenHash: sha256Hex(token),
     createdAt: now,
     expiresAt: new Date(now.getTime() + ctx.config.sessionTtlDays * 86_400_000),
+    githubTokenSealed: githubToken ? sealGithubToken(token, githubToken) : null,
   });
   return token;
 }
@@ -257,9 +289,10 @@ export async function finishGithubOauth(ctx: AppContext, code: string | undefine
       if (primary && typeof primary.email === "string") email = primary.email;
     }
   }
-  // The GitHub token is dropped here: the server never stores a credential for anyone's GitHub.
+  if (!(await isMemberLogin(ctx, profile.login))) throw new Problem("forbidden", `This instance is for members of ${ctx.config.allowedGithubOrgs.join(", ")} on GitHub.`);
   const user = await upsertUser(ctx, { github: { id: profile.id, login: profile.login, email, avatarUrl: typeof profile.avatar_url === "string" ? profile.avatar_url : null } });
-  const session = await createSession(ctx, user.id);
+  // The token (read:user user:email) stays sealed on the session, for the push check at registration.
+  const session = await createSession(ctx, user.id, tokenBody.access_token);
   const target = new URL(saved.redirect);
   target.hash = `token=${session}`;
   return target.toString();

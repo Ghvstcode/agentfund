@@ -20,7 +20,8 @@ Sources:
 ```
 claude -p --output-format stream-json --verbose --include-partial-messages \
        --dangerously-skip-permissions --setting-sources user \
-       --strict-mcp-config --no-session-persistence [--model M]      < prompt
+       --strict-mcp-config --no-session-persistence \
+       --tools Bash,Read,Edit,Write,Glob,Grep,NotebookEdit,Task [--model M]   < prompt
 ```
 
 | Flag | Why | Verified by |
@@ -33,6 +34,7 @@ claude -p --output-format stream-json --verbose --include-partial-messages \
 | `--setting-sources user` | Do not load `project`/`local` settings files from the repository being worked on. | `--help` (flag exists and is accepted); effect not separately tested |
 | `--strict-mcp-config` | Ignore MCP server definitions other than `--mcp-config` (none), e.g. a repo's `.mcp.json`. | `--help`; accepted in live run |
 | `--no-session-persistence` | Nothing to resume; the container is discarded. Print-mode only. | `--help`; accepted in live run |
+| `--tools` allowlist | Without it, 2.1.289's `system/init` lists `WebSearch`, `WebFetch`, `RemoteTrigger`, `CronCreate`/`CronDelete`/`CronList`, `ScheduleWakeup`, `Workflow`, `SendMessage`, `Skill` and more, all usable under `bypassPermissions`. Web search runs on Anthropic's side (the result's `usage.server_tool_use` counts `web_search_requests` and `web_fetch_requests`), so it reaches the web without passing the egress proxy; the scheduling tools create cloud agents on the donor's account that outlive the run. An allowlist, not `--disallowedTools`, so tools added by later versions stay off. Names the CLI does not know are dropped silently (2.1.289 has no `TodoWrite`). **Not verified:** that a `Task` sub-agent is held to the same set (no run has used one). | live run: `system/init` reports exactly `Task, Bash, Edit, Glob, Grep, NotebookEdit, Read, Write`; a real task completed with them |
 | **not** `--bare` | Bare mode never reads `CLAUDE_CODE_OAUTH_TOKEN` (docs: "Bare mode does not read `CLAUDE_CODE_OAUTH_TOKEN`"), which would remove an authentication method. | docs |
 
 Not verified by execution: the CLI refusing `--dangerously-skip-permissions`
@@ -98,22 +100,66 @@ identical usage, then `message_delta`. Hence:
 | `{"type":"result","is_error":true,"api_error_status":429}` (or 529) | field observed (`null` on success); 429 value **not observed** | rate limited |
 | `{"type":"system","subtype":"api_retry","attempt":n,"error":"rate_limit",…}` | headless docs, "Handle API retries" | the CLI retries by itself; treated as rate limited only after 3 consecutive retries with no successful call in between |
 | `error` ∈ `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `billing_error`, `cloud_credential_error`, or `api_error_status` 401/403 | docs + live (`authentication_failed`) | claim released, worker stops with a clear message |
+| `api_retry` with `"error":"unknown","error_status":null`, and nothing at all from the model API (no `message_start`, no HTTP status, no `rate_limit_event`) before the run ends | live, see below | API unreachable: claim released, backoff as for a rate limit |
 
 Rate limited ⇒ the sandbox is torn down, the claim is **released** with the
 tokens burned so far, an exponential backoff with jitter (5 min doubling to
 4 h, never ending before `resetsAt`) is stored, and no task is claimed until
 it ends.
 
+### API unreachable
+
+Recorded on 2026-11-10 with 2.1.289 in `agentfund/sandbox:dev`, a fake key and
+no way to reach `api.anthropic.com` (no tokens can be spent that way): behind
+the real egress proxy with no route out (the proxy logs `dns_failure`), behind
+the proxy with `api.anthropic.com` off its allowlist (`not_allowlisted`), with
+`--network none`, and with `HTTPS_PROXY` on a closed port. All four look alike:
+
+- ten `system/api_retry` events, `"error":"unknown"`, `"error_status":null`,
+  with doubling delays: the CLI gives up by itself after **3.5 to 4.5 minutes**;
+- an `assistant` message the CLI makes up: `"model":"<synthetic>"`,
+  `"is_api_error_message":true`, `"error":"server_error"`, zero usage, text such
+  as `API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL) …`
+  (proxy), `… Can't reach the API server — check your internet or DNS
+  (EAI_AGAIN)` (no network), `… Connection refused … (ECONNREFUSED)`;
+- `result` with `is_error:true`, `subtype:"success"`, `api_error_status:null`,
+  `terminal_reason:"api_error"`, zero usage, exit code 1.
+
+The text differs from version to version (the HANDOFF quoted "Unable to connect
+to API"), so the meter keys on the structure, not the text: at least one
+`api_retry` without an HTTP status and no sign that the API ever answered. A
+synthetic message is not an answer. Once anything came back from the API (a
+message, any HTTP status, a usage report), a later failure is an ordinary
+failure: losing the connection mid-run does not count. The recordings are
+`testdata/claude-code-2.1.289-proxy-offline.jsonl` and `…-no-dns.jsonl`
+(`TestMeterOnRealUnreachableStreams`).
+
+The worker releases the claim with `the model API was unreachable from the
+sandbox: <CLI text>` and backs off (the same backoff as for a rate limit, shown
+as `after the model API was unreachable`). Nothing is reported, so the 24 h
+`retry_failed_after` cooldown does not start. Because the CLI takes about four
+minutes to give up, a task with `timeout_minutes` under 5 still ends as a
+`timeout` report; the runner does not stop Claude Code early (unlike Codex).
+
 ## Network
 
 - The CLI honours `HTTPS_PROXY`/`HTTP_PROXY` (and lowercase forms; first set wins in the order `https_proxy`, `HTTPS_PROXY`, `http_proxy`, `HTTP_PROXY`); no SOCKS. The sandbox sets all four to `http://egress-proxy:3128`.
 - Required host for model requests: `api.anthropic.com`. That is the whole default egress allowlist (`sandbox.allow_git_host` and `sandbox.extra_allow_hosts` add to it).
-- The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". Whether a long-lived `setup-token` token ever needs it at run time was **not tested** (it would need a real token and real usage). If a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
+- The docs list `platform.claude.com` for "OAuth token exchange, refresh, and revocation". A long-lived `setup-token` token did **not** need it: four real runs on 2026-11-10 under such a token reached only `api.anthropic.com` (egress records). Token refresh near expiry was not tested; if a run under an OAuth token fails with an authentication error although the token is valid, add `platform.claude.com` to `sandbox.extra_allow_hosts`.
+- Extra CAs: 2.1.289 (a compiled binary, not plain Node) honours `NODE_EXTRA_CA_CERTS`, which *adds* to its roots. Checked on 2026-11-10 against a local TLS server signed by a test CA. Without the variable it fails with `Unable to connect to API: SSL certificate verification failed (UNABLE_TO_VERIFY_LEAF_SIGNATURE)`, and the message itself suggests `NODE_EXTRA_CA_CERTS`. With it, TLS succeeds. `sandbox.extra_ca_certs` sets it to `/etc/agentfund/ca/extra.pem`.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` are set so the CLI does not try telemetry/update hosts that the proxy would refuse anyway.
 
-## Not done
+## Real runs
 
-No task has been run end-to-end against the real model API from inside the
-sandbox (that needs the donor's token and spends their tokens). Everything
-after "the CLI starts in the sandbox and reports `authentication_failed`" is
-covered by the mock agent (`cmd/mock-agent`), which emits the shapes above.
+2026-11-10, `make trial` with `MODEL=sonnet` (`claude-sonnet-5-5`) under a `setup-token` OAuth
+token, Claude Code 2.1.289 in `agentfund/sandbox:dev`: all three `examples/hello-project` tasks
+completed, passed `verify` in the sandbox, stayed inside `scope.write`, and went reported →
+delivered → merged. Each took 14–20 s and about 63–82k input tokens (almost all cache reads of
+the CLI's own system prompt) and 1–1.8k output tokens, $0.03–0.05 by the CLI's estimate. The
+meter's in-flight count equalled the CLI's final `result` usage exactly. With the `--tools`
+allowlist the same task took 38k input tokens (fewer tool definitions in the prompt), reported
+`web_search_requests: 0`, and still completed. One run is recorded in
+`testdata/real-2.1.289-sonnet-task.jsonl` (`TestMeterOnRealTaskStream`).
+
+Not yet run for real: a larger repository with a toolchain (a gridrs task), `max_tokens` or
+`timeout_minutes` actually being hit, and a rate limit or exhausted quota.

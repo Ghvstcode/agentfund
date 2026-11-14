@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signBody } from "../src/ci/adapter.js";
 import type { OperationId, Schemas } from "../src/lib/openapi.js";
+import { indexAll } from "../src/services/indexer.js";
 import { createTestApp, projectSecret, type TestApp } from "./helpers/app.js";
 import { raw, testNetwork } from "./helpers/network.js";
 import { TestRepo } from "./helpers/repo.js";
@@ -89,7 +90,7 @@ describe("every operation, validated against the document", () => {
     // meta
     const meta = (await t.call<Schemas["Meta"]>("getMeta")).body;
     expect(meta).toMatchObject({ app: "AgentFund", base_url: "http://af.test", protocol_versions: ["v1"], spec_versions: [1] });
-    expect(meta.links).toEqual({ source_url: "https://github.com/agentfund/agentfund", install_command: "git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images" });
+    expect(meta.links).toEqual({ source_url: "https://github.com/ghvstcode/agentfund", install_command: "curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh" });
     expect(meta.instance_pubkey).toMatch(/^[A-Za-z0-9+/]{56}$/);
     expect(Buffer.from(meta.instance_pubkey!, "base64").subarray(0, 2).toString()).toBe("Ed");
     await t.call("getStats");
@@ -196,6 +197,11 @@ describe("every operation, validated against the document", () => {
     expect((await t.call("getTask", { path: { task_id: `${slug}:0009-missing` } })).status).toBe(404);
     expect((await t.call("getTask", { path: { task_id: "missing:0001-a" } })).status).toBe(404);
     expect((await t.call("getTask", { path: { task_id: "not-a-task-id" } })).status).toBe(404);
+    // The dependent opens once the branch, which now holds the merge, has been read again.
+    repo.write("src/a.py", "# 0001-a\n");
+    repo.commit("Merge 0001-a");
+    t.clock.advance(1);
+    await indexAll(t.ctx);
     const c2 = (await t.call<Schemas["Claim"]>("claimTask", { token: key.key, path: { task_id: `${slug}:0002-b` } })).body;
     await t.call("heartbeatClaim", { token: key.key, path: { claim_id: c2.claim_id }, body: { tokens_in: 1, tokens_out: 1, phase: "sandbox" } });
     const withClaim = (await t.call<{ items: Schemas["Task"][] }>("listTasks", { path: { slug }, query: { state: "claimed" } })).body.items;
@@ -303,9 +309,10 @@ describe("every operation, validated against the document", () => {
     }
     // dev login 404 needs a differently configured instance; covered in auth.test.ts.
     // The federation 404s are the answers of an instance with FEDERATION=false; covered in federation.test.ts.
+    // The push-access 403 needs GitHub sign-in instead of dev login; covered in registration.test.ts.
     expect(missing.sort()).toEqual([
-      "adminListPeers 404", "authDev 404", "authFederated 404", "authGithubStart 404", "createIdentityAssertion 404",
-      "listFederatedDonors 404", "listFederatedProjects 404", "listPeers 404",
+      "adminListPeers 404", "authDev 404", "authFederated 404", "authGithubStart 404", "createIdentityAssertion 404", "createProject 403",
+      "listFederatedDonors 404", "listFederatedProjects 404", "listPeers 404", "previewProject 403",
     ]);
     const undocumented = [...t.seen].filter((s) => {
       const [id, status] = s.split(" ") as [OperationId, string];

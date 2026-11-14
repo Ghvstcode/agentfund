@@ -21,7 +21,7 @@ verification chain), `protocol.md` + `openapi.yaml` (wire protocol v1).
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
 # or, from a checkout (Go 1.27+):
 make -C worker build        # → worker/bin/agentfund
 ```
@@ -30,15 +30,17 @@ The installer honours `AGENTFUND_REPO`, `AGENTFUND_VERSION`, `AGENTFUND_INSTALL_
 the SHA-256 of the archive against the release's checksum file.
 
 Requirements for running tasks: Docker, `git`, and — for GitHub projects — the `gh` CLI logged in
-(`gh auth login`). Two container images must be present locally:
+(`gh auth login`). Two container images must be present locally. A released binary defaults to
+the images published with it, by digest; `agentfund version` names them, and `docker pull` fetches
+each. A build from source defaults to local images:
 
-| Image | Default reference | Build |
+| Image | Default from source | Build |
 | --- | --- | --- |
 | Sandbox | `agentfund/sandbox:dev` | `make -C worker sandbox-image` (from `images/sandbox`) |
 | Egress proxy | `agentfund/egress-proxy:dev` | `make -C worker egress-image` (from `images/egress-proxy`) |
 
-Pin them by digest in `config.yaml` once you use published images
-(`image: "…/sandbox@sha256:…"`): a tag can be re-pointed, a digest cannot.
+If you set `sandbox.image` yourself, pin it by digest (`image: "…/sandbox@sha256:…"`): a tag can
+be re-pointed, a digest cannot.
 
 ## For maintainers
 
@@ -124,14 +126,15 @@ global:
   retry_failed_after: "24h"              # do not re-claim a task that just failed here
   claude_token_command: ""               # optional: command printing the agent's OAuth token
   sandbox:
-    image: "agentfund/sandbox:dev"
-    egress_proxy_image: "agentfund/egress-proxy:dev"
+    image: ""                            # "" = the images this binary was released with
+    egress_proxy_image: ""               #      (`agentfund version`); from source, the :dev builds
     cpus: "2"
     memory: "4g"
     pids: 512
     allow_git_host: false                # true only if verify must fetch from the git host
     extra_allow_hosts: []                # extra host[:port] the sandbox may reach
     pass_env: []                         # extra variable NAMES passed to the agent process
+    extra_ca_certs: ""                   # PEM file of extra CAs the agent trusts (TLS-inspecting proxy)
     docker: "docker"
   runner:
     name: "claude-code"

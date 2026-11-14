@@ -9,29 +9,28 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
-// Default image references. These are the names the repository's own
+// Default image references. A build from the checkout uses the names the repository's own
 // Dockerfiles are built under (`make -C worker images`):
 //
 //	images/sandbox       -> agentfund/sandbox:dev
 //	images/egress-proxy  -> agentfund/egress-proxy:dev
 //
-// A tag can be re-pointed by whoever controls the registry (or the local
-// image store); a digest cannot. Once images are published, pin them by
-// digest in config.yaml:
-//
-//	sandbox:
-//	  image: "ghcr.io/<org>/sandbox@sha256:<digest>"
-//	  egress_proxy_image: "ghcr.io/<org>/egress-proxy@sha256:<digest>"
-const (
+// A released binary has the digests of the images published with it stamped in by the linker
+// (.goreleaser.yaml, set by the release workflow), e.g.
+// ghcr.io/ghvstcode/agentfund-sandbox@sha256:<digest>. A tag can be re-pointed by whoever
+// controls the registry (or the local image store); a digest cannot. `agentfund version`
+// prints both.
+var (
 	DefaultSandboxImage     = "agentfund/sandbox:dev"
 	DefaultEgressProxyImage = "agentfund/egress-proxy:dev"
 )
@@ -46,13 +45,55 @@ type Sandbox struct {
 	AllowGitHost     bool     `yaml:"allow_git_host"`
 	ExtraAllowHosts  []string `yaml:"extra_allow_hosts"`
 	PassEnv          []string `yaml:"pass_env"`
-	Docker           string   `yaml:"docker"`
+	// ExtraCACerts is a PEM file of CA certificates the agent trusts besides
+	// the image's roots ("" = none). See ReadCACerts.
+	ExtraCACerts string `yaml:"extra_ca_certs"`
+	Docker       string `yaml:"docker"`
 }
 
 // Runner configures the coding agent.
 type Runner struct {
 	Name  string `yaml:"name"`
 	Model string `yaml:"model"`
+	// TokenCommand prints the agent's credential when none is in the
+	// environment. For claude-code it falls back to global.claude_token_command.
+	TokenCommand string `yaml:"token_command"`
+	// CodexHome is the AgentFund-only CODEX_HOME holding a ChatGPT sign-in
+	// for runner codex ("" = <config dir>/codex). It must not be the backer's
+	// own ~/.codex: both would rotate the same refresh token.
+	CodexHome string `yaml:"codex_home"`
+}
+
+// CodexHomeDir is the directory of the dedicated Codex ChatGPT sign-in.
+func (g Global) CodexHomeDir() string {
+	if g.Runner.CodexHome != "" {
+		return expandHome(g.Runner.CodexHome)
+	}
+	return filepath.Join(Dir(), "codex")
+}
+
+func expandHome(p string) string {
+	if p == "~" {
+		return home()
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home(), p[2:])
+	}
+	return p
+}
+
+// Runners are the coding agents the worker can drive. "codex" is experimental.
+var Runners = []string{"claude-code", "codex"}
+
+// AgentTokenCommand is the credential command for the configured runner.
+func (g Global) AgentTokenCommand() string {
+	if g.Runner.TokenCommand != "" {
+		return g.Runner.TokenCommand
+	}
+	if g.Runner.Name == "claude-code" {
+		return g.ClaudeTokenCommand
+	}
+	return ""
 }
 
 // Global holds the donor-wide policy.
@@ -81,6 +122,9 @@ type Project struct {
 	ApprovedLockSHA256 string    `yaml:"approved_lock_sha256"`
 	ApprovedAt         time.Time `yaml:"approved_at"`
 	APIKeyEnv          string    `yaml:"api_key_env,omitempty"`
+	// GitAuth is "gh" when the donor agreed, at approve time, to fetch this
+	// project's private repository with their gh login. Empty = anonymous.
+	GitAuth string `yaml:"git_auth,omitempty"`
 
 	// Optional per-project overrides of the global policy. They can only be
 	// combined with the global caps, never exceed them (see policy package).
@@ -142,6 +186,13 @@ func LoadFile(path string) (*Config, error) {
 	if c.Projects == nil {
 		c.Projects = map[string]*Project{}
 	}
+	// "" means this binary's own images, so an upgrade brings the images released with it.
+	if c.Global.Sandbox.Image == "" {
+		c.Global.Sandbox.Image = DefaultSandboxImage
+	}
+	if c.Global.Sandbox.EgressProxyImage == "" {
+		c.Global.Sandbox.EgressProxyImage = DefaultEgressProxyImage
+	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -159,11 +210,20 @@ func (c *Config) Validate() error {
 	if g.Sandbox.Image == "" || g.Sandbox.EgressProxyImage == "" {
 		return fmt.Errorf("global.sandbox.image and egress_proxy_image must be set")
 	}
-	if g.Runner.Name != "claude-code" {
-		return fmt.Errorf("global.runner.name %q is not supported (only claude-code)", g.Runner.Name)
+	if !slices.Contains(Runners, g.Runner.Name) {
+		return fmt.Errorf("global.runner.name %q is not supported (one of: %s)", g.Runner.Name, strings.Join(Runners, ", "))
 	}
 	if _, err := g.RetryDelay(); err != nil {
 		return err
+	}
+	if g.Runner.CodexHome != "" {
+		d := filepath.Clean(g.CodexHomeDir())
+		if !filepath.IsAbs(d) {
+			return fmt.Errorf("global.runner.codex_home must be an absolute path (or start with ~/)")
+		}
+		if d == filepath.Join(home(), ".codex") {
+			return fmt.Errorf("global.runner.codex_home must not be ~/.codex: give AgentFund its own sign-in (the default, %s), so it never rotates the tokens your own Codex uses", filepath.Join(Dir(), "codex"))
+		}
 	}
 	for _, n := range g.Sandbox.PassEnv {
 		if !envNameRE.MatchString(n) {
@@ -175,12 +235,20 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("global.sandbox.extra_allow_hosts: %q is not host[:port]", h)
 		}
 	}
+	if g.Sandbox.ExtraCACerts != "" {
+		if _, err := ReadCACerts(g.Sandbox.ExtraCACerts); err != nil {
+			return err
+		}
+	}
 	for key, p := range c.Projects {
 		if p == nil || p.Server == "" || p.Slug == "" {
 			return fmt.Errorf("projects[%s]: server and slug are required", key)
 		}
 		if p.APIKeyEnv != "" && !envNameRE.MatchString(p.APIKeyEnv) {
 			return fmt.Errorf("projects[%s].api_key_env is not an environment variable name", key)
+		}
+		if p.GitAuth != "" && p.GitAuth != "gh" {
+			return fmt.Errorf("projects[%s].git_auth must be gh or empty, not %q", key, p.GitAuth)
 		}
 	}
 	return nil
@@ -361,34 +429,51 @@ func (c *Config) render() ([]byte, error) {
 	w("  # your environment (or this command) at run time and passes them to the sandbox.\n")
 	w("  claude_token_command: %q\n", g.ClaudeTokenCommand)
 	w("  sandbox:\n")
-	w("    # Sandbox image the agent runs in. Prefer a digest pin (name@sha256:...).\n")
-	w("    image: %q\n", g.Sandbox.Image)
+	w("    # Sandbox image the agent runs in. \"\" = the one this binary was released with\n")
+	w("    # (`%s version` names it). Your own: pin it by digest (name@sha256:...).\n", app.BinaryName)
+	w("    image: %q\n", unlessDefault(g.Sandbox.Image, DefaultSandboxImage))
 	w("    # Egress proxy sidecar image; the only route from the sandbox to the network.\n")
-	w("    egress_proxy_image: %q\n", g.Sandbox.EgressProxyImage)
+	w("    egress_proxy_image: %q\n", unlessDefault(g.Sandbox.EgressProxyImage, DefaultEgressProxyImage))
 	w("    # CPU limit of the sandbox container (docker --cpus).\n")
 	w("    cpus: %q\n", g.Sandbox.CPUs)
 	w("    # Memory limit of the sandbox container (docker --memory).\n")
 	w("    memory: %q\n", g.Sandbox.Memory)
 	w("    # Maximum number of processes in the sandbox (docker --pids-limit).\n")
 	w("    pids: %d\n", g.Sandbox.PIDs)
-	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com).\n")
+	w("    # false (default): the sandbox can reach only the model API (api.anthropic.com;\n")
+	w("    # for codex api.openai.com, or chatgpt.com with a ChatGPT sign-in).\n")
 	w("    # The sandbox has no .git and no git credentials; turn on only if a project's\n")
 	w("    # verify step must fetch from the git host.\n")
 	w("    allow_git_host: %t\n", g.Sandbox.AllowGitHost)
 	w("    # Extra host[:port] entries the sandbox may reach besides the model API\n")
-	w("    # (api.anthropic.com). Keep this empty unless needed.\n")
+	w("    # (see allow_git_host). Keep this empty unless needed.\n")
 	w("    extra_allow_hosts: %s\n", yamlList(g.Sandbox.ExtraAllowHosts))
 	w("    # Names of additional environment variables to pass from your shell into the\n")
 	w("    # agent process (e.g. ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, AWS_REGION).\n")
 	w("    # Their hosts are NOT reachable unless you also list them in extra_allow_hosts.\n")
 	w("    pass_env: %s\n", yamlList(g.Sandbox.PassEnv))
+	w("    # Optional PEM file of extra CA certificates the agent should trust, e.g. the CA\n")
+	w("    # of a TLS-inspecting corporate proxy (absolute path or ~/...). Only CERTIFICATE\n")
+	w("    # blocks are allowed. Copied into the sandbox at start and added to its roots.\n")
+	w("    extra_ca_certs: %q\n", g.Sandbox.ExtraCACerts)
 	w("    # Docker CLI binary.\n")
 	w("    docker: %q\n", g.Sandbox.Docker)
 	w("  runner:\n")
-	w("    # Coding agent to run. Only \"claude-code\" is implemented.\n")
+	w("    # Coding agent to run: \"claude-code\" (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)\n")
+	w("    # or \"codex\" (EXPERIMENTAL; CODEX_API_KEY, OPENAI_API_KEY, CODEX_ACCESS_TOKEN or a\n")
+	w("    # ChatGPT sign-in in codex_home). Codex reports usage\n")
+	w("    # only when it finishes, so a Codex run can end above a task's max_tokens.\n")
 	w("    name: %q\n", g.Runner.Name)
 	w("    # Optional model alias or id passed to the agent (--model). \"\" = its default.\n")
 	w("    model: %q\n", g.Runner.Model)
+	w("    # Optional shell command printing the agent's credential on stdout, used when\n")
+	w("    # none is in the environment. \"\" = claude_token_command for claude-code.\n")
+	w("    token_command: %q\n", g.Runner.TokenCommand)
+	w("    # codex only: directory of a ChatGPT sign-in used only by AgentFund, created with\n")
+	w("    #   CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login\n")
+	w("    # Used when no API key or CODEX_ACCESS_TOKEN is set. The worker refreshes it here;\n")
+	w("    # the sandbox gets the access token only. \"\" = <config dir>/codex. Never ~/.codex.\n")
+	w("    codex_home: %q\n", g.Runner.CodexHome)
 	w("\n# Approved projects, keyed by <server-url>/<slug>. `pubkey`, `approved_commit` and\n")
 	w("# `approved_lock_sha256` are what you reviewed; the worker trusts nothing else.\n")
 	w("# Optional per-project overrides: tokens_per_day, tokens_per_week,\n")
@@ -404,6 +489,15 @@ func (c *Config) render() ([]byte, error) {
 	}
 	b.Write(pj)
 	return []byte(b.String()), nil
+}
+
+// unlessDefault is v, or "" when v is the binary's default: a saved config must not pin the
+// images of the binary that happened to write it.
+func unlessDefault(v, def string) string {
+	if v == def {
+		return ""
+	}
+	return v
 }
 
 // Credentials is credentials.yaml: server API keys (af_…), keyed by server URL.

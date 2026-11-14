@@ -10,16 +10,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/app"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/githost"
-	"github.com/agentfund/agentfund/worker/internal/pipeline"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/runner"
-	"github.com/agentfund/agentfund/worker/internal/sandbox"
-	"github.com/agentfund/agentfund/worker/internal/store"
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/githost"
+	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/runner"
+	"github.com/ghvstcode/agentfund/worker/internal/sandbox"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 )
 
 // Environment overrides for images (handy for local builds and end-to-end tests).
@@ -51,12 +51,19 @@ func newWorker(e *env, arg string, needKey bool) (*pipeline.Worker, error) {
 	} else {
 		key, _ = config.APIKey(ref.Server, proj)
 	}
+	agent, err := runner.New(cfg.Global.Runner.Name)
+	if err != nil {
+		return nil, err
+	}
+	if c, ok := agent.(*runner.Codex); ok {
+		c.Home = cfg.Global.CodexHomeDir()
+	}
 	return &pipeline.Worker{
 		Cfg: cfg, Ref: ref, Project: proj,
 		API:      api.New(ref.Server, key),
 		Store:    store.Open(config.StorePath()),
 		Engine:   sandbox.CLI{Bin: cfg.Global.Sandbox.Docker},
-		Runner:   runner.NewClaudeCode(),
+		Runner:   agent,
 		HostFor:  githost.For,
 		ReposDir: config.ReposDir(), LogsDir: config.LogsDir(),
 		Out: e.err,
@@ -81,7 +88,9 @@ and releases active claims.
 
 The coding agent runs under YOUR credentials, read from the environment at
 run time: CLAUDE_CODE_OAUTH_TOKEN (from ` + "`claude setup-token`" + `) and/or
-ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. They are passed
+ANTHROPIC_API_KEY, or the claude_token_command in config.yaml. With
+runner.name: codex (experimental) it is CODEX_API_KEY or OPENAI_API_KEY, or
+runner.token_command. They are passed
 to the sandboxed agent process and are never stored or sent anywhere else.
 
 Exit status:

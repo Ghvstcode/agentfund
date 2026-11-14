@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
 )
 
 // Problem codes the worker switches on (protocol.md §11).

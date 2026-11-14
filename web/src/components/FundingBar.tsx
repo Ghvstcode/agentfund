@@ -28,12 +28,12 @@ function describe(totals: FundingBarProps['totals'], goal: number): string {
  */
 function Bar({ totals, goal, size }: Required<Pick<FundingBarProps, 'totals' | 'goal' | 'size'>>) {
   const whole = Math.max(goal, 1);
-  const segment = 'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out';
+  const segment = 'absolute inset-y-0 left-0 transition-[width] duration-500 ease-out';
   return (
-    <span className={cn('relative block overflow-hidden rounded-full bg-muted', size === 'lg' ? 'h-2.5' : 'h-1.5')}>
+    <span className={cn('relative block overflow-hidden bg-muted', size === 'lg' ? 'h-2.5' : 'h-1')}>
       <span className={cn(segment, 'bg-foreground/15')} style={{ width: share(totals.pledged, whole) }} />
-      <span className={cn(segment, 'bg-live/40')} style={{ width: share(totals.delivered + totals.in_flight, whole) }} />
-      <span className={cn(segment, 'bg-live')} style={{ width: share(totals.delivered, whole) }} />
+      <span className={cn(segment, 'bg-pass/40')} style={{ width: share(totals.delivered + totals.in_flight, whole) }} />
+      <span className={cn(segment, 'bg-pass')} style={{ width: share(totals.delivered, whole) }} />
       <span className={cn(segment, 'bg-foreground')} style={{ width: share(totals.merged, whole) }} />
     </span>
   );
@@ -49,8 +49,8 @@ export function FundingBar({ totals, goal, size = 'sm', className }: FundingBarP
   }
   const rows = [
     ['Merged', totals.merged, 'bg-foreground'],
-    ['Delivered', totals.delivered, 'bg-live'],
-    ['Running now', totals.in_flight, 'bg-live/40'],
+    ['Delivered', totals.delivered, 'bg-pass'],
+    ['Running now', totals.in_flight, 'bg-pass/40'],
     ['Pledged', totals.pledged, 'bg-foreground/15'],
   ] as const;
   return (
@@ -59,7 +59,7 @@ export function FundingBar({ totals, goal, size = 'sm', className }: FundingBarP
       <TooltipTrigger asChild>
         {/* Focusable so keyboard users can read the same breakdown the pointer gets. */}
         {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
-        <div role="img" aria-label={describe(totals, goal)} tabIndex={0} className={cn('rounded-full py-1', className)}>
+        <div role="img" aria-label={describe(totals, goal)} tabIndex={0} className={cn('py-1', className)}>
           <Bar totals={totals} goal={goal} size="lg" />
         </div>
       </TooltipTrigger>

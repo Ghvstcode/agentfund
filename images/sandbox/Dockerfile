@@ -19,6 +19,7 @@ ARG BASE_IMAGE=node:22-bookworm-slim
 FROM ${BASE_IMAGE}
 
 ARG CLAUDE_CODE_VERSION=2.1.289
+ARG CODEX_VERSION=0.167.0
 ARG GO_VERSION=1.27.1
 ARG RUST_TOOLCHAIN=stable
 ARG TARGETARCH
@@ -57,6 +58,12 @@ RUN set -eux; \
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force \
  && claude --version
+
+# Second coding agent (runner.name: codex, experimental): the unmodified OpenAI
+# Codex CLI from npm, version-pinned. Unused unless the donor selects it.
+RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
+ && npm cache clean --force \
+ && codex --version
 
 # Unprivileged user the agent and verify run as. uid/gid must match
 # internal/scope (AgentUID/AgentGID) in the worker.

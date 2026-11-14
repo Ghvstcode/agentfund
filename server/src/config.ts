@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { DEFAULT_PORT } from "./constants.js";
 
@@ -58,6 +59,11 @@ const envSchema = z.object({
   GITHUB_CLIENT_ID: optional,
   GITHUB_CLIENT_SECRET: optional,
   GITHUB_TOKEN: optional,
+  GITHUB_APP_ID: optional,
+  GITHUB_APP_PRIVATE_KEY: optional,
+  GITHUB_APP_PRIVATE_KEY_FILE: optional,
+  INSTANCE_ACCESS: z.enum(["public", "members"]).optional().default("public"),
+  ALLOWED_GITHUB_ORGS: list.transform((arr) => arr.map((o) => o.toLowerCase())),
   WEBHOOK_SECRET: optional,
   WEB_ORIGINS: list.transform((arr, ctx) => arr.map((o) => origin(o, ctx))),
   ADMIN_HANDLES: list.transform((arr) => arr.map((h) => h.toLowerCase())),
@@ -75,10 +81,15 @@ const envSchema = z.object({
   RATE_LIMIT_PER_MINUTE: int(600, 0, 1_000_000),
   AUTH_RATE_LIMIT_PER_MINUTE: int(30, 0, 1_000_000),
   TRUST_PROXY: bool(false),
+  CLIENT_IP_HEADER: optional,
   DB_POOL_MAX: int(10, 1, 200),
   SOURCE_URL: optional,
   INSTALL_COMMAND: optional,
   DOCS_URL: optional,
+  PRIVACY_URL: optional,
+  TERMS_URL: optional,
+  LEGAL_CONTACT: optional,
+  LEGAL_NAME: optional,
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
 });
 
@@ -91,6 +102,11 @@ export interface Config {
   githubClientId: string | undefined;
   githubClientSecret: string | undefined;
   githubToken: string | undefined;
+  /** GitHub App used to read private repositories; set only on members-only instances. */
+  githubApp: { appId: string; privateKey: string } | undefined;
+  /** `members`: every page and API call needs a signed-in member of `allowedGithubOrgs`. */
+  instanceAccess: "public" | "members";
+  allowedGithubOrgs: string[];
   webhookSecret: string | undefined;
   webOrigins: string[];
   adminHandles: string[];
@@ -109,11 +125,19 @@ export interface Config {
   rateLimitPerMinute: number;
   authRateLimitPerMinute: number;
   trustProxy: boolean;
+  /** Lower-case header the edge proxy sets to the client IP, overwriting any client value. */
+  clientIpHeader: string | undefined;
   dbPoolMax: number;
   logLevel: "debug" | "info" | "warn" | "error";
   sourceUrl: string;
   installCommand: string;
   docsUrl: string | undefined;
+  privacyUrl: string | undefined;
+  termsUrl: string | undefined;
+  /** Email address the built-in privacy and terms pages give for requests. */
+  legalContact: string | undefined;
+  /** Who runs the instance, as the built-in privacy and terms pages name them. */
+  legalName: string | undefined;
   /** Human-readable notes about defaults that were applied; logged at boot. */
   warnings: string[];
 }
@@ -163,8 +187,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (authDevLogin) warnings.push("AUTH_DEV_LOGIN=true: anyone who can reach this instance can log in as any handle. Never use this on a public instance.");
     if (!authDevLogin && !githubOauth) warnings.push("Neither GitHub OAuth nor dev login is enabled: nobody can log in.");
   }
-  for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL]] as const) {
+  for (const [name, value] of [["SOURCE_URL", e.SOURCE_URL], ["DOCS_URL", e.DOCS_URL], ["PRIVACY_URL", e.PRIVACY_URL], ["TERMS_URL", e.TERMS_URL]] as const) {
     if (value && !/^https?:\/\/\S+$/.test(value)) problems.push(`  ${name}: must be an http(s) URL`);
+  }
+  if (e.CLIENT_IP_HEADER && !/^[A-Za-z0-9-]+$/.test(e.CLIENT_IP_HEADER)) problems.push("  CLIENT_IP_HEADER: must be a header name, e.g. fly-client-ip");
+  let githubApp: Config["githubApp"];
+  if (e.GITHUB_APP_PRIVATE_KEY && e.GITHUB_APP_PRIVATE_KEY_FILE) problems.push("  GITHUB_APP_PRIVATE_KEY / GITHUB_APP_PRIVATE_KEY_FILE: set one, not both");
+  let appKey = e.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  if (e.GITHUB_APP_PRIVATE_KEY_FILE) {
+    try {
+      appKey = readFileSync(e.GITHUB_APP_PRIVATE_KEY_FILE, "utf8");
+    } catch {
+      problems.push(`  GITHUB_APP_PRIVATE_KEY_FILE: cannot read ${e.GITHUB_APP_PRIVATE_KEY_FILE}`);
+    }
+  }
+  if (Boolean(e.GITHUB_APP_ID) !== Boolean(appKey)) problems.push("  GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY: set both or neither");
+  else if (e.GITHUB_APP_ID && appKey) githubApp = { appId: e.GITHUB_APP_ID, privateKey: appKey };
+  // The app can read private repositories, so it is only allowed where nothing is public.
+  if (githubApp && e.INSTANCE_ACCESS !== "members") problems.push("  GITHUB_APP_ID: a GitHub App can read private repositories; it needs INSTANCE_ACCESS=members");
+  if (e.INSTANCE_ACCESS === "members") {
+    if (!githubApp) problems.push("  INSTANCE_ACCESS=members: needs GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (membership is checked through the app)");
+    if (e.ALLOWED_GITHUB_ORGS.length === 0) problems.push("  INSTANCE_ACCESS=members: needs ALLOWED_GITHUB_ORGS");
+    if (!githubOauth) problems.push("  INSTANCE_ACCESS=members: needs GitHub OAuth (GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET)");
+    if (authDevLogin) problems.push("  INSTANCE_ACCESS=members: AUTH_DEV_LOGIN must be false (dev login skips the membership check)");
+  }
+  for (const org of e.ALLOWED_GITHUB_ORGS) if (!/^[a-z0-9-]{1,39}$/.test(org)) problems.push(`  ALLOWED_GITHUB_ORGS: "${org}" is not a GitHub organization name`);
+  if (e.LEGAL_CONTACT && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.LEGAL_CONTACT)) problems.push("  LEGAL_CONTACT: must be an email address");
+  if (githubOauth && !e.LEGAL_CONTACT && !(e.PRIVACY_URL && e.TERMS_URL)) {
+    warnings.push("LEGAL_CONTACT is not set: the built-in /privacy and /terms pages give no address for data requests. Set it, or publish your own pages with PRIVACY_URL and TERMS_URL.");
   }
   if (e.WEBHOOK_SECRET && e.WEBHOOK_SECRET.length < 16) problems.push("  WEBHOOK_SECRET: must be at least 16 characters");
   if (problems.length) throw new ConfigError(`Invalid configuration:\n${problems.join("\n")}`);
@@ -184,13 +234,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubClientId: e.GITHUB_CLIENT_ID,
     githubClientSecret: e.GITHUB_CLIENT_SECRET,
     githubToken: e.GITHUB_TOKEN,
+    githubApp,
+    instanceAccess: e.INSTANCE_ACCESS,
+    allowedGithubOrgs: e.ALLOWED_GITHUB_ORGS,
     webhookSecret: e.WEBHOOK_SECRET,
     webOrigins,
     adminHandles: e.ADMIN_HANDLES,
     authDevLogin,
     allowFileRepos: e.ALLOW_FILE_REPOS,
     ciPoll: e.CI_POLL,
-    federation: e.FEDERATION,
+    // A members-only instance answers nothing anonymously and admits only its organizations'
+    // members, so it can neither be read by a peer nor take a peer's word for who someone is.
+    federation: e.FEDERATION && e.INSTANCE_ACCESS !== "members",
     federationSyncIntervalSeconds: e.FEDERATION_SYNC_INTERVAL_SECONDS,
     dataDir: e.DATA_DIR ?? "./data",
     webDist: e.WEB_DIST ?? "../web/dist",
@@ -201,11 +256,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
     authRateLimitPerMinute: e.AUTH_RATE_LIMIT_PER_MINUTE,
     trustProxy: e.TRUST_PROXY,
+    clientIpHeader: e.CLIENT_IP_HEADER?.toLowerCase(),
     dbPoolMax: e.DB_POOL_MAX,
     logLevel: e.LOG_LEVEL,
-    sourceUrl: e.SOURCE_URL ?? "https://github.com/agentfund/agentfund",
-    installCommand: e.INSTALL_COMMAND ?? "git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images",
+    sourceUrl: e.SOURCE_URL ?? "https://github.com/ghvstcode/agentfund",
+    installCommand: e.INSTALL_COMMAND ?? "curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh",
     docsUrl: e.DOCS_URL,
+    privacyUrl: e.PRIVACY_URL,
+    termsUrl: e.TERMS_URL,
+    legalContact: e.LEGAL_CONTACT,
+    legalName: e.LEGAL_NAME,
     warnings,
   };
 }

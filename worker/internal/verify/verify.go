@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/minisign"
-	"github.com/agentfund/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
 )
 
 // Step identifies which step of the chain refused.

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Build from the monorepo root:  docker build -f server/Dockerfile -t ghcr.io/agentfund/agentfund .
+# Build from the monorepo root:  docker build -f server/Dockerfile -t ghcr.io/ghvstcode/agentfund .
 # One image serves the API and the built web UI.
 
 FROM node:22-bookworm-slim AS base

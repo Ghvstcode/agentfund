@@ -1,60 +1,57 @@
-import { Activity as ActivityIcon, ArrowRight, FolderGit2, Search, SearchX, Zap } from 'lucide-react';
+import { ArrowUpRight, FolderGit2, Search, SearchX } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import {
   flatItems,
   type ProjectFilters,
-  useDeliveryEvents,
-  useEvents,
   useFederatedProjects,
   useFederationEnabled,
+  useMeta,
   usePeers,
   useProjects,
   useStats,
 } from '@/api/queries';
-import type { AuditEvent, FederatedProject } from '@/api/types';
+import type { FederatedProject, Project, Totals } from '@/api/types';
 import { Button, ButtonLink } from '@/components/Button';
-import { EventLine } from '@/components/EventLine';
+import { CommandLine } from '@/components/CommandLine';
+import { CopyButton } from '@/components/CopyButton';
 import { FederatedBackDialog } from '@/components/FederatedBackDialog';
-import { FederatedProjectCard, FederatedProjectCardSkeleton } from '@/components/FederatedProjectCard';
-import { SelectField, SwitchField } from '@/components/Field';
-import { InFlight } from '@/components/InFlight';
-import { LiveIndicator } from '@/components/LiveIndicator';
+import { FederatedProjectRow, FederatedProjectRowSkeleton } from '@/components/FederatedProjectRow';
+import { SelectField } from '@/components/Field';
+import { TokenDot, type TokenState } from '@/components/Mark';
 import { Num } from '@/components/Num';
-import { ProjectCard, ProjectCardSkeleton } from '@/components/ProjectCard';
-import { Sparkline } from '@/components/Sparkline';
-import { Stat } from '@/components/Stat';
-import { EmptyState, ErrorState, Loading, LoadMore, Skeleton, SkeletonRows } from '@/components/States';
+import { EmptyState, ErrorState, Loading, LoadMore, Skeleton } from '@/components/States';
 import { TokenCounter } from '@/components/TokenCounter';
+import { TokenPyramid } from '@/components/TokenPyramid';
 import { Input } from '@/components/ui/input';
-import { CLI_NAME } from '@/config';
+import { APP_NAME, CLI_NAME } from '@/config';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useLive } from '@/hooks/useLive';
+import { docLinks, instanceLinks } from '@/lib/commands';
 import { formatCompact } from '@/lib/format';
-import { cumulative, dailySeries } from '@/lib/series';
+import { cn } from '@/lib/utils';
 
-const SORTS = [
+/** The project index's tabs, each a real query the API answers. */
+const TABS = [
   { value: 'trending', label: 'Trending' },
-  { value: 'active', label: 'Recently active' },
-  { value: 'recent', label: 'Newest' },
+  { value: 'needs', label: 'Needs donors' },
   { value: 'delivered', label: 'Most delivered' },
+  { value: 'recent', label: 'New' },
 ] as const;
 
-type Sort = (typeof SORTS)[number]['value'];
-const FEED_LENGTH = 10;
-const PAGE_SIZE = 12;
+type Tab = (typeof TABS)[number]['value'];
+const PAGE_SIZE = 10;
 const FEDERATED_PAGE_SIZE = 6;
-const CHART_DAYS = 14;
+const TAG_CHIPS = 10;
 
 function useFilters() {
   const [params, setParams] = useSearchParams();
-  const sort = SORTS.find((option) => option.value === params.get('sort'))?.value ?? 'trending';
+  const tab = TABS.find((option) => option.value === params.get('tab'))?.value ?? 'trending';
   const filters = {
     q: params.get('q') ?? '',
     language: params.get('language') ?? '',
-    status: params.get('status') === 'paused' ? ('paused' as const) : ('active' as const),
-    needsDonors: params.get('needs_donors') === 'true',
-    sort,
+    tag: params.get('tag') ?? '',
+    tab,
   };
   const set = useCallback(
     (change: Record<string, string | null>) => {
@@ -67,101 +64,253 @@ function useFilters() {
           }
           return next;
         },
-        { replace: true },
+        { replace: true, preventScrollReset: true },
       );
     },
     [setParams],
   );
-  const active = Boolean(filters.q || filters.language || filters.needsDonors || filters.status !== 'active');
-  return { filters, set, active, clear: () => setParams({}, { replace: true }) };
+  const active = Boolean(filters.q || filters.language || filters.tag || filters.tab !== 'trending');
+  return { filters, set, active, clear: () => setParams({}, { replace: true, preventScrollReset: true }) };
 }
 
-/** The side panel of the hero: recent delivery as a chart, and the instance in four figures. */
-function Pulse({ totals }: { totals: { pledged: number; merged: number } | undefined }) {
-  const stats = useStats();
-  const deliveries = useDeliveryEvents();
-  const series = dailySeries(deliveries.data ?? [], CHART_DAYS);
-  const recent = series.reduce((sum, value) => sum + value, 0);
-  const figure = (value: number | undefined, unit = 'tokens') =>
-    value === undefined ? <Skeleton className="h-5 w-12" /> : <Num value={value} unit={unit} />;
+/** Values seen in any result so far, most frequent first. The API has no facet list, so this grows as you browse. */
+function useKnownValues(seen: (string | null | undefined)[], selected: string, limit = Infinity): string[] {
+  const [known, setKnown] = useState<Record<string, number>>({});
+  const tally: Record<string, number> = {};
+  for (const value of seen) if (value) tally[value] = (tally[value] ?? 0) + 1;
+  const key = JSON.stringify(Object.entries(tally).sort());
+  useEffect(() => {
+    const fresh: Record<string, number> = Object.fromEntries(JSON.parse(key) as [string, number][]);
+    setKnown((current) => {
+      const next = { ...current };
+      for (const [value, count] of Object.entries(fresh)) next[value] = Math.max(next[value] ?? 0, count);
+      return Object.keys(next).some((value) => next[value] !== current[value]) ? next : current;
+    });
+  }, [key]);
+  const ranked = Object.keys(known).sort((a, b) => (known[b] ?? 0) - (known[a] ?? 0) || a.localeCompare(b)).slice(0, limit);
+  return selected && !ranked.includes(selected) ? [...ranked, selected] : ranked;
+}
 
+function Legend({ items }: { items: [TokenState, string][] }) {
   return (
-    <aside aria-label="Instance at a glance" className="surface rise grid content-start gap-5 p-5" style={{ '--i': 2 } as React.CSSProperties}>
-      <div className="grid gap-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="label">Delivered, last {CHART_DAYS} days</h2>
-          <span className="num text-sm font-medium">{deliveries.data ? formatCompact(recent) : ' '}</span>
-        </div>
-        <Sparkline
-          values={cumulative(series)}
-          className="h-20 text-foreground"
-          label={`Delivery over the last ${CHART_DAYS} days: ${formatCompact(recent)} tokens`}
-        />
-      </div>
-      {stats.isError ? (
-        <ErrorState title="Couldn't load instance totals" error={stats.error} onRetry={() => void stats.refetch()} className="p-4" />
-      ) : (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-5 border-t pt-5">
-          <Stat label="Pledged" value={figure(totals?.pledged)} />
-          <Stat label="Merged" value={figure(totals?.merged)} />
-          <Stat label="Projects" value={figure(stats.data?.projects, '')} />
-          <Stat label="Donors" value={figure(stats.data?.donors, '')} />
-        </dl>
-      )}
-    </aside>
+    <ul className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+      {items.map(([state, label]) => (
+        <li key={state} className="flex items-center gap-1.5">
+          <TokenDot state={state} className="size-2" />
+          {label}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function Hero({ onEvent }: { onEvent: (event: AuditEvent) => void }) {
-  const stats = useStats();
-  const live = useLive(undefined, onEvent);
-  const totals = live.frame?.totals ?? stats.data?.totals;
+function Hero({ totals, live }: { totals: Totals | undefined; live: boolean }) {
+  const meta = useMeta();
+  const docs = docLinks(meta.data);
+  const name = meta.data?.name ?? APP_NAME;
+  const here = name === APP_NAME ? `this ${APP_NAME} instance` : name;
 
   return (
-    <section aria-labelledby="hero-title" className="relative overflow-hidden border-b">
-      <div
-        aria-hidden="true"
-        className="bg-grid pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_70%_90%_at_20%_0%,black,transparent)]"
-      />
-      <div className="container-page relative grid gap-10 py-12 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-end lg:py-16">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <LiveIndicator status={live.status} />
-            <h1 id="hero-title" className="text-sm font-medium text-muted-foreground">
-              Tokens delivered to open source
-            </h1>
-          </div>
-          <p className="mt-5 -ml-[0.04em]">
-            <TokenCounter value={totals?.delivered} label="tokens delivered" size="hero" placeholderDigits={8} />
-          </p>
-          <InFlight tokens={totals?.in_flight} className="mt-4" />
-          <p className="rise mt-8 max-w-xl text-lg leading-snug text-pretty text-muted-foreground" style={{ '--i': 1 } as React.CSSProperties}>
-            <span className="font-medium text-foreground">Fund open source with inference.</span> Donors run signed
-            tasks on their own machines, under their own Claude Code subscription. A token counts only after CI passes
-            on the pull request it produced.
-          </p>
-          <div className="rise mt-6 flex flex-wrap gap-2.5" style={{ '--i': 2 } as React.CSSProperties}>
-            <Button asChild variant="primary" size="lg">
-              <a href="#projects">
-                <Zap className="fill-current" strokeWidth={0} aria-hidden="true" />
-                Back a project
-              </a>
-            </Button>
-            <ButtonLink to="/maintain/new" size="lg">
-              List your project
-              <ArrowRight strokeWidth={1.5} aria-hidden="true" />
-            </ButtonLink>
-          </div>
+    <section aria-labelledby="hero-title" className="container-page grid items-center gap-12 py-14 lg:grid-cols-[minmax(0,1fr)_25rem] lg:py-24">
+      <div className="min-w-0">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8125rem] text-muted-foreground">
+          <span className={cn('size-2 rounded-full bg-pass', live && 'live-dot bg-pass')} aria-hidden="true" />
+          <span className="text-foreground">
+            <TokenCounter value={totals?.delivered} label="tokens delivered" size="sm" placeholderDigits={6} />
+          </span>
+          <span className="num">tokens delivered · open source, research and in-house tools</span>
+        </p>
+        <h1
+          id="hero-title"
+          className="mt-7 text-[clamp(3rem,8.6vw,6.25rem)] leading-[0.94] font-semibold tracking-[-0.055em] text-balance"
+        >
+          Fund software <br className="hidden sm:block" />
+          in tokens.
+        </h1>
+        <p className="mt-8 max-w-[40rem] text-lg leading-relaxed text-pretty text-muted-foreground sm:text-xl sm:leading-relaxed">
+          Back any project by lending your agent. Maintainers sign small tasks; your agent runs them on your machine,
+          under your caps. A token counts only once CI passes.{' '}
+          <span className="font-medium text-foreground">Use {here}, or run your own inside your company.</span>
+        </p>
+        <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-3">
+          <Button asChild variant="primary" size="lg" className="rounded-none px-5">
+            <a href="#projects">Find a project to back</a>
+          </Button>
+          <a href="#install" className="text-[0.9375rem] font-medium hover:underline">
+            Install the worker
+          </a>
+          <a href={docs.quickstart} className="flex items-center gap-1 text-[0.9375rem] font-medium hover:underline">
+            Read the docs <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          </a>
         </div>
-        <Pulse totals={totals} />
       </div>
+      <figure className="mx-auto grid w-full max-w-64 justify-items-center gap-5 sm:max-w-sm lg:max-w-none">
+        <TokenPyramid />
+        <figcaption>
+          <Legend items={[['delivered', 'Delivered'], ['merged', 'Merged'], ['reported', 'Reported'], ['pledged', 'Pledged']]} />
+        </figcaption>
+      </figure>
     </section>
   );
 }
 
-function Toolbar({ languages }: { languages: string[] }) {
-  const { filters, set } = useFilters();
+function StatStrip({ totals }: { totals: Totals | undefined }) {
+  const stats = useStats();
+  const figure = (value: number | undefined, className?: string) =>
+    value === undefined ? <Skeleton className="h-10 w-28" /> : <Num value={value} className={cn('text-[2.5rem] leading-none font-medium tracking-[-0.04em]', className)} />;
+  const cells = [
+    { label: 'Delivered', value: figure(totals?.delivered, 'text-live'), note: 'CI passed. The only number that ranks.' },
+    {
+      label: 'Merged',
+      value: figure(totals?.merged),
+      note: stats.data ? `In main, across ${stats.data.tasks_merged.toLocaleString('en')} merged tasks.` : ' ',
+    },
+    {
+      label: 'Pledged',
+      value: figure(totals?.pledged),
+      note: stats.data ? `Stated intent from ${stats.data.donors.toLocaleString('en')} donors.` : ' ',
+    },
+    { label: 'Dollars moved', value: <span className="num text-[2.5rem] leading-none font-medium tracking-[-0.04em]">0</span>, note: 'A scoreboard, not a bank.' },
+  ];
+
+  if (stats.isError) {
+    return (
+      <div className="container-page">
+        <ErrorState title="Couldn't load instance totals" error={stats.error} onRetry={() => void stats.refetch()} />
+      </div>
+    );
+  }
+  return (
+    <section aria-label="Instance totals" className="container-page">
+      <dl className="grid border-t border-t-foreground sm:grid-cols-2 lg:grid-cols-4 lg:border-b">
+        {cells.map((cell, index) => (
+          <div
+            key={cell.label}
+            className={cn(
+              'grid content-start gap-2.5 border-b py-6 sm:py-7 lg:border-b-0',
+              index % 2 === 1 && 'sm:border-l sm:pl-6',
+              index > 0 && 'lg:border-l lg:pl-6',
+            )}
+          >
+            <dt className="text-xs font-semibold tracking-[0.12em] uppercase">{cell.label}</dt>
+            <dd>{cell.value}</dd>
+            <dd className="text-[0.8125rem] text-muted-foreground">{cell.note}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function ProjectStatus({ project }: { project: Project }) {
+  const chip = 'inline-flex h-5 items-center px-1.5 text-[0.6875rem] font-medium whitespace-nowrap';
+  if (project.totals.in_flight > 0) {
+    return (
+      <span className={cn(chip, 'gap-1.5 bg-pass-tint text-live')}>
+        <span className="live-dot size-1.5" aria-hidden="true" /> Running now
+      </span>
+    );
+  }
+  if (project.token_goal > 0 && project.totals.delivered >= project.token_goal) return <span className={cn(chip, 'bg-pass font-semibold text-black')}>Funded</span>;
+  if (project.status === 'paused') return <span className={cn(chip, 'border text-muted-foreground')}>Paused</span>;
+  if ((project.tasks.claimable ?? 0) > 0) return <span className={cn(chip, 'border border-foreground')}>Needs donors</span>;
+  return null;
+}
+
+const ROW_GRID = 'md:grid md:grid-cols-[2.5rem_minmax(0,1fr)_6.5rem_15rem_5rem_4.5rem_4.5rem] md:items-center md:gap-6';
+/** The same first four columns and the same total width, so the two lists line up; the last three differ. */
+const FEDERATED_ROW_GRID = 'md:grid md:grid-cols-[2.5rem_minmax(0,1fr)_6.5rem_15rem_4.25rem_3.25rem_6.5rem] md:items-center md:gap-6';
+const COLUMN_HEAD = 'hidden h-10 border-t border-b border-t-foreground text-[0.6875rem] font-medium tracking-[0.08em] text-muted-foreground uppercase md:grid';
+
+function ProjectRow({ project, rank }: { project: Project; rank: number }) {
+  const { totals, token_goal: goal } = project;
+  const percent = goal > 0 ? Math.round((totals.delivered / goal) * 100) : 0;
+  return (
+    <li className={cn('group relative grid gap-3 border-b py-5 transition-colors hover:bg-muted/40', ROW_GRID)}>
+      <span className="num hidden text-[0.8125rem] text-muted-foreground md:block">{String(rank).padStart(2, '0')}</span>
+      <div className="grid min-w-0 gap-1">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <h3 className="text-base font-semibold tracking-tight">
+            {/* The whole row is the link target; the name carries the accessible name. */}
+            <Link to={`/${project.slug}`} className="after:absolute after:inset-0 focus-visible:outline-none">
+              {project.name}
+            </Link>
+          </h3>
+          <span className="num text-xs text-muted-foreground">{project.maintainer.handle}</span>
+          <ProjectStatus project={project} />
+        </div>
+        <p className="truncate text-[0.8125rem] text-muted-foreground">{project.description}</p>
+        {(project.tags?.length ?? 0) > 0 && (
+          <ul aria-label="Tags" className="flex flex-wrap gap-1 pt-1">
+            {project.tags?.slice(0, 4).map((tag) => (
+              <li key={tag} className="num bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground">
+                {tag}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <span className="hidden text-[0.8125rem] md:block">{project.language ?? '—'}</span>
+      <div className="grid gap-2">
+        <div className="h-1 w-full bg-muted" aria-hidden="true">
+          <div className="h-1 bg-pass" style={{ width: `${Math.min(percent, 100)}%` }} />
+        </div>
+        <div className="flex justify-between gap-3 text-xs">
+          <span>
+            <Num value={totals.delivered} /> <span className="num text-muted-foreground">of {goal > 0 ? formatCompact(goal) : '—'}</span>
+          </span>
+          <span className="num font-semibold">{goal > 0 ? `${percent}%` : ''}</span>
+        </div>
+      </div>
+      <div className="flex justify-between text-xs md:contents">
+        <span className="text-muted-foreground md:hidden">Last 7 days</span>
+        <span className={cn('num md:text-right md:text-[0.8125rem]', project.velocity_7d > 0 ? 'text-live' : 'text-muted-foreground')}>
+          {project.velocity_7d > 0 ? `+${formatCompact(project.velocity_7d)}` : '—'}
+        </span>
+      </div>
+      <div className="flex justify-between text-xs md:contents">
+        <span className="text-muted-foreground md:hidden">Donors</span>
+        <span className="num md:text-right md:text-[0.8125rem]">{project.donors}</span>
+      </div>
+      <span aria-hidden="true" className="hidden h-8 items-center justify-center border border-foreground text-[0.8125rem] font-medium transition-colors group-hover:bg-foreground group-hover:text-background md:flex">
+        Back
+      </span>
+    </li>
+  );
+}
+
+function Chip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={cn(
+        'h-8 border px-3 text-[0.8125rem] whitespace-nowrap transition-colors',
+        selected ? 'border-foreground bg-foreground font-medium text-background' : 'hover:border-foreground/40',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Projects() {
+  const { filters, set, active, clear } = useFilters();
   const [search, setSearch] = useState(filters.q);
+  const query: ProjectFilters = {
+    q: filters.q || undefined,
+    language: filters.language || undefined,
+    tag: filters.tag || undefined,
+    status: 'active',
+    needs_donors: filters.tab === 'needs' || undefined,
+    sort: filters.tab === 'needs' ? 'trending' : (filters.tab as Exclude<Tab, 'needs'>),
+    limit: PAGE_SIZE,
+  };
+  const projects = useProjects(query);
+  const items = flatItems(projects);
+  const languages = useKnownValues(items.map((project) => project.language), filters.language);
+  const tags = useKnownValues(items.flatMap((project) => project.tags ?? []), filters.tag, TAG_CHIPS);
 
   // Keep typing responsive: the URL (and so the request) follows a moment behind the input.
   useEffect(() => {
@@ -171,121 +320,101 @@ function Toolbar({ languages }: { languages: string[] }) {
   }, [search, filters.q, set]);
 
   return (
-    <form
-      role="search"
-      aria-label="Filter projects"
-      onSubmit={(event) => event.preventDefault()}
-      className="flex flex-wrap items-center gap-2"
-    >
-      <div className="relative min-w-48 flex-1">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
-        <Input
-          type="search"
-          data-slash-focus
-          aria-label="Search projects"
-          aria-keyshortcuts="/"
-          placeholder="Search projects"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          maxLength={200}
-          className="h-9 pr-9 pl-8 [&::-webkit-search-cancel-button]:hidden"
-        />
-        <kbd aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium text-muted-foreground">
-          /
-        </kbd>
+    <section id="projects" aria-labelledby="projects-title" className="container-page grid grid-cols-[minmax(0,1fr)] scroll-mt-20 pt-20 sm:pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5 pb-5">
+        <div className="grid gap-2">
+          <h2 id="projects-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
+            Projects to back.
+          </h2>
+          <p className="text-[0.9375rem] text-muted-foreground">Open source, research and in-house tools with signed tasks open right now.</p>
+        </div>
+        <div role="group" aria-label="Order" className="-mb-px flex gap-6 overflow-x-auto [scrollbar-width:none]">
+          {TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={filters.tab === tab.value}
+              onClick={() => set({ tab: tab.value === 'trending' ? null : tab.value })}
+              className={cn(
+                'border-b-2 pb-1.5 text-sm whitespace-nowrap transition-colors',
+                filters.tab === tab.value ? 'border-foreground font-semibold' : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <SelectField
-        label="Language"
-        hideLabel
-        value={filters.language}
-        onChange={(event) => set({ language: event.target.value || null })}
-        className="min-w-36"
-      >
-        <option value="">Any language</option>
-        {languages.map((language) => (
-          <option key={language} value={language}>
-            {language}
-          </option>
-        ))}
-      </SelectField>
-      <SelectField
-        label="Status"
-        hideLabel
-        value={filters.status}
-        onChange={(event) => set({ status: event.target.value === 'paused' ? 'paused' : null })}
-      >
-        <option value="active">Active</option>
-        <option value="paused">Paused</option>
-      </SelectField>
-      <SelectField
-        label="Sort by"
-        hideLabel
-        value={filters.sort}
-        onChange={(event) => set({ sort: event.target.value === 'trending' ? null : event.target.value })}
-        className="min-w-40"
-      >
-        {SORTS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </SelectField>
-      <SwitchField label="Needs donors" checked={filters.needsDonors} onCheckedChange={(checked) => set({ needs_donors: checked ? 'true' : null })} />
-    </form>
-  );
-}
 
-/** Languages seen in any result so far. The API has no facet list, so this grows as you browse. */
-function useKnownLanguages(seen: (string | null | undefined)[], selected: string): string[] {
-  const [known, setKnown] = useState<string[]>([]);
-  const missing = [...new Set([...seen, selected])]
-    .filter((language): language is string => Boolean(language) && !known.includes(language ?? ''))
-    .sort()
-    .join('\n');
-  useEffect(() => {
-    if (missing) setKnown((current) => [...new Set([...current, ...missing.split('\n')])].sort());
-  }, [missing]);
-  return known;
-}
+      <form
+        role="search"
+        aria-label="Filter projects"
+        onSubmit={(event) => event.preventDefault()}
+        className="flex flex-wrap items-center justify-between gap-3 pb-5"
+      >
+        <div role="group" aria-label="Tags" className="flex w-full min-w-0 flex-wrap gap-1.5 sm:w-auto">
+          <Chip selected={!filters.tag} onClick={() => set({ tag: null })}>
+            All
+          </Chip>
+          {tags.map((tag) => (
+            <Chip key={tag} selected={filters.tag === tag} onClick={() => set({ tag: filters.tag === tag ? null : tag })}>
+              {tag}
+            </Chip>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <div className="relative w-full min-w-44 sm:w-52">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
+            <Input
+              type="search"
+              data-slash-focus
+              aria-label="Search projects"
+              aria-keyshortcuts="/"
+              placeholder="Search projects"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              maxLength={200}
+              className="h-8 rounded-none pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
+            />
+            <kbd aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 border bg-muted px-1.5 text-[0.6875rem] leading-5 font-medium text-muted-foreground">
+              /
+            </kbd>
+          </div>
+          <SelectField
+            label="Language"
+            hideLabel
+            value={filters.language}
+            onChange={(event) => set({ language: event.target.value || null })}
+            className="h-8 min-w-36 [&_select]:rounded-none"
+          >
+            <option value="">Any language</option>
+            {languages.map((language) => (
+              <option key={language} value={language}>
+                {language}
+              </option>
+            ))}
+          </SelectField>
+        </div>
+      </form>
 
-function Projects() {
-  const { filters, active, clear } = useFilters();
-  const query: ProjectFilters = {
-    q: filters.q || undefined,
-    language: filters.language || undefined,
-    status: filters.status,
-    needs_donors: filters.needsDonors || undefined,
-    sort: filters.sort as Sort,
-    limit: PAGE_SIZE,
-  };
-  const projects = useProjects(query);
-  const items = flatItems(projects);
-  const languages = useKnownLanguages(items.map((project) => project.language), filters.language);
-  const grid = 'grid gap-4 sm:grid-cols-2';
-
-  return (
-    <section id="projects" aria-labelledby="projects-title" className="grid min-w-0 scroll-mt-20 content-start gap-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="projects-title" className="text-lg font-semibold tracking-tight">
-          Projects
-        </h2>
-        <p className="text-xs text-muted-foreground">Trending ranks by tokens delivered in the last 7 days.</p>
-      </div>
-      <Toolbar languages={languages} />
       {projects.isPending ? (
-        <Loading label="projects" className={grid}>
-          {Array.from({ length: 4 }, (_, index) => (
-            <ProjectCardSkeleton key={index} />
+        <Loading label="projects" className="border-t border-t-foreground md:border-t-0">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="grid gap-2 border-b py-5">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-80 max-w-full" />
+            </div>
           ))}
         </Loading>
       ) : projects.isError ? (
-        <ErrorState title="Couldn't load projects" error={projects.error} onRetry={() => void projects.refetch()} />
+        <ErrorState title="Couldn't load projects" error={projects.error} onRetry={() => void projects.refetch()} className="mt-5" />
       ) : items.length === 0 && active ? (
-        <EmptyState icon={SearchX} title="No projects match these filters" action={<Button onClick={clear}>Clear filters</Button>}>
+        <EmptyState icon={SearchX} title="No projects match these filters" action={<Button onClick={clear}>Clear filters</Button>} className="mt-5">
           <p>Try a broader search, or drop a filter.</p>
         </EmptyState>
       ) : items.length === 0 ? (
         <EmptyState
+          className="mt-5"
           icon={FolderGit2}
           title="No projects yet"
           action={
@@ -317,17 +446,34 @@ function Projects() {
         </EmptyState>
       ) : (
         <>
-          <div className={items.length === 1 ? 'grid gap-4' : grid}>
-            {items.map((project) => (
-              <ProjectCard key={project.slug} project={project} />
-            ))}
+          <div
+            aria-hidden="true"
+            className={cn(COLUMN_HEAD, ROW_GRID)}
+          >
+            <span>#</span>
+            <span>Project</span>
+            <span>Language</span>
+            <span>Delivered of goal</span>
+            <span className="text-right">7-day</span>
+            <span className="text-right">Donors</span>
+            <span />
           </div>
-          <LoadMore
-            hasMore={projects.hasNextPage}
-            loading={projects.isFetchingNextPage}
-            onLoad={() => void projects.fetchNextPage()}
-            label="Load more projects"
-          />
+          <ol aria-label="Projects" className="border-t border-t-foreground md:border-t-0">
+            {items.map((project, index) => (
+              <ProjectRow key={project.slug} project={project} rank={index + 1} />
+            ))}
+          </ol>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 text-[0.8125rem] text-muted-foreground">
+            <span>
+              {filters.tab === 'trending' ? 'Ranked by tokens delivered in the last 7 days.' : `Showing ${items.length}.`}
+            </span>
+            <LoadMore
+              hasMore={projects.hasNextPage}
+              loading={projects.isFetchingNextPage}
+              onLoad={() => void projects.fetchNextPage()}
+              label="More projects"
+            />
+          </div>
         </>
       )}
     </section>
@@ -336,9 +482,10 @@ function Projects() {
 
 /**
  * Projects hosted on peer instances, under the local list. Absent unless federation is on and
- * at least one peer has projects to list, so a fresh instance shows no empty box. The search
- * box and the language filter above apply here too; status, sort and "needs donors" do not,
- * because the peers rank and gate their own projects.
+ * at least one active peer has projects to list, so a fresh instance shows no empty block. The
+ * search box and the language filter of the list above apply here too (a tag is matched through
+ * the search, which covers tags); the ordering tabs do not, because peers rank and gate their
+ * own projects.
  */
 function FederatedProjects() {
   const { filters } = useFilters();
@@ -348,29 +495,36 @@ function FederatedProjects() {
   const [backing, setBacking] = useState<FederatedProject | null>(null);
   const sources = (peers.data?.items ?? []).filter((item) => item.status === 'active' && item.discover && item.projects > 0);
   const selected = sources.some((item) => item.host === peer) ? peer : '';
+  const q = filters.q || filters.tag;
   const projects = useFederatedProjects(
-    { q: filters.q || undefined, language: filters.language || undefined, peer: selected || undefined, limit: FEDERATED_PAGE_SIZE },
+    { q: q || undefined, language: filters.language || undefined, peer: selected || undefined, limit: FEDERATED_PAGE_SIZE },
     enabled && sources.length > 0,
   );
   const items = flatItems(projects);
-  const grid = 'grid gap-4 sm:grid-cols-2';
+  const where = selected || (sources.length === 1 ? (sources[0]?.host ?? 'the peer') : 'other instances');
 
   if (!enabled || peers.isPending || (!peers.isError && sources.length === 0)) return null;
 
   return (
-    <section id="other-instances" aria-labelledby="other-instances-title" className="grid min-w-0 scroll-mt-20 content-start gap-4 border-t pt-10">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="grid min-w-0 gap-1">
-          <h2 id="other-instances-title" className="text-lg font-semibold tracking-tight">
+    <section id="other-instances" aria-labelledby="other-instances-title" className="container-page grid grid-cols-[minmax(0,1fr)] scroll-mt-20 pt-14">
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 pb-5">
+        <div className="grid min-w-0 gap-1.5">
+          <h2 id="other-instances-title" className="text-2xl font-semibold tracking-[-0.03em]">
             On other instances
           </h2>
-          <p className="max-w-prose text-xs text-pretty text-muted-foreground">
-            Projects hosted by instances this one peers with. They open on their home instance, and the figures are
-            that instance's own, as of its last sync.
+          <p className="max-w-[44rem] text-[0.9375rem] text-pretty text-muted-foreground">
+            Projects hosted by instances this one peers with. A row opens on its home instance; the figures are that
+            instance's own, as of its last sync. The search and language filter above apply.
           </p>
         </div>
         {sources.length > 1 && (
-          <SelectField label="Instance" hideLabel value={selected} onChange={(event) => setPeer(event.target.value)} className="min-w-44">
+          <SelectField
+            label="Instance"
+            hideLabel
+            value={selected}
+            onChange={(event) => setPeer(event.target.value)}
+            className="h-8 w-full sm:w-auto sm:min-w-52 [&_select]:rounded-none"
+          >
             <option value="">Any instance</option>
             {sources.map((item) => (
               <option key={item.host} value={item.host}>
@@ -383,30 +537,42 @@ function FederatedProjects() {
       {peers.isError ? (
         <ErrorState title="Couldn't load projects on other instances" error={peers.error} onRetry={() => void peers.refetch()} />
       ) : projects.isPending ? (
-        <Loading label="projects on other instances" className={grid}>
-          {Array.from({ length: 2 }, (_, index) => (
-            <FederatedProjectCardSkeleton key={index} />
+        <Loading label="projects on other instances" className="border-t border-t-foreground">
+          {Array.from({ length: 3 }, (_, index) => (
+            <FederatedProjectRowSkeleton key={index} />
           ))}
         </Loading>
       ) : projects.isError ? (
         <ErrorState title="Couldn't load projects on other instances" error={projects.error} onRetry={() => void projects.refetch()} />
       ) : items.length === 0 ? (
-        <p className="rounded-xl border border-dashed px-5 py-4 text-sm text-muted-foreground">
-          {filters.q ? `No project on ${selected || 'another instance'} matches “${filters.q}”.` : `No project on ${selected || 'another instance'} matches these filters.`}
+        <p className="border-t border-b border-t-foreground py-5 text-sm text-muted-foreground">
+          {q ? `No project on ${where} matches “${q}”${filters.language ? ` in ${filters.language}` : ''}.` : `No project on ${where} matches these filters.`}
         </p>
       ) : (
         <>
-          <div className={items.length === 1 ? 'grid gap-4' : grid}>
-            {items.map((project) => (
-              <FederatedProjectCard key={project.id} project={project} onBack={() => setBacking(project)} />
-            ))}
+          <div aria-hidden="true" className={cn(COLUMN_HEAD, FEDERATED_ROW_GRID)}>
+            <span />
+            <span>Project · instance</span>
+            <span>Language</span>
+            <span>Delivered of goal</span>
+            <span className="text-right">Open</span>
+            <span className="text-right">Donors</span>
+            <span />
           </div>
-          <LoadMore
-            hasMore={projects.hasNextPage}
-            loading={projects.isFetchingNextPage}
-            onLoad={() => void projects.fetchNextPage()}
-            label="Load more from other instances"
-          />
+          <ul aria-label="Projects on other instances" className="border-t border-t-foreground md:border-t-0">
+            {items.map((project) => (
+              <FederatedProjectRow key={project.id} project={project} onBack={() => setBacking(project)} className={FEDERATED_ROW_GRID} />
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 text-[0.8125rem] text-muted-foreground">
+            <span>Not counted in this instance's totals. Tokens delivered there are ranked there.</span>
+            <LoadMore
+              hasMore={projects.hasNextPage}
+              loading={projects.isFetchingNextPage}
+              onLoad={() => void projects.fetchNextPage()}
+              label="More from other instances"
+            />
+          </div>
         </>
       )}
       {backing && <FederatedBackDialog project={backing} onClose={() => setBacking(null)} />}
@@ -414,59 +580,221 @@ function FederatedProjects() {
   );
 }
 
-function Activity({ liveEvents }: { liveEvents: AuditEvent[] }) {
-  const events = useEvents(FEED_LENGTH);
-  const fetched = flatItems(events);
-  const known = new Set(fetched.map((event) => event.id));
-  const fresh = liveEvents.filter((event) => !known.has(event.id));
-  const items = [...fresh, ...fetched].slice(0, FEED_LENGTH);
-
+function Install() {
+  const meta = useMeta();
+  const docs = docLinks(meta.data);
+  const links = instanceLinks(meta.data);
+  const base = (meta.data?.base_url ?? (typeof window === 'undefined' ? '' : window.location.origin)).replace(/\/+$/, '');
+  const steps: [string, string, string][] = [
+    ['1', 'Install the worker', links.installCommand],
+    ['2', 'Sign in with an API key from Settings', `${CLI_NAME} login ${base}`],
+    ['3', 'Review a project, then lend your agent', `${CLI_NAME} approve ${base}/<project>`],
+  ];
   return (
-    <aside aria-labelledby="activity-title" className="grid min-w-0 content-start gap-4 lg:sticky lg:top-20">
-      <h2 id="activity-title" className="text-lg font-semibold tracking-tight">
-        Activity
-      </h2>
-      {events.isPending ? (
-        <Loading label="recent activity">
-          <SkeletonRows rows={6} className="h-12" />
-        </Loading>
-      ) : events.isError ? (
-        <ErrorState title="Couldn't load activity" error={events.error} onRetry={() => void events.refetch()} />
-      ) : items.length === 0 ? (
-        <EmptyState icon={ActivityIcon} title="Nothing has happened yet">
-          <p>Claims, deliveries and merges appear here the moment they are recorded.</p>
-        </EmptyState>
-      ) : (
-        <ol className="surface divide-y px-4">
-          {items.map((event) => (
-            <li key={event.id}>
-              <EventLine event={event} fresh={fresh.includes(event)} />
-            </li>
-          ))}
-        </ol>
-      )}
-    </aside>
+    <section aria-labelledby="install-title" id="install" className="container-page grid scroll-mt-20 gap-7 pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-2">
+          <h2 id="install-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
+            Get the worker.
+          </h2>
+          <p className="max-w-[40rem] text-[0.9375rem] text-pretty text-muted-foreground">
+            One binary for macOS and Linux. It runs each task in Docker on your machine, with your own Claude Code
+            subscription, and never sends your credentials anywhere.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <a href={`${links.sourceUrl.replace(/\/+$/, '')}/releases/latest`} className="flex items-center gap-1 text-sm font-medium hover:underline">
+            Download a release <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          </a>
+          <a href={docs.donors} className="flex items-center gap-1 text-sm font-medium hover:underline">
+            Backer guide <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          </a>
+        </div>
+      </div>
+      <ol className="grid border-t border-t-foreground">
+        {steps.map(([n, title, command]) => (
+          <li key={n} className="grid gap-3 border-b py-5 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] sm:items-center sm:gap-6">
+            <span className="flex items-baseline gap-3">
+              <span className="num text-xs text-muted-foreground">0{n}</span>
+              <span className="text-[1.0625rem] font-semibold tracking-tight">{title}</span>
+            </span>
+            <CommandLine command={command} label={title.toLowerCase()} />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function ForTeams() {
+  const meta = useMeta();
+  const docs = docLinks(meta.data);
+  const command = 'docker compose up --build';
+  const points = [
+    ['Your instance, your rules', 'One container and Postgres, with your own GitHub sign-in. Turn on approval and an admin reviews every project before it is listed.'],
+    ['Caps on every worker', "Each engineer's worker stops at its own per-task, daily and weekly caps."],
+    ['Signed tasks only', 'Workers run nothing a maintainer has not signed, and check it on their own machine.'],
+    ['A ledger you can audit', 'Tokens spent against work delivered and merged, per project and per person.'],
+  ];
+  return (
+    <section aria-labelledby="teams-title" id="teams" className="container-page scroll-mt-20 pt-24">
+      <div className="grid gap-12 bg-band p-8 text-band-foreground sm:p-12 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)] lg:gap-16 lg:p-16">
+        <div className="flex flex-col justify-between gap-10">
+          <div className="grid gap-5">
+            <p className="text-xs font-semibold tracking-[0.12em] text-band-muted uppercase">For teams and companies</p>
+            <h2 id="teams-title" className="text-4xl leading-[1.08] font-semibold tracking-[-0.045em] sm:text-5xl">
+              Run your own instance. Send your team's spare tokens where they count.
+            </h2>
+            <p className="text-[1.0625rem] leading-relaxed text-pretty text-band-muted">
+              Your company already pays for agent seats. Run your own instance and let engineers' idle agents work on the
+              open-source projects you depend on, with caps and a ledger you control.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <a
+              href={docs.organizations}
+              className="inline-flex h-11 w-fit items-center gap-1.5 bg-band-foreground px-5 text-[0.9375rem] font-semibold text-band transition-opacity hover:opacity-90"
+            >
+              Run it for your organisation <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            </a>
+            <a
+              href={docs.selfHosting}
+              className="inline-flex items-center gap-1 text-[0.9375rem] font-semibold text-band-muted underline-offset-4 transition-colors hover:text-band-foreground hover:underline"
+            >
+              Self-hosting guide <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+        <div className="grid content-start">
+          <ul className="grid">
+            {points.map(([title, body]) => (
+              <li key={title} className="grid gap-1.5 border-b border-band-line py-5 first:pt-0">
+                <span className="text-[1.0625rem] font-semibold">{title}</span>
+                <span className="text-sm leading-relaxed text-band-muted">{body}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6 flex h-11 items-center justify-between gap-3 border border-band-line pr-2 pl-4">
+            <code className="truncate text-[0.8125rem]">
+              <span className="text-band-muted">$ </span>
+              {command}
+            </code>
+            <CopyButton text={command} label="the start command" className="border-band-line bg-transparent text-band-muted hover:bg-white/10 hover:text-band-foreground" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function States() {
+  const steps: [TokenState, string, string, string][] = [
+    ['pledged', '01 · Pledged', 'A maintainer signs small tasks.', 'A prompt, a write scope and a token cap, signed with a key you can check.'],
+    ['reported', '02 · Reported', 'Your agent runs one, locally.', 'Sandboxed, with your own login and your caps. The spend is reported, pass or fail.'],
+    ['delivered', '03 · Delivered', 'CI passes on its pull request.', 'Now it counts, and only now. Failed runs stay visible; they never rank.'],
+    ['merged', '04 · Merged', 'The maintainer merges it.', 'Every merge is on the public ledger, linked to the run that paid for it.'],
+  ];
+  return (
+    <section aria-labelledby="states-title" className="container-page grid gap-7 pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h2 id="states-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
+          Four states. One counts.
+        </h2>
+      </div>
+      <ol className="grid border-t border-t-foreground sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map(([state, label, title, body], index) => (
+          <li key={state} className={cn('grid content-start gap-4 border-b py-7 sm:pr-7 lg:border-b-0', index > 0 && 'lg:border-l lg:pl-7', index % 2 === 1 && 'sm:border-l sm:pl-7 lg:pl-7')}>
+            <TokenDot state={state} className={cn('size-9', state === 'pledged' && 'border-[3px]')} />
+            <div className="grid gap-1.5">
+              <span className={cn('num text-xs', state === 'delivered' ? 'text-live' : 'text-muted-foreground')}>{label}</span>
+              <span className="text-lg font-semibold tracking-tight">{title}</span>
+              <span className="text-sm leading-relaxed text-muted-foreground">{body}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function Docs() {
+  const meta = useMeta();
+  const docs = docLinks(meta.data);
+  const guides = [
+    ['01 · 5 min', 'Quickstart', 'Run a throwaway instance and a worker in one command.', docs.quickstart],
+    ['02 · donors', 'Back a project', 'Install the worker, approve a project, set your caps.', docs.donors],
+    ['03 · maintainers', 'Write signed tasks', 'Scopes, caps, CI gates and signing your manifests.', docs.maintainers],
+    ['04 · teams', 'Self-host', 'Run your own instance with your own login and repositories.', docs.selfHosting],
+    ['05 · reference', 'Spec v1', 'The manifest format, the protocol and the OpenAPI schema.', docs.spec],
+    ['06 · trust', 'Security model', 'What runs where, what is checked, and what the server never sees.', docs.security],
+  ];
+  return (
+    <section aria-labelledby="docs-title" className="container-page grid gap-7 pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-2">
+          <h2 id="docs-title" className="text-4xl font-semibold tracking-[-0.04em] sm:text-[2.75rem] sm:leading-[1.1]">
+            Read the docs.
+          </h2>
+          <p className="text-[0.9375rem] text-muted-foreground">From a first run to the full spec.</p>
+        </div>
+        <a href={docs.home} className="flex items-center gap-1 text-sm font-medium hover:underline">
+          All docs <ArrowUpRight className="size-4" strokeWidth={1.75} aria-hidden="true" />
+        </a>
+      </div>
+      <ul className="grid border-t border-t-foreground sm:grid-cols-2 lg:grid-cols-3">
+        {guides.map(([label, title, body, href]) => (
+          <li key={title} className="border-b">
+            <a href={href} className="group grid h-full content-start gap-2 py-6 pr-6 transition-colors hover:bg-muted/40">
+              <span className="num text-xs text-muted-foreground">{label}</span>
+              <span className="flex items-center gap-1 text-lg font-semibold tracking-tight">
+                {title}
+                <ArrowUpRight className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" strokeWidth={1.75} aria-hidden="true" />
+              </span>
+              <span className="text-sm leading-relaxed text-muted-foreground">{body}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Closing() {
+  return (
+    <section aria-labelledby="closing-title" className="container-page pt-24">
+      <div className="flex flex-wrap items-end justify-between gap-8 bg-band p-8 text-band-foreground sm:p-12 lg:p-16">
+        <h2 id="closing-title" className="max-w-3xl text-4xl leading-[1.06] font-semibold tracking-[-0.045em] sm:text-[3.5rem]">
+          Your agent is idle tonight. Lend it to something worth building.
+        </h2>
+        <div className="grid justify-items-start gap-3 sm:justify-items-end">
+          <a href="#projects" className="inline-flex h-12 items-center bg-band-foreground px-6 text-[0.9375rem] font-semibold text-band transition-opacity hover:opacity-90">
+            Find a project to back
+          </a>
+          <Link to="/maintain/new" className="text-sm text-band-muted hover:text-band-foreground">
+            Maintainer? <span className="text-band-foreground">List your project ›</span>
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 
 export default function Discover() {
   useDocumentTitle(undefined);
-  const [liveEvents, setLiveEvents] = useState<AuditEvent[]>([]);
-  const onEvent = useCallback(
-    (event: AuditEvent) => setLiveEvents((current) => [event, ...current].slice(0, FEED_LENGTH)),
-    [],
-  );
-
+  const stats = useStats();
+  const live = useLive();
+  const totals = live.frame?.totals ?? stats.data?.totals;
   return (
     <>
-      <Hero onEvent={onEvent} />
-      <div className="container-page grid gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="grid min-w-0 content-start gap-10">
-          <Projects />
-          <FederatedProjects />
-        </div>
-        <Activity liveEvents={liveEvents} />
-      </div>
+      <Hero totals={totals} live={live.status === 'live'} />
+      <StatStrip totals={totals} />
+      <Projects />
+      <FederatedProjects />
+      <Install />
+      <ForTeams />
+      <States />
+      <Docs />
+      <Closing />
     </>
   );
 }

@@ -6,15 +6,15 @@ import { session } from '../lib/session';
 import { FEDERATED_PROJECTS, FEDERATION_META, mockApi } from '../test/mockApi';
 import { renderApp } from '../test/render';
 import { FederatedBackDialog } from './FederatedBackDialog';
-import { FederatedProjectCard } from './FederatedProjectCard';
+import { FederatedProjectRow } from './FederatedProjectRow';
 
 const ACCEPTED = FEDERATED_PROJECTS.find((project) => project.slug === 'fjord-db') as FederatedProject;
 const NOT_ACCEPTED = FEDERATED_PROJECTS.find((project) => project.slug === 'openspectra') as FederatedProject;
 
-describe('FederatedProjectCard', () => {
-  it('reads as remote: host badge, a link that leaves in a new tab, and its own back control', async () => {
+describe('FederatedProjectRow', () => {
+  it('reads as remote: host chip, a link that leaves in a new tab, and its own back control', async () => {
     const onBack = vi.fn();
-    renderApp(<FederatedProjectCard project={ACCEPTED} onBack={onBack} />);
+    renderApp(<FederatedProjectRow project={ACCEPTED} onBack={onBack} />);
     expect(screen.getByText('fund.nordic-oss.example')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: /fjord-db on fund\.nordic-oss\.example \(opens in a new tab\)/ });
     expect(link).toHaveAttribute('href', 'https://fund.nordic-oss.example/fjord-db');

@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/pipeline"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 )
 
 type capSource struct {

@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/apitest"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/githost"
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/minisign"
-	"github.com/agentfund/agentfund/worker/internal/runner"
-	"github.com/agentfund/agentfund/worker/internal/store"
-	"github.com/agentfund/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/apitest"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/githost"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/runner"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
 )
 
 const testSecret = "sk-ant-oat01-TESTSECRET-do-not-leak-0123456789abcdef"
@@ -499,11 +499,21 @@ func TestPrepareFailsBeforeClaiming(t *testing.T) {
 		f := newFixture(t, nil)
 		f.w.Engine = &missingImageEngine{}
 		_, err := f.once()
-		if err == nil || !strings.Contains(err.Error(), "make -C worker images") || !strings.Contains(err.Error(), "docker pull "+f.w.Cfg.Global.Sandbox.Image) {
+		if err == nil || !strings.Contains(err.Error(), "make -C worker images") || strings.Contains(err.Error(), "docker pull") {
 			t.Fatalf("err = %v", err)
 		}
 		if len(f.srv.Calls("/claim")) != 0 {
 			t.Fatal("claimed without images")
+		}
+	})
+	t.Run("missing pinned image is pulled, not built", func(t *testing.T) {
+		f := newFixture(t, nil)
+		f.w.Engine = &missingImageEngine{}
+		pinned := "ghcr.io/ghvstcode/agentfund-sandbox@sha256:" + strings.Repeat("ab", 32)
+		f.w.Cfg.Global.Sandbox.Image = pinned
+		_, err := f.once()
+		if err == nil || !strings.Contains(err.Error(), "docker pull "+pinned+"`") || strings.Contains(err.Error(), "make -C worker images") {
+			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("server lacks protocol v1", func(t *testing.T) {

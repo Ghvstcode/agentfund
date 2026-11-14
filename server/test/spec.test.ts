@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Context } from "hono";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../src/config.js";
+import type { AppContext } from "../src/context.js";
+import { clientIp } from "../src/http/middleware.js";
 import { friendlyGitMessage, parseRepoUrl } from "../src/lib/git.js";
 import { validateAgentfund, validateManifest } from "../src/lib/schemas.js";
 import { parseStrictYaml } from "../src/lib/yaml.js";
@@ -88,10 +91,10 @@ describe("repo URL validation", () => {
 
 describe("git failures are reported in plain words", () => {
   it.each([
-    ["remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found", false, "repository not found or not public"],
-    ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "repository not found or not public"],
-    ["fatal: unable to access 'https://gitlab.com/a/b/': The requested URL returned error: 403", false, "repository not found or not public"],
-    ["fatal: '/nonexistent/x' does not appear to be a git repository", false, "repository not found or not public"],
+    ["remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found", false, "repository not found or no access"],
+    ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "repository not found or no access"],
+    ["fatal: unable to access 'https://gitlab.com/a/b/': The requested URL returned error: 403", false, "repository not found or no access"],
+    ["fatal: '/nonexistent/x' does not appear to be a git repository", false, "repository not found or no access"],
     ["fatal: unable to access 'https://nope.invalid/a/b/': Could not resolve host: nope.invalid", false, "could not reach host"],
     ["fatal: unable to access 'https://h.example/a/b/': Failed to connect to h.example port 443", false, "could not reach host"],
     ["", true, "timed out"],
@@ -111,16 +114,38 @@ describe("config", () => {
     expect(c.authDevLogin).toBe(true);
     expect(c.warnings.join(" ")).toMatch(/DEV LOGIN IS ENABLED/);
     expect(c.webOrigins).toEqual(["http://localhost:5173"]);
-    expect(c.sourceUrl).toBe("https://github.com/agentfund/agentfund");
+    expect(c.sourceUrl).toBe("https://github.com/ghvstcode/agentfund");
     expect(c.docsUrl).toBeUndefined();
     expect(loadConfig({ ...env, SOURCE_URL: "https://git.example/fork", INSTALL_COMMAND: "brew install x", DOCS_URL: "https://docs.example" })).toMatchObject({ sourceUrl: "https://git.example/fork", installCommand: "brew install x", docsUrl: "https://docs.example" });
     expect(() => loadConfig({ ...env, DOCS_URL: "javascript:alert(1)" })).toThrow(/DOCS_URL/);
+  });
+  it("reads the client IP from CLIENT_IP_HEADER, never from a forgeable X-Forwarded-For", () => {
+    const ip = (vars: Record<string, string>, headers: Record<string, string>) => {
+      const ctx = { config: loadConfig({ ...env, ...vars }) } as unknown as AppContext;
+      const c = { req: { header: (n: string) => headers[n.toLowerCase()] }, env: { incoming: { socket: { remoteAddress: "10.0.0.1" } } } } as unknown as Context;
+      return clientIp(ctx, c);
+    };
+    const forged = { "x-forwarded-for": "6.6.6.6, 1.2.3.4", "fly-client-ip": "1.2.3.4" };
+    expect(ip({}, forged)).toBe("10.0.0.1");
+    expect(ip({ TRUST_PROXY: "true" }, forged)).toBe("6.6.6.6");
+    expect(ip({ TRUST_PROXY: "true", CLIENT_IP_HEADER: "Fly-Client-IP" }, forged)).toBe("1.2.3.4");
+    expect(ip({ CLIENT_IP_HEADER: "fly-client-ip" }, {})).toBe("10.0.0.1");
+    expect(() => loadConfig({ ...env, CLIENT_IP_HEADER: "fly client ip" })).toThrow(/CLIENT_IP_HEADER/);
   });
   it("turns dev login off by default once GitHub OAuth is configured", () => {
     const c = loadConfig({ ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret", BASE_URL: "https://fund.example/" });
     expect(c.authDevLogin).toBe(false);
     expect(c.baseUrl).toBe("https://fund.example");
     expect(c.webOrigins).toEqual([]);
+    expect(c.warnings.join(" ")).toMatch(/LEGAL_CONTACT is not set/);
+  });
+  it("takes the operator's own legal pages and contact", () => {
+    const oauth = { ...env, GITHUB_CLIENT_ID: "id", GITHUB_CLIENT_SECRET: "secret" };
+    const c = loadConfig({ ...oauth, PRIVACY_URL: "https://fund.example/privacy.html", TERMS_URL: "https://fund.example/terms.html", LEGAL_CONTACT: "privacy@fund.example", LEGAL_NAME: "Fund Example Ltd" });
+    expect(c).toMatchObject({ privacyUrl: "https://fund.example/privacy.html", termsUrl: "https://fund.example/terms.html", legalContact: "privacy@fund.example", legalName: "Fund Example Ltd" });
+    expect(c.warnings.join(" ")).not.toMatch(/LEGAL_CONTACT/);
+    expect(() => loadConfig({ ...env, TERMS_URL: "javascript:alert(1)" })).toThrow(/TERMS_URL/);
+    expect(() => loadConfig({ ...env, LEGAL_CONTACT: "not an address" })).toThrow(/LEGAL_CONTACT/);
   });
   it("fails clearly on bad values", () => {
     expect(() => loadConfig({})).toThrow(ConfigError);

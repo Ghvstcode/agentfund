@@ -6,8 +6,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -19,18 +27,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/apitest"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/logs"
-	"github.com/agentfund/agentfund/worker/internal/runner"
-	"github.com/agentfund/agentfund/worker/internal/sandbox"
-	"github.com/agentfund/agentfund/worker/internal/scope"
-	"github.com/agentfund/agentfund/worker/internal/spec"
-	"github.com/agentfund/agentfund/worker/internal/store"
-	"github.com/agentfund/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/apitest"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/logs"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/runner"
+	"github.com/ghvstcode/agentfund/worker/internal/sandbox"
+	"github.com/ghvstcode/agentfund/worker/internal/scope"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
 )
 
 // Image names can be overridden to test against other builds.
@@ -270,6 +279,8 @@ func TestIntegrationHappyPath(t *testing.T) {
 			HasOAuthToken bool     `json:"has_oauth_token"`
 			HasAPIKey     bool     `json:"has_api_key"`
 			HTTPSProxy    string   `json:"https_proxy"`
+			SSLCertFile   string   `json:"ssl_cert_file"`
+			NodeExtraCA   string   `json:"node_extra_ca_certs"`
 			HasGitDir     bool     `json:"has_git_dir"`
 			Args          []string `json:"args"`
 		} `json:"mock"`
@@ -288,7 +299,8 @@ func TestIntegrationHappyPath(t *testing.T) {
 		}
 	}
 	if init.Cwd != "/work" || init.Mock.UID != scope.AgentUID || init.Mock.PromptBytes != len(m.Prompt) || !strings.HasPrefix(m.Prompt, init.Mock.PromptHead) ||
-		!init.Mock.HasOAuthToken || init.Mock.HasAPIKey || init.Mock.HTTPSProxy != "http://egress-proxy:3128" || init.Mock.HasGitDir {
+		!init.Mock.HasOAuthToken || init.Mock.HasAPIKey || init.Mock.HTTPSProxy != "http://egress-proxy:3128" || init.Mock.HasGitDir ||
+		init.Mock.SSLCertFile != "" || init.Mock.NodeExtraCA != "" {
 		t.Fatalf("what the agent saw in the sandbox: %+v", init)
 	}
 	if strings.Contains(strings.Join(init.Mock.Args, " "), "Implement") {
@@ -499,6 +511,48 @@ func TestIntegrationRateLimitReleasesAndBacksOff(t *testing.T) {
 	}
 	if n := len(f.srv.Outcomes()); n != 1 {
 		t.Fatalf("%d claims; the worker must not claim during backoff", n)
+	}
+	f.noBranchPushed()
+	assertSecretNowhere(t, f, res[0])
+}
+
+// An agent that never reaches the model API is the backer's network, not the
+// task: the claim is released (no failed report, no retry cooldown) and the
+// worker backs off as for a rate limit.
+func TestIntegrationUnreachableAPIReleasesAndBacksOff(t *testing.T) {
+	f := integration(t, "unreachable", nil)
+	before := time.Now()
+	res, err := f.once()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := f.onlyOutcome()
+	if len(res) != 1 || res[0].Outcome != OutcomeReleased || o.Status != "released" || o.Report != nil {
+		t.Fatalf("results %+v outcome %+v", res, o)
+	}
+	if reason := o.Release["reason"].(string); !strings.Contains(reason, "unreachable") || !strings.Contains(reason, "ERR_PROXY_TUNNEL") {
+		t.Fatalf("release reason: %q", reason)
+	}
+	st, _ := f.w.Store.Snapshot()
+	if st.Backoff.Attempts != 1 || st.Backoff.Cause != policy.CauseUnreachable || st.Backoff.Until.Before(before.Add(policy.BackoffBase*8/10)) {
+		t.Fatalf("backoff state: %+v", st.Backoff)
+	}
+	if _, err := f.once(); !errors.Is(err, ErrNothingToDo) || !strings.Contains(err.Error(), "unreachable") {
+		t.Fatalf("second pass: %v", err)
+	}
+	if n := len(f.srv.Outcomes()); n != 1 {
+		t.Fatalf("%d claims; the worker must not claim during backoff", n)
+	}
+	// Once the backoff is over the same task is claimed again: no 24 h
+	// retry_failed_after lockout as after a failed attempt.
+	if err := f.w.Store.SetBackoff(policy.BackoffState{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.once(); err != nil {
+		t.Fatalf("third pass: %v", err)
+	}
+	if out := f.srv.Outcomes(); len(out) != 2 || out[1].Status != "released" {
+		t.Fatalf("outcomes after the backoff: %+v", out)
 	}
 	f.noBranchPushed()
 	assertSecretNowhere(t, f, res[0])
@@ -732,6 +786,102 @@ func TestIntegrationSandboxIsolation(t *testing.T) {
 	if code, _ := s.Exec(ctx, sandbox.ExecSpec{Cmd: []string{"true"}}); code == 0 {
 		t.Error("exec succeeded after Kill")
 	}
+}
+
+// writeTestCA writes a self-signed CA certificate to a temporary PEM file.
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "agentfund-test-corp-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "corp-ca.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The worker passes sandbox.extra_ca_certs through to the agent's environment.
+func TestIntegrationExtraCACertsReachTheAgent(t *testing.T) {
+	f := integration(t, "happy", nil)
+	f.w.Cfg.Global.Sandbox.ExtraCACerts = writeTestCA(t)
+	res, err := f.once()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Outcome != api.StatusCompleted {
+		t.Fatalf("results: %+v", res)
+	}
+	var init struct {
+		Mock struct {
+			SSLCertFile string `json:"ssl_cert_file"`
+			NodeExtraCA string `json:"node_extra_ca_certs"`
+		} `json:"mock"`
+	}
+	for _, l := range readLog(t, res[0].LogFile) {
+		if l.Kind == "agent" && bytes.Contains(l.Event, []byte(`"subtype":"init"`)) {
+			if err := json.Unmarshal(l.Event, &init); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if l.Kind == "sandbox" && l.Raw["extra_ca_certs"] != f.w.Cfg.Global.Sandbox.ExtraCACerts {
+			t.Errorf("sandbox log line lacks the CA path: %+v", l.Raw)
+		}
+	}
+	if init.Mock.SSLCertFile != sandbox.CABundleFile || init.Mock.NodeExtraCA != sandbox.ExtraCAFile {
+		t.Fatalf("agent environment: %+v", init.Mock)
+	}
+}
+
+func TestIntegrationSandboxExtraCACerts(t *testing.T) {
+	img := ensureImages(t, "happy")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	t.Cleanup(func() { assertNoLeftovers(t) })
+
+	path := writeTestCA(t)
+	// The path is on the host only (Colima, for one, cannot see the test's temp dir): the worker copies the contents in.
+	extra, err := config.ReadCACerts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := sandbox.Start(ctx, docker, sandbox.Spec{
+		RunID: "extraca-" + strconv.FormatInt(time.Now().UnixNano()%1e9, 36), Image: img, ProxyImage: proxyImage,
+		CPUs: "1", Memory: "256m", PIDs: 64, AllowHosts: []string{"api.anthropic.com"}, ExtraCACerts: extra,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	expect := func(name, script string, wantOK bool, wantOut string) {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := s.Exec(ctx, sandbox.ExecSpec{Cmd: []string{"sh", "-c", script}, Stdout: &out, Stderr: &out})
+		if err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+		if got := strings.TrimSpace(out.String()); (code == 0) != wantOK || (wantOut != "" && !strings.Contains(got, wantOut)) {
+			t.Errorf("%s: exit %d, output %q (want ok=%v, containing %q)", name, code, got, wantOK, wantOut)
+		}
+	}
+	expect("agent sees the variables", `echo "$NODE_EXTRA_CA_CERTS $SSL_CERT_FILE"`, true, sandbox.ExtraCAFile+" "+sandbox.CABundleFile)
+	expect("extra certificates are the donor's", "cat "+sandbox.ExtraCAFile, true, strings.TrimSpace(string(extra)))
+	expect("bundle is the system roots plus the donor's", fmt.Sprintf(
+		`sys=$(grep -c 'BEGIN CERTIFICATE' %s); all=$(grep -c 'BEGIN CERTIFICATE' %s); test "$sys" -gt 10 && test "$all" -eq $((sys+1)) && echo counted`,
+		sandbox.SystemCABundle, sandbox.CABundleFile), true, "counted")
+	expect("donor CA ends the bundle", "tail -c 600 "+sandbox.CABundleFile, true, strings.TrimSpace(string(extra))[len(extra)-200:])
+	expect("files are root-owned and not writable", "stat -c '%u %a' "+sandbox.ExtraCAFile+" "+sandbox.CABundleFile+" "+sandbox.CADir+"; test ! -w "+sandbox.ExtraCAFile+" && test ! -w "+sandbox.CABundleFile+" && echo ro", true, "0 644\n0 644\n0 755\nro")
+	expect("cannot overwrite the bundle", "echo x > "+sandbox.CABundleFile, false, "")
+	expect("cannot remove the bundle", "rm -f "+sandbox.CABundleFile, false, "")
+	expect("cannot add files beside it", "touch "+sandbox.CADir+"/evil.pem", false, "")
+	expect("the bundle verifies the donor CA", "openssl verify -CAfile "+sandbox.CABundleFile+" "+sandbox.ExtraCAFile, true, ": OK")
 }
 
 func TestIntegrationOrphanCleanup(t *testing.T) {

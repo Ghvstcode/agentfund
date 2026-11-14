@@ -47,7 +47,7 @@ describe('DonorProfile', () => {
     const home = await screen.findByRole('link', { name: /Profile at home/ });
     expect(home).toHaveAttribute('href', 'https://lab.hackerspace.example:8443/u/jun');
     expect(screen.getByText(/hosts jun's account and vouches for it/)).toBeInTheDocument();
-    expect(screen.getByText(/Here since/)).toBeInTheDocument();
+    expect(screen.getByText(/here since/)).toBeInTheDocument();
 
     const paths = spy.mock.calls.map(([request]) => new URL((request as Request).url).pathname);
     expect(paths).toContain('/v1/donors/jun%40lab.hackerspace.example%3A8443');

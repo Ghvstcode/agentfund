@@ -917,6 +917,8 @@ export interface components {
                 ci_poll: boolean;
                 /** @description The `/v1/federation/*` operations and `POST /v1/auth/federated` are served */
                 federation: boolean;
+                /** @description Every page and API call needs a signed-in member of the instance's GitHub organizations (INSTANCE_ACCESS=members). Only getMeta, sign-in and webhooks answer anonymously. */
+                members_only?: boolean;
             } & {
                 [key: string]: unknown;
             };
@@ -927,6 +929,17 @@ export interface components {
                 /** @description Shell one-liner that installs the worker CLI */
                 install_command?: string;
                 docs_url?: string;
+                /** @description The operator's own privacy policy; UIs link here instead of their built-in page */
+                privacy_url?: string;
+                /** @description The operator's own terms of use; UIs link here instead of their built-in page */
+                terms_url?: string;
+                /**
+                 * Format: email
+                 * @description Where privacy, deletion and terms requests go
+                 */
+                legal_contact?: string;
+                /** @description The person or organisation that runs this instance, as its privacy policy and terms name them */
+                legal_name?: string;
             };
             defaults?: {
                 lease_seconds?: number;
@@ -1091,7 +1104,7 @@ export interface components {
             commit: string;
             manifest: components["schemas"]["Manifest"];
             depends_on: string[];
-            /** @description Dependencies not yet merged */
+            /** @description Dependencies not yet merged, or merged since the base branch was last indexed */
             blocked_by: string[];
             claimable: boolean;
             burn: {
@@ -1340,7 +1353,7 @@ export interface components {
             /** @enum {string} */
             conclusion: "success" | "failure" | "cancelled";
             run_url?: string;
-            /** @description True when the PR for this branch has merged */
+            /** @description True when the PR for this branch has merged. Send it only once the merge is on the base branch: dependents open on the next index after it. */
             merged?: boolean;
             /** @description True when the PR was closed without merging */
             closed?: boolean;
@@ -1618,6 +1631,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
         };
@@ -1647,6 +1661,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
         };
     };

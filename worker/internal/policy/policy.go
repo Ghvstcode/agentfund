@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
 )
 
 // Code names the reason for a refusal.
@@ -176,6 +176,7 @@ type Input struct {
 	ProjectUsage Usage
 	Active       int // tasks currently running (not counting the one being decided)
 	BackoffUntil time.Time
+	BackoffCause string // what started the backoff, e.g. "a rate limit"; "" = a rate limit
 	Trust        Trust
 	// Task facts.
 	MaxTokens int64
@@ -303,7 +304,11 @@ func Evaluate(in Input) Decision {
 	}
 	if !in.BackoffUntil.IsZero() && in.Now.Before(in.BackoffUntil) {
 		d := in.BackoffUntil.Sub(in.Now)
-		return refuse(Backoff, d, "backing off after a rate limit for another %s", d.Round(time.Second))
+		cause := in.BackoffCause
+		if cause == "" {
+			cause = CauseRateLimit
+		}
+		return refuse(Backoff, d, "backing off after %s for another %s", cause, d.Round(time.Second))
 	}
 	sched := in.Global.Schedule
 	if in.Project.Schedule != nil {
@@ -358,11 +363,21 @@ func Evaluate(in Input) Decision {
 	return Decision{Allow: true}
 }
 
-// BackoffState tracks consecutive rate limits.
+// BackoffState tracks consecutive rate limits and unreachable-API runs; both
+// mean "not now" for every task, so they share one backoff.
 type BackoffState struct {
 	Attempts int
 	Until    time.Time
+	// Cause is what started the latest backoff (CauseRateLimit or
+	// CauseUnreachable); empty in state files written before it existed.
+	Cause string `json:",omitempty"`
 }
+
+// Backoff causes, phrased to follow "backing off after".
+const (
+	CauseRateLimit   = "a rate limit"
+	CauseUnreachable = "the model API was unreachable"
+)
 
 // Backoff bounds.
 const (

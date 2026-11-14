@@ -23,7 +23,7 @@ agentfund work <slug> --once --task <task-id>      # one task, in the real sandb
 That part takes an afternoon. The hard part is **decomposition**: turning a project into
 tasks that an agent which cannot ask you anything can finish, in parallel with other agents
 it will never meet, judged by a test it cannot edit. Most of this guide is about that. The
-running example is [gridrs](https://github.com/agentfund/gridrs), a terminal spreadsheet in
+running example is [gridrs](https://github.com/Ghvstcode/gridrs), a terminal spreadsheet in
 Rust split into 23 manifests (the `agentfund` organisation name is a placeholder until launch).
 
 > [!IMPORTANT]
@@ -111,9 +111,16 @@ independent; that is on you.
 ### Register the project
 
 1. Sign in to the instance, open **Maintain → Register a project**, and paste the repository
-   URL. The wizard clones it, verifies the lock signature against the key in `agentfund.yaml`,
-   and shows you the key fingerprint, the commit, the lock hash and the manifest list before
-   anything is created.
+   URL. On a public instance the repository must be public: the instance clones it without
+   credentials. You need push access to it on GitHub, which the instance checks with your
+   GitHub sign-in, so nobody can register someone else's project; an instance admin can
+   register a repository for its owner, or one hosted outside github.com. If your organization
+   restricts OAuth apps, an owner has to approve the instance's app first. On a members-only
+   instance it may be private, if the instance's GitHub App is installed on it and you have
+   write access to it
+   ([Self-hosting](self-hosting.md#members-only-instance-private-repositories)). The wizard
+   clones it, verifies the lock signature against the key in `agentfund.yaml`, and shows you the
+   key fingerprint, the commit, the lock hash and the manifest list before anything is created.
 2. Confirm. The key in `agentfund.yaml` at that moment becomes the **registered key**; from
    then on it changes only through a signed [rotation](#rotation). If the instance requires
    approval for new projects, yours starts `pending` until an admin activates it.
@@ -144,7 +151,7 @@ the base branch, on a timer (default every 60 s), and when you press **Re-pin**:
 | Dashboard control | Effect |
 | --- | --- |
 | **Follow `main`** (on by default) | The pin advances to each validly signed head. Needed so tasks with dependencies are claimed against a commit that contains the merged work. |
-| **Re-pin** | Index now. Empty pins the branch head; a 40-hex commit pins that commit. |
+| **Re-pin** | Index now. Empty pins the branch head; a 40-hex commit pins that commit. Pinning a commit older than a merge also reopens that merge's dependents, against the older commit. |
 | **Pause / Resume** | A paused project refuses new claims (`project-not-active`). Running claims continue. |
 | **Token goal** | The number the progress bar is measured against. |
 
@@ -195,7 +202,9 @@ scope:
 ### Wide, not deep
 
 `depends_on` means **merged**, not "PR open": a dependent task is not claimable until you
-have reviewed and merged its dependencies. A chain of twenty tasks is twenty review cycles.
+have reviewed and merged its dependencies, and the instance has read the branch since then (the
+push webhook, the timer or **Re-pin**), so the dependent is claimed against a commit that contains
+the merged work. A chain of twenty tasks is twenty review cycles.
 gridrs has 23 tasks in 6 layers, 18 of them in the first two:
 
 ```
@@ -521,6 +530,10 @@ The worker's scope check limits *where* the change is, not what it does.
   repository default to read-only too (Settings → Actions → General → Workflow permissions).
 - [ ] **No secrets in any job that runs PR code.** No deploy keys, no registry tokens, no
   self-hosted runners (GitHub: they "can be persistently compromised by untrusted code").
+  On a **private** repository this matters more: the worker pushes `agentfund/…` into the
+  repository itself, so GitHub does pass secrets to `pull_request` workflows for those PRs.
+  Guard secret-using jobs with `if: ${{ !startsWith(github.head_ref, 'agentfund/') }}`, or
+  keep secrets behind an environment with required reviewers.
 - [ ] **Pin actions by full commit SHA**, e.g.
   `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2`. GitHub calls this
   "the only way to use an action as an immutable release". Set `persist-credentials: false`
@@ -547,7 +560,7 @@ The worker's scope check limits *where* the change is, not what it does.
   script and acceptance tests are ordinary files: make sure no manifest's `scope.write`
   covers them. gridrs's CI also fails any PR that removes or edits a `ci/done/` marker.
 
-[`gridrs/.github/workflows/ci.yml`](https://github.com/agentfund/gridrs/blob/main/.github/workflows/ci.yml)
+[`gridrs/.github/workflows/ci.yml`](https://github.com/Ghvstcode/gridrs/blob/main/.github/workflows/ci.yml)
 and [`examples/hello-project/.github/workflows/ci.yml`](../examples/hello-project/.github/workflows/ci.yml)
 implement the workflow-file items.
 
@@ -614,7 +627,7 @@ curl -X POST "$BASE_URL/v1/webhooks/ci" \
 | `branch`, `head_sha` | yes | The PR's branch and its 40-hex head commit. They must equal what the worker reported. |
 | `conclusion` | yes | `success`, `failure` or `cancelled`. |
 | `run_url` | no | Shown in the ledger as the evidence link. |
-| `merged` / `closed` | no | `true` when the PR merged / was closed unmerged. |
+| `merged` / `closed` | no | `true` when the PR merged / was closed unmerged. Send `merged` only once the merge is on the base branch: dependents open on the next index after it. |
 
 Before choosing it:
 

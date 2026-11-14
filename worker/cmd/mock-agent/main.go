@@ -15,6 +15,8 @@
 //	hang        emit the init event, then do nothing forever
 //	ratelimit   emit a rate-limit refusal and exit non-zero
 //	autherror   emit an authentication failure and exit non-zero
+//	unreachable never reach the model API: connection retries, then an error result
+//	            without an HTTP status (the shape Claude Code 2.1.289 emits with no route)
 //	leak        like happy, but write the credential it was given into an in-scope file
 //	nochange    succeed without touching any file
 //
@@ -37,6 +39,7 @@ var knownFlags = map[string]bool{
 	"-p": false, "--print": false, "--verbose": false, "--include-partial-messages": false,
 	"--dangerously-skip-permissions": false, "--strict-mcp-config": false, "--no-session-persistence": false,
 	"--output-format": true, "--setting-sources": true, "--model": true, "--permission-mode": true,
+	"--tools": true,
 }
 
 const version = "0.0.0-mock"
@@ -156,6 +159,7 @@ const badImpl = `def slugify(text: str) -> str:
 func main() {
 	args := os.Args[1:]
 	var outputFormat string
+	tools := []string{"Task", "Bash", "Edit", "Read", "Write", "WebSearch", "RemoteTrigger"} // like the real default: more than a task needs
 	printMode, verbose, skipPerms := false, false, false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -188,6 +192,8 @@ func main() {
 			outputFormat = val
 		case "--model":
 			model = val
+		case "--tools":
+			tools = strings.Split(val, ",")
 		}
 	}
 	if !printMode || outputFormat != "stream-json" || !verbose {
@@ -214,10 +220,11 @@ func main() {
 	_, gitErr := os.Stat(".git")
 	emit(map[string]any{
 		"type": "system", "subtype": "init", "session_id": session, "model": model, "claude_code_version": version,
-		"cwd": cwd, "permissionMode": "bypassPermissions",
+		"cwd": cwd, "permissionMode": "bypassPermissions", "tools": tools,
 		"mock": map[string]any{
 			"scenario": scenario, "uid": os.Getuid(), "prompt_bytes": len(prompt), "prompt_head": firstLine(prompt),
 			"has_oauth_token": token != "", "has_api_key": apiKey != "", "https_proxy": os.Getenv("HTTPS_PROXY"),
+			"ssl_cert_file": os.Getenv("SSL_CERT_FILE"), "node_extra_ca_certs": os.Getenv("NODE_EXTRA_CA_CERTS"),
 			"has_git_dir": gitErr == nil, "args": args,
 		},
 	})
@@ -304,6 +311,21 @@ func main() {
 		emit(map[string]any{"type": "assistant", "session_id": session, "parent_tool_use_id": nil, "error": "authentication_failed",
 			"message": map[string]any{"id": "msg_mock_err", "model": model, "role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Invalid API key"}}}})
 		result(true, "success", "Invalid API key · Please run /login", 401)
+		os.Exit(1)
+	case "unreachable":
+		const msg = "API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL) — the proxy refused the tunnel: check its credentials and that it allows this host"
+		for i := 1; i <= 3; i++ {
+			emit(map[string]any{"type": "system", "subtype": "api_retry", "attempt": i, "max_retries": 10, "retry_delay_ms": 500,
+				"error_status": nil, "error": "unknown", "session_id": session})
+		}
+		emit(map[string]any{"type": "assistant", "session_id": session, "parent_tool_use_id": nil, "error": "server_error", "is_api_error_message": true,
+			"message": map[string]any{"id": "00000000-0000-4000-8000-000000000002", "model": "<synthetic>", "role": "assistant",
+				"usage":   map[string]any{"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+				"content": []any{map[string]any{"type": "text", "text": msg}}}})
+		emit(map[string]any{"type": "result", "subtype": "success", "is_error": true, "result": msg, "session_id": session, "num_turns": 1,
+			"total_cost_usd": 0, "api_error_status": nil, "terminal_reason": "api_error",
+			"usage":      map[string]any{"input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0},
+			"modelUsage": map[string]any{}})
 		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "mock-agent: unknown MOCK_AGENT_SCENARIO %q\n", scenario)

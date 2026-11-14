@@ -15,8 +15,8 @@ export const BOARD_STATES = ['open', 'claimed', 'delivered', 'merged'] as const 
 export const STATE_HINTS: Record<(typeof BOARD_STATES)[number], string> = {
   open: 'Waiting for a worker',
   claimed: 'Running, or awaiting CI',
-  delivered: 'CI passed',
-  merged: 'PR merged',
+  delivered: 'CI passed, awaiting merge',
+  merged: 'In main',
 };
 
 export const STATE_ICONS: Record<TaskState, LucideIcon> = {

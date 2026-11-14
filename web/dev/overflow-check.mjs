@@ -13,7 +13,7 @@ const ORIGIN = 'http://localhost:5173';
 const widths = process.argv.slice(2).map(Number).filter(Boolean);
 const WIDTHS = widths.length ? widths : [1024, 390];
 
-const back = (page) => page.getByRole('button', { name: /Back with tokens/ }).click();
+const back = (page) => page.getByRole('button', { name: /Back this project/ }).click();
 const review = async (page, repo) => {
   await page.getByLabel('Repository URL').fill(`https://github.com/example/${repo}`);
   await page.getByRole('button', { name: 'Check repository' }).click();
@@ -46,7 +46,7 @@ const PAGES = [
   ['styleguide', '/styleguide'],
   ['not-found', '/no/such/page'],
   ['sign-in', '/maintain', null, { signedOut: true }],
-  ['sign-in-dialog', '/', (page) => page.getByRole('button', { name: 'Sign in' }).click(), { signedOut: true }],
+  ['sign-in-dialog', '/', (page) => page.getByRole('button', { name: 'Sign in' }).first().click(), { signedOut: true }],
   ['command-palette', '/', async (page) => { await page.keyboard.press('Control+k'); await page.getByPlaceholder(/Jump to/).waitFor(); }],
 ];
 

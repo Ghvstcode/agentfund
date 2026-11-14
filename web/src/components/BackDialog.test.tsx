@@ -30,7 +30,7 @@ async function openDialog() {
   const user = userEvent.setup();
   renderApp(<Harness />);
   await user.click(screen.getByRole('button', { name: 'Back with tokens' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Back gridrs with tokens' });
+  const dialog = await screen.findByRole('dialog', { name: 'Lend your agent to gridrs.' });
   return { user, dialog };
 }
 
@@ -56,6 +56,14 @@ describe('BackDialog', () => {
     ]);
   });
 
+  it('rewrites the work command from the chosen caps', async () => {
+    const { user, dialog } = await openDialog();
+    await user.click(await within(dialog).findByRole('button', { name: '1B' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Any time' }));
+    expect(within(dialog).getByText('agentfund work https://fund.example/gridrs --budget 1b --schedule ""')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '1B' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('copies a command to the clipboard', async () => {
     const { user, dialog } = await openDialog();
     await user.click(await within(dialog).findByRole('button', { name: /Copy the command: Start working/ }));
@@ -70,7 +78,7 @@ describe('BackDialog', () => {
     const { dialog } = await openDialog();
     expect(
       await within(dialog).findByText(
-        'git clone https://github.com/agentfund/agentfund && make -C agentfund/worker build images',
+        'curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh',
       ),
     ).toBeInTheDocument();
   });

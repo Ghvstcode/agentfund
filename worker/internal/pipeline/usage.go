@@ -1,8 +1,8 @@
 package pipeline
 
 import (
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
 )
 
 // usageWith returns current usage plus extra hypothetical reservations (dry-run).

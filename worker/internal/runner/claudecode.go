@@ -55,6 +55,14 @@ func (c *ClaudeCode) APIHosts() []string { return []string{DefaultAPIHost} }
 //     the repository being worked on.
 //   - --strict-mcp-config: ignore MCP server definitions found in the repo.
 //   - --no-session-persistence: nothing to resume; the container is discarded.
+//   - --tools: an allowlist of the built-in tools a coding task needs. The
+//     default set also holds tools that act outside the sandbox no matter what
+//     the egress proxy allows: WebSearch (and, in some versions, WebFetch) run
+//     on Anthropic's side, and RemoteTrigger, Cron* and ScheduleWakeup create
+//     scheduled cloud agents on the donor's account, where a task prompt would
+//     outlive the run. An allowlist also keeps tools that later CLI versions
+//     add switched off until someone looks at them. Seen in the first
+//     real-model run (2.1.289); see CLAUDE_CODE_NOTES.md.
 func (c *ClaudeCode) Args(model string) []string {
 	args := []string{
 		c.Binary, "-p",
@@ -65,12 +73,18 @@ func (c *ClaudeCode) Args(model string) []string {
 		"--setting-sources", "user",
 		"--strict-mcp-config",
 		"--no-session-persistence",
+		"--tools", strings.Join(ClaudeCodeTools, ","),
 	}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
 	return args
 }
+
+// ClaudeCodeTools are the built-in tools a run may use: the shell, file reads
+// and edits, search, and sub-agents (Task). That sub-agents are held to the
+// same set is expected but not verified by execution (CLAUDE_CODE_NOTES.md).
+var ClaudeCodeTools = []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit", "Task"}
 
 // staticEnv is forwarded into every run. None of it is secret.
 var staticEnv = []string{

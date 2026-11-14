@@ -111,6 +111,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Project" }
         "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
 
@@ -136,6 +137,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProjectPreview" }
         "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
 
   /v1/projects/{slug}:
@@ -1237,6 +1239,9 @@ components:
             ci_providers: { type: array, items: { type: string, enum: [github, generic] } }
             ci_poll: { type: boolean, description: "Server also polls the CI provider, so webhooks need not reach it" }
             federation: { type: boolean, description: "The `/v1/federation/*` operations and `POST /v1/auth/federated` are served" }
+            members_only:
+              type: boolean
+              description: "Every page and API call needs a signed-in member of the instance's GitHub organizations (INSTANCE_ACCESS=members). Only getMeta, sign-in and webhooks answer anonymously."
           additionalProperties: true
         links:
           type: object
@@ -1245,6 +1250,10 @@ components:
             source_url: { type: string, description: Where this instance's software source lives }
             install_command: { type: string, description: Shell one-liner that installs the worker CLI }
             docs_url: { type: string }
+            privacy_url: { type: string, description: "The operator's own privacy policy; UIs link here instead of their built-in page" }
+            terms_url: { type: string, description: "The operator's own terms of use; UIs link here instead of their built-in page" }
+            legal_contact: { type: string, format: email, description: "Where privacy, deletion and terms requests go" }
+            legal_name: { type: string, description: "The person or organisation that runs this instance, as its privacy policy and terms name them" }
         defaults:
           type: object
           properties:
@@ -1420,7 +1429,7 @@ components:
         commit: { type: string, description: Pinned commit the manifest was read from }
         manifest: { $ref: "#/components/schemas/Manifest" }
         depends_on: { type: array, items: { type: string } }
-        blocked_by: { type: array, items: { type: string }, description: Dependencies not yet merged }
+        blocked_by: { type: array, items: { type: string }, description: "Dependencies not yet merged, or merged since the base branch was last indexed" }
         claimable: { type: boolean }
         burn:
           type: object
@@ -1688,7 +1697,7 @@ components:
         head_sha: { type: string, pattern: "^[0-9a-f]{40}$" }
         conclusion: { type: string, enum: [success, failure, cancelled] }
         run_url: { type: string }
-        merged: { type: boolean, description: True when the PR for this branch has merged }
+        merged: { type: boolean, description: "True when the PR for this branch has merged. Send it only once the merge is on the base branch: dependents open on the next index after it." }
         closed: { type: boolean, description: True when the PR was closed without merging }
 
     InstanceConfig:

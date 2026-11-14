@@ -12,8 +12,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/agentfund/agentfund/worker/internal/app"
-	"github.com/agentfund/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
 )
 
 // Exit codes.
@@ -128,6 +129,7 @@ Donors:       login → approve → dry-run → work   (status, logs, daemon ins
 		loginCmd(e), approveCmd(e), workCmd(e), dryRunCmd(e), statusCmd(e), logsCmd(e), daemonCmd(e),
 		&cobra.Command{Use: "version", Short: "Print the version", Args: cobra.NoArgs, Run: func(*cobra.Command, []string) {
 			fmt.Fprintf(stdout, "%s %s (commit %s, built %s)\n", app.BinaryName, app.Version, app.Commit, app.Date)
+			fmt.Fprintf(stdout, "default sandbox image       %s\ndefault egress-proxy image  %s\n", config.DefaultSandboxImage, config.DefaultEgressProxyImage)
 		}},
 	)
 	err := root.Execute()

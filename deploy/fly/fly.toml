@@ -1,0 +1,41 @@
+# One AgentFund instance on Fly.io. See docs/self-hosting.md#deploy-to-flyio.
+# Change `app` and `primary_region`, then: fly deploy -c deploy/fly/fly.toml
+app = "agentfund"
+primary_region = "iad"
+
+[build]
+  # The published release image; bump the tag to upgrade. Migrations run at boot.
+  image = "ghcr.io/ghvstcode/agentfund:0.1.3"
+
+[env]
+  PORT = "8787"
+  # Bare clones are a cache the indexer rebuilds, so the machine's own disk is enough.
+  DATA_DIR = "/data"
+  # Fly's proxy sets this header and overwrites any value a client sends.
+  CLIENT_IP_HEADER = "fly-client-ip"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Keep one machine running: the server holds LISTEN/NOTIFY, runs the lease sweep and the
+  # indexer on timers, and must answer webhooks.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Every open page holds a /v1/stream (Server-Sent Events) connection.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 800
+    hard_limit = 1000
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

@@ -12,12 +12,20 @@ you already use (a subscription login or your own API key). It never stores, tra
 intermediates that credential or your usage.
 
 Anthropic's documentation says subscription usage limits "assume ordinary, individual
-usage". Whether donating inference fits your plan is your call to make, and an API key is the
-unambiguous option. Read the terms yourself:
+usage". Whether donating inference fits your plan is your call to make. AgentFund is built around
+subscription tokens (`claude setup-token`); the worker also accepts an API key if you would
+rather keep donated usage apart from your plan. Read the terms yourself:
 [Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
 [Usage Policy](https://www.anthropic.com/legal/aup),
 [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
 The careful version of this answer is limitation 3 in [Security](SECURITY.md).
+
+The same goes for Codex (experimental) and OpenAI: with a ChatGPT sign-in or access token,
+whether donating usage fits your plan or workspace agreement is between you and OpenAI; the
+worker also accepts an API key. Read
+[OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/) and
+[Usage Policies](https://openai.com/policies/usage-policies/). A ChatGPT sign-in is also the one
+credential the worker stores and renews; see [Codex in the donor guide](donors.md#codex-experimental).
 
 ### What does it cost me?
 
@@ -38,7 +46,8 @@ tasks in the gridrs demo project are capped at 1.5M to 4M tokens each.
 
 ### What can the agent touch?
 
-A copy of the project's public repository inside a container, and the model API. It has no
+A copy of the project's repository inside a container, and the model API. The repository is
+public, unless the project is on a members-only instance. It has no
 host mounts, runs as a non-root user, and its only network route is a proxy that allows the
 model API and nothing else: not the git host, not a package registry. Your git credentials
 never enter the container; the worker pushes from the host. If the agent changes anything
@@ -57,8 +66,9 @@ anything that does not verify. The server can withhold work. It cannot change it
 ### Does the server see my credentials or my code?
 
 It sees your handle, your reports (token counts, the branch, the commit, a digest of your
-log) and your pledges. It never receives your model credential or your git credential, and
-the work is on a public repository to begin with.
+log) and your pledges. It never receives your model credential or your git credential. The
+work is on a public repository, or, on a members-only instance, on a private one the instance
+can already read.
 
 ### What happens if a task fails?
 
@@ -103,8 +113,16 @@ token. The checklist is in the [Maintainer guide](maintainers.md).
 
 ### Can it work on a private repository?
 
-It is not designed to. Donors must be able to read every prompt before approving, and the
-safety argument for the sandbox rests on there being nothing private inside it.
+Yes, on a members-only instance: one that only the members of your GitHub organization can
+sign in to, which reads private repositories through a read-only GitHub App
+([Self-hosting](self-hosting.md#members-only-instance-private-repositories)). Backers fetch
+and push with their own `gh` login and need write access to the repository. A public instance
+cannot hold credentials for private repositories.
+
+The repository's code then sits in the sandbox and goes to the model provider under the
+backer's credential. Whether that is acceptable is your company's decision. Use
+organization-managed credentials for private projects, not personal subscriptions. See
+[Security](SECURITY.md#private-repositories).
 
 ### Will an agent break my project into tasks for me?
 

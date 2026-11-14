@@ -12,6 +12,7 @@ import { Problem, validation } from "../lib/problem.js";
 import type { Principal } from "./auth.js";
 import { appendEvent } from "./events.js";
 import { getInstance } from "./instance.js";
+import { membersOnly } from "./members.js";
 import { projectById, type ProjectRow } from "./projects.js";
 import { inspectRepo, readDescriptor, verifyCommit, type Inspection, type VerifiedLock } from "./repo.js";
 
@@ -23,6 +24,68 @@ function repoRef(ctx: AppContext, url: string): RepoRef {
   } catch (err) {
     if (err instanceof RepoUrlError) throw validation("/repo_url", err.message);
     throw err;
+  }
+}
+
+const NO_ACCESS = "repository not found or you have no write access to it";
+
+/**
+ * Members-only instances can read private repositories, so preview and create must not become
+ * a way to read one: the caller needs write on the repo (checked through the GitHub App) before
+ * anything about it is fetched or said. Every failure reads the same, so nothing leaks.
+ */
+async function canRegister(ctx: AppContext, who: Principal, repo: RepoRef): Promise<boolean> {
+  if (!membersOnly(ctx) || repo.scheme === "file") return true;
+  if (!ctx.githubApp || !repo.github || !who.user.githubLogin) return false;
+  try {
+    const permission = await ctx.githubApp.permissionOf(repo.github, who.user.githubLogin);
+    return permission === "admin" || permission === "write";
+  } catch (err) {
+    ctx.log.warn("repository permission check failed", { repo: repo.url, err });
+    return false;
+  }
+}
+
+/**
+ * On a public instance anyone may sign in, so registering must not let someone claim another
+ * person's AgentFund-ready repository: the caller needs push access to it on GitHub, asked with
+ * the caller's own sign-in token (`GET /repos/{owner}/{repo}` → `permissions.push`). Admins may
+ * register for anyone. Dev-login users and file:// repositories have no GitHub to ask; both exist
+ * only on instances where dev login (anyone may be admin) or ALLOW_FILE_REPOS is on.
+ * Members-only instances check write through the GitHub App in `canRegister` instead.
+ */
+export async function requirePushAccess(ctx: AppContext, who: Principal, repo: RepoRef): Promise<void> {
+  if (membersOnly(ctx) || who.user.role === "admin" || repo.scheme === "file") return;
+  if (ctx.config.authDevLogin && !who.user.githubLogin) return;
+  const refuse = (detail: string): never => {
+    throw new Problem("forbidden", detail, { errors: [{ path: "/repo_url", message: detail }] });
+  };
+  if (!repo.github) refuse("Only github.com repositories can be checked for push access on this instance; ask an admin to register this one for you.");
+  const token = who.githubToken?.() ?? null;
+  if (!token) refuse("Sign out and sign in with GitHub again, so the instance can check that you can push to this repository.");
+  let res: Response;
+  try {
+    res = await ctx.fetch(`https://api.github.com/repos/${repo.github}`, {
+      headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2026-03-10", "user-agent": "agentfund-server" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    ctx.log.warn("push access check failed", { repo: repo.url, err });
+    return refuse("GitHub could not be reached to check your push access; try again.");
+  }
+  if (res.status === 401) refuse("GitHub no longer accepts your sign-in; sign out and sign in with GitHub again.");
+  if (res.status === 301) refuse("This repository has moved on GitHub; register it under its current URL.");
+  if (res.status === 404) refuse("GitHub does not show you this repository; check the URL.");
+  if (!res.ok) {
+    ctx.log.warn("push access check failed", { repo: repo.url, status: res.status });
+    refuse("GitHub could not be reached to check your push access; try again.");
+  }
+  const { permissions } = (await res.json().catch(() => ({}))) as { permissions?: { push?: unknown } };
+  if (permissions?.push !== true) {
+    refuse(
+      `You need push access to ${repo.github} on GitHub to register it. If it belongs to an organization that restricts OAuth apps, an owner can approve this instance's app, or an instance admin can register it for you.`,
+    );
   }
 }
 
@@ -40,8 +103,10 @@ async function suggestSlug(ctx: AppContext, name: string): Promise<string> {
   return `${base.slice(0, 50)}-${Date.now().toString(36)}`;
 }
 
-export async function previewProject(ctx: AppContext, repoUrl: string): Promise<Schemas["ProjectPreview"]> {
+export async function previewProject(ctx: AppContext, who: Principal, repoUrl: string): Promise<Schemas["ProjectPreview"]> {
   const repo = repoRef(ctx, repoUrl);
+  if (!(await canRegister(ctx, who, repo))) return { ok: false, errors: [NO_ACCESS] };
+  await requirePushAccess(ctx, who, repo);
   const ins = await inspectRepo(ctx.git, repo);
   const errors = [...ins.errors];
   if (await registered(ctx, repo)) errors.push("this repository is already registered on this instance");
@@ -110,6 +175,8 @@ async function applyManifests(ctx: AppContext, tx: Tx, projectId: number, v: Ver
 
 export async function createProject(ctx: AppContext, who: Principal, body: BodyOf<"createProject">): Promise<Schemas["Project"]> {
   const repo = repoRef(ctx, body.repo_url);
+  if (!(await canRegister(ctx, who, repo))) throw new Problem("repo-unverifiable", NO_ACCESS, { errors: [{ path: "/repo_url", message: NO_ACCESS }] });
+  await requirePushAccess(ctx, who, repo);
   if (await registered(ctx, repo)) throw new Problem("repo-already-registered", "This repository is already registered on this instance.");
   const ins: Inspection = await inspectRepo(ctx.git, repo);
   const d = ins.descriptor;
@@ -146,6 +213,7 @@ export async function createProject(ctx: AppContext, who: Principal, body: BodyO
           tokenGoal: body.token_goal ?? d.token_goal ?? v.tokenTotal,
           createdAt: now,
           lastIndexedAt: now,
+          branchReadAt: now,
           webhookSecret: newSecret(),
         })
         .returning();
@@ -195,6 +263,9 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
 
   let target: string | undefined = opts.commit;
   let verified: VerifiedLock;
+  // Taken before the fetch, so branchReadAt never claims a read later than the one that happened:
+  // the dependency gate (ledger DEP_LANDED) compares merges against it.
+  const checkedAt = ctx.clock.now();
   try {
     await ctx.git.fetch(repo);
     if (target) {
@@ -205,7 +276,7 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
       target = head;
     }
     if (target === project.pinnedCommit && !project.indexError) {
-      await ctx.db.update(projects).set({ lastIndexedAt: ctx.clock.now() }).where(eq(projects.id, project.id));
+      await ctx.db.update(projects).set({ lastIndexedAt: checkedAt, branchReadAt: checkedAt }).where(eq(projects.id, project.id));
       return { ok: true, changed: false, commit: target };
     }
     verified = await verifyCommit(ctx.git, repo, target, project.pubkey);
@@ -221,7 +292,6 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
   const changed = await ctx.db.transaction(async (tx) => {
     const [locked] = await tx.select().from(projects).where(eq(projects.id, project.id)).for("no key update");
     if (!locked || locked.status === "removed") return false;
-    const now = ctx.clock.now();
     const moved = locked.pinnedCommit !== commit;
     const rotated = verified.signingKey !== locked.pubkey;
     await tx
@@ -230,7 +300,8 @@ export async function indexProject(ctx: AppContext, projectId: number, opts: { c
         pinnedCommit: commit,
         lockSha256: verified.lockSha256,
         pubkey: verified.signingKey,
-        lastIndexedAt: now,
+        lastIndexedAt: checkedAt,
+        branchReadAt: checkedAt,
         indexError: null,
         indexErrorKey: null,
         ...(descriptor ? { description: descriptor.description, homepage: descriptor.homepage ?? null, language: descriptor.language ? descriptor.language.toLowerCase() : null, tags: descriptor.tags ?? [] } : {}),

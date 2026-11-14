@@ -90,6 +90,9 @@ can no longer authenticate.
 `FEDERATION=false` removes the capability and makes every federation operation answer 404.
 With it on and no peers added, the instance fetches nothing and accepts no one.
 
+A members-only instance (`INSTANCE_ACCESS=members`) never federates, whatever `FEDERATION`
+says: it answers nothing anonymously, and it admits only members of its GitHub organizations.
+
 ## For donors
 
 Say your account is on `home.example` and the project you want to back is

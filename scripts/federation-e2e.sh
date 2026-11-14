@@ -9,10 +9,6 @@
 # approve at the host → a task claimed, reported and CI-confirmed under the home identity →
 # home shows the work as "elsewhere" without counting it → pausing the peer cuts the donor off.
 #
-# With the mock-agent sandbox image present (make -C worker e2e-images) the task is run by
-# `agentfund work --once`; otherwise the claim and report are sent with curl using the key the
-# federated login stored, which exercises the same server path.
-#
 # Needs: docker, node 22 + pnpm, go, git, curl, openssl.   Usage: sh scripts/federation-e2e.sh [--keep]
 set -eu
 
@@ -70,9 +66,10 @@ peer() { # on-url admin-token peer-url extra-json  → adds the peer after confi
 say "build"
 lib_need docker node pnpm go git curl openssl
 (cd "$ROOT" && pnpm install --frozen-lockfile >/dev/null && pnpm --filter server build >/dev/null)
-(cd "$ROOT/worker" && make build >/dev/null)
+(cd "$ROOT/worker" && make build >/dev/null && make e2e-images E2E_SCENARIOS=happy >/dev/null)
+docker image inspect agentfund/egress-proxy:dev >/dev/null 2>&1 || docker build -q -t agentfund/egress-proxy:dev "$ROOT/images/egress-proxy" >/dev/null
 AF="$ROOT/worker/bin/agentfund"
-ok "server and worker binary"
+ok "server, worker binary, mock-agent sandbox image, egress proxy"
 
 say "two instances"
 start home "$HOME_PORT" "$HOME_URL" "Home Instance"
@@ -139,20 +136,12 @@ say "approve at the host, then deliver one task under the home identity"
 "$AF" approve "$HOST_URL/hello" --yes --no-pager >"$WORK/approve.txt" 2>&1 || { cat "$WORK/approve.txt"; fail "approve"; }
 grep -q "$(echo "$PROJECT" | json 'v.pubkey_fingerprint')" "$WORK/approve.txt" || fail "approve did not show the host's maintainer fingerprint"
 ok "approved against the maintainer key pinned at the host"
-if docker image inspect agentfund/sandbox-e2e:happy agentfund/egress-proxy:dev >/dev/null 2>&1; then
-  export AGENTFUND_SANDBOX_IMAGE=agentfund/sandbox-e2e:happy AGENTFUND_EGRESS_PROXY_IMAGE=agentfund/egress-proxy:dev CLAUDE_CODE_OAUTH_TOKEN="e2e-not-a-real-credential"
-  "$AF" work hello --once --json >"$WORK/work.json" 2>"$WORK/work.err" || { cat "$WORK/work.err"; fail "work --once"; }
-  RESULT=$(tail -n 1 "$WORK/work.json")
-  [ "$(echo "$RESULT" | json 'v.outcome')" = "completed" ] || fail "outcome: $RESULT"
-  BRANCH=$(echo "$RESULT" | json 'v.branch'); SHA=$(echo "$RESULT" | json 'v.head_sha'); TOKENS=$(echo "$RESULT" | json 'v.tokens_in+v.tokens_out')
-  ok "agentfund work --once completed in the sandbox: $TOKENS tokens, branch $BRANCH"
-else
-  CLAIM=$(on "$HOST_URL" api POST /v1/tasks/hello:0001-slugify/claim "" "$HOST_KEY")
-  CID=$(echo "$CLAIM" | json 'v.claim_id'); SHORT=$(echo "$CID" | cut -c5-12)
-  BRANCH="agentfund/0001-slugify-$SHORT"; SHA=$HEAD0; TOKENS=120000
-  on "$HOST_URL" api POST "/v1/claims/$CID/report" "{\"status\":\"completed\",\"tokens_in\":100000,\"tokens_out\":20000,\"cost_estimate\":0.5,\"branch\":\"$BRANCH\",\"pr_url\":\"https://example.test/pull/1\",\"head_sha\":\"$SHA\",\"verify_exit_code\":0,\"log_digest\":\"$(printf x | openssl dgst -sha256 | sed 's/^.*= //')\"}" "$HOST_KEY" >/dev/null
-  ok "claimed and reported with the federated key (no sandbox image here, so by curl): $TOKENS tokens"
-fi
+export AGENTFUND_SANDBOX_IMAGE=agentfund/sandbox-e2e:happy AGENTFUND_EGRESS_PROXY_IMAGE=agentfund/egress-proxy:dev CLAUDE_CODE_OAUTH_TOKEN="e2e-not-a-real-credential"
+"$AF" work hello --once --json >"$WORK/work.json" 2>"$WORK/work.err" || { cat "$WORK/work.err"; fail "work --once"; }
+RESULT=$(tail -n 1 "$WORK/work.json")
+[ "$(echo "$RESULT" | json 'v.outcome')" = "completed" ] || fail "outcome: $RESULT"
+BRANCH=$(echo "$RESULT" | json 'v.branch'); SHA=$(echo "$RESULT" | json 'v.head_sha'); TOKENS=$(echo "$RESULT" | json 'v.tokens_in+v.tokens_out')
+ok "agentfund work --once completed in the sandbox: $TOKENS tokens, branch $BRANCH"
 BODY="{\"provider\":\"generic\",\"repo_url\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"head_sha\":\"$SHA\",\"conclusion\":\"success\"}"
 [ "$(on "$HOST_URL" ci_result "$BODY" | json 'v.matched')" = "true" ] || fail "CI result did not match"
 D=$(on "$HOST_URL" api GET "/v1/donors/alice@$HOME_HOST")

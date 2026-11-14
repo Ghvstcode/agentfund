@@ -165,6 +165,20 @@ func TestEvaluateCaps(t *testing.T) {
 	}
 }
 
+// The backoff refusal names what started it; older state has no cause.
+func TestBackoffReasonNamesTheCause(t *testing.T) {
+	for cause, want := range map[string]string{
+		"":               "backing off after a rate limit for another 1m0s",
+		CauseUnreachable: "backing off after the model API was unreachable for another 1m0s",
+	} {
+		in := base()
+		in.BackoffUntil, in.BackoffCause = in.Now.Add(time.Minute), cause
+		if d := Evaluate(in); d.Code != Backoff || d.Reason != want {
+			t.Errorf("cause %q: %s %q", cause, d.Code, d.Reason)
+		}
+	}
+}
+
 func TestSchedule(t *testing.T) {
 	night := sched(t, "02:00-06:00")
 	wrap := sched(t, "22:00-06:00")

@@ -14,19 +14,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/app"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/githost"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/runner"
-	"github.com/agentfund/agentfund/worker/internal/sandbox"
-	"github.com/agentfund/agentfund/worker/internal/scope"
-	"github.com/agentfund/agentfund/worker/internal/spec"
-	"github.com/agentfund/agentfund/worker/internal/store"
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
-	"github.com/agentfund/agentfund/worker/internal/verify"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/githost"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/runner"
+	"github.com/ghvstcode/agentfund/worker/internal/sandbox"
+	"github.com/ghvstcode/agentfund/worker/internal/scope"
+	"github.com/ghvstcode/agentfund/worker/internal/spec"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/verify"
 )
 
 // Outcomes of one task attempt, beyond the wire report statuses.
@@ -161,7 +161,7 @@ func (w *Worker) decide(maxTokens int64, repoURL string, trust policy.Trust, g, 
 	}
 	d := policy.Evaluate(policy.Input{
 		Now: w.now(), Global: lim, Project: pl, GlobalUsage: g, ProjectUsage: p, Active: active,
-		BackoffUntil: backoff.Until, Trust: trust, MaxTokens: maxTokens, RepoURL: repoURL,
+		BackoffUntil: backoff.Until, BackoffCause: backoff.Cause, Trust: trust, MaxTokens: maxTokens, RepoURL: repoURL,
 	})
 	if d.Allow && w.SessionBudget > 0 && w.sessionUsed.Load()+maxTokens > w.SessionBudget {
 		return policy.Decision{Code: "session-budget", Reason: fmt.Sprintf("reserving %s tokens would exceed this run's --budget (%s used of %s)",
@@ -278,7 +278,7 @@ func ApprovalBasis(ctx context.Context, cfg *config.Config, p *config.Project, r
 	}
 	repoDir := gitx.CachePath(reposDir, repoURL)
 	if fetch {
-		if err := gitx.Fetch(ctx, repoDir, repoURL, commit, p.ApprovedCommit); err != nil {
+		if err := gitx.FetchAuth(ctx, repoDir, repoURL, gitx.Auth(p.GitAuth), commit, p.ApprovedCommit); err != nil {
 			return "", false, "", err
 		}
 	} else if !gitx.CommitExists(ctx, repoDir, commit) || !gitx.CommitExists(ctx, repoDir, p.ApprovedCommit) {
@@ -338,7 +338,7 @@ func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
-	creds, err := w.Runner.Credentials(ctx, lookup, w.Cfg.Global.ClaudeTokenCommand, w.Cfg.Global.Sandbox.PassEnv)
+	creds, err := w.Runner.Credentials(ctx, lookup, w.Cfg.Global.AgentTokenCommand(), w.Cfg.Global.Sandbox.PassEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -348,9 +348,12 @@ func (w *Worker) Prepare(ctx context.Context) (*api.Project, error) {
 	}
 	for _, img := range []string{w.Cfg.Global.Sandbox.Image, w.Cfg.Global.Sandbox.EgressProxyImage} {
 		if !sandbox.ImagePresent(ctx, w.Engine, img) {
-			return nil, fmt.Errorf("container image %s is not present locally. From a checkout of the repository, build both images with `make -C worker images`; "+
-				"once images are published, `%s pull %s`. To use another image set sandbox.image / sandbox.egress_proxy_image in %s",
-				img, w.Cfg.Global.Sandbox.Docker, img, config.Path())
+			get := "from a checkout of the repository, build both images with `make -C worker images`"
+			if strings.Contains(img, "@sha256:") { // a released binary's default, or a pinned image
+				get = fmt.Sprintf("pull it: `%s pull %s`", w.Cfg.Global.Sandbox.Docker, img)
+			}
+			return nil, fmt.Errorf("container image %s is not present locally; %s. To use another image set sandbox.image / sandbox.egress_proxy_image in %s",
+				img, get, config.Path())
 		}
 	}
 	if removed, _ := sandbox.CleanOrphans(ctx, w.Engine, store.PIDAlive); len(removed) > 0 {
@@ -370,7 +373,7 @@ func (w *Worker) repoLock(dir string) *sync.Mutex {
 	return m.(*sync.Mutex)
 }
 
-// egressAllowlist is the model API plus whatever the donor explicitly added
+// egressAllowlist is the model API (for the credential in use) plus whatever the donor explicitly added
 // (extra_allow_hosts; the project's git host only with allow_git_host).
 // Nothing from the claim or the repository can widen it.
 func (w *Worker) egressAllowlist(repoURL string) []string {
@@ -383,7 +386,11 @@ func (w *Worker) egressAllowlist(repoURL string) []string {
 			out = append(out, h)
 		}
 	}
-	for _, h := range w.Runner.APIHosts() {
+	hosts := w.creds.Hosts
+	if len(hosts) == 0 {
+		hosts = w.Runner.APIHosts()
+	}
+	for _, h := range hosts {
 		add(h)
 	}
 	if w.Cfg.Global.Sandbox.AllowGitHost {

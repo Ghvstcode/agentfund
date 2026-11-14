@@ -10,7 +10,7 @@ protect you from, and how to check all of it yourself.
 ## The short version
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh   # the CLI
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh   # the CLI
 make -C worker images                          # sandbox + proxy images, from a checkout
 export CLAUDE_CODE_OAUTH_TOKEN=...             # or ANTHROPIC_API_KEY; the bill is yours
 agentfund login https://fund.example           # store the instance's API key (af_...)
@@ -24,7 +24,8 @@ agentfund logs                                 # what was actually run
 > [!IMPORTANT]
 > This is pre-release software. The full loop is proven against a mock agent, and the GitHub
 > path (push, pull request, Actions, delivery, merge) has been proven once by hand. A real
-> model inside the sandbox has not been run yet, and neither has a pull request from a fork.
+> model (Claude Code with Sonnet) has completed the sample project's tasks in the sandbox; a
+> larger project and a pull request from a fork have not been run yet.
 > The [Status section of the README](../README.md#status) is kept current. Treat a first run
 > as a test: `--once`, a small budget, and read the log afterwards.
 
@@ -38,12 +39,11 @@ agentfund logs                                 # what was actually run
 ## 1. Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agentfund/agentfund/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ghvstcode/agentfund/main/scripts/install.sh | sh
 ```
 
-No release is published yet, and `agentfund/agentfund` is a placeholder organisation name
-until launch. Until then, build from a checkout (Go 1.27+): `cd worker && make build` writes
-`worker/bin/agentfund`.
+No release is published yet. Until there is one, build from a checkout (Go 1.27+):
+`cd worker && make build` writes `worker/bin/agentfund`.
 
 The installer detects OS and architecture (Linux and macOS, amd64 and arm64), downloads the
 release archive, verifies its SHA-256 against the release's checksum file, and installs to
@@ -57,8 +57,8 @@ release archive, verifies its SHA-256 against the release's checksum file, and i
 | Docker (the `docker` CLI and a running daemon) | The sandbox and its egress proxy are containers. |
 | `git` | The worker clones the project on the host to verify it. |
 | `gh`, logged in (`gh auth login`) | The worker forks the project, pushes the branch and opens the PR as **you**. |
-| Two local images: `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | Not published to a registry yet. Build them: `make -C worker images`. |
-| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work` | The agent runs under your credentials. With neither set and no `claude_token_command` in the config, `work` stops before claiming anything. |
+| The sandbox and egress-proxy images | A released binary uses the images published with it, by digest: `agentfund version` names them, `docker pull` each once. A build from source uses `agentfund/sandbox:dev` and `agentfund/egress-proxy:dev`: `make -C worker images`. |
+| `CLAUDE_CODE_OAUTH_TOKEN` (printed by `claude setup-token`) or `ANTHROPIC_API_KEY` (from the Anthropic Console), exported in the shell that runs `agentfund work`; with `runner.name: codex`, `CODEX_API_KEY` or `OPENAI_API_KEY`, a ChatGPT Business/Enterprise access token in `CODEX_ACCESS_TOKEN`, or a ChatGPT sign-in made for AgentFund only (see [§7](#7-whose-credentials-whose-bill)) | The agent runs under your credentials. With none of them and no token command in the config, `work` stops before claiming anything. |
 
 Read [Whose credentials, whose bill](#7-whose-credentials-whose-bill) before choosing one.
 
@@ -137,6 +137,26 @@ Approval pins three values in `~/.config/agentfund/config.yaml`:
 
 Run `approve` again at any time to approve a newer commit.
 
+### Private projects
+
+On a members-only instance (one only your GitHub organization can sign in to) a project's
+repository may be private. Three things differ:
+
+- **Log in first.** The instance answers nobody anonymously, so run `agentfund login` before
+  `approve`.
+- **The fetch uses your `gh` login, with your consent.** When the repository cannot be fetched
+  anonymously, `approve` asks whether to use your `gh` login to read it, and stores the answer
+  for that project as `git_auth: gh`. Non-interactively, pass `--git-auth gh`. The credential
+  is used on your machine, for `https://github.com` only, and never enters the sandbox. The
+  server cannot turn it on.
+- **You need write access to the repository.** A private repository usually cannot be forked,
+  so the worker pushes the task branch into the repository itself. Before it spends any tokens,
+  `work` checks with `gh` that you can push, and releases the claim if you cannot.
+
+The repository's code is sent to the model provider under your credential. Use the
+credential your organization gives you for this (a company seat or API key), not a personal
+subscription, unless your organization says otherwise.
+
 ## 4. Preview, work, watch
 
 `<project>` is the full `<server-url>/<slug>`, or just the slug when it is unique among your
@@ -201,9 +221,9 @@ to your fork, open the PR → report. `worker/README.md` describes each step in 
 agentfund status            # --json, --recent 20
 ```
 
-Tokens today and this week against your caps, any rate-limit backoff, running tasks with
-phase and lease expiry, recent runs with their outcome (10 by default), and your active
-claims as each server sees them.
+Tokens today and this week against your caps, any backoff (rate limit or unreachable API),
+running tasks with phase and lease expiry, recent runs with their outcome (10 by default), and
+your active claims as each server sees them.
 
 ### daemon install
 
@@ -245,13 +265,16 @@ Token amounts accept plain integers or `k`/`m`/`g` suffixes in either case (`750
 | `auto_follow_signed_updates` | `false` | See [below](#when-the-projects-commit-moves). |
 | `retry_failed_after` | `"24h"` | After a task failed, timed out, hit its cap or was discarded here, do not claim it again for this long. Stops you paying for the same failure repeatedly. `"0"` retries immediately. |
 | `claude_token_command` | `""` | Shell command printing a Claude Code OAuth token, used only when neither credential variable is set. |
-| `sandbox.image`, `sandbox.egress_proxy_image` | `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | What runs. Pin by digest (`name@sha256:...`) once you use published images: a tag can be re-pointed. |
+| `sandbox.image`, `sandbox.egress_proxy_image` | The images this binary was released with, by digest (`agentfund version`); from source, `agentfund/sandbox:dev`, `agentfund/egress-proxy:dev` | What runs. If you set your own, pin it by digest (`name@sha256:...`): a tag can be re-pointed. |
 | `sandbox.cpus`, `memory`, `pids` | `"2"`, `"4g"`, `512` | Your machine's resources. |
-| `sandbox.allow_git_host` | `false` | By default the sandbox reaches only `api.anthropic.com`. `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
+| `sandbox.allow_git_host` | `false` | By default the sandbox reaches only the model API: `api.anthropic.com`; for `codex`, `api.openai.com` with an API key or `chatgpt.com` with a ChatGPT credential (plus `auth.openai.com` for an access token). `true` adds the project's git host. Leave it off: the sandbox has no `.git` and no git credentials, and every extra host is another place a hostile prompt could send data. |
 | `sandbox.extra_allow_hosts` | `[]` | Further `host[:port]` entries for the proxy. Same warning. |
 | `sandbox.pass_env` | `[]` | Names of extra environment variables passed to the agent (e.g. `ANTHROPIC_BASE_URL`). Their hosts are unreachable unless also allow-listed. |
+| `sandbox.extra_ca_certs` | `""` | Path (absolute, or `~/...`) to a PEM file of CA certificates the agent should trust besides the image's own roots: the CA of a TLS-inspecting corporate proxy, or of a private gateway. See [below](#behind-a-tls-inspecting-proxy). |
 | `sandbox.docker` | `"docker"` | Docker CLI binary. |
-| `runner.name`, `runner.model` | `"claude-code"`, `""` | Only `claude-code` exists. `model` is passed as `--model`; empty uses the CLI's default. |
+| `runner.name`, `runner.model` | `"claude-code"`, `""` | `claude-code` or `codex` (experimental: it reports usage only when it finishes, so a run can end above `max_tokens`; see [runners.md](runners.md)). `model` is passed as `--model`; empty uses the CLI's default, which for Claude Code 2.1.289 is an Opus model. Budgets count tokens, not dollars, so set a cheaper model if cost matters. |
+| `runner.token_command` | `""` | Like `claude_token_command`, for whichever runner is configured; for `codex` its output is passed as `CODEX_ACCESS_TOKEN` when it starts with `at-` (a ChatGPT access token), otherwise as `CODEX_API_KEY`. Empty with `claude-code` falls back to `claude_token_command`. |
+| `runner.codex_home` | `""` (`~/.config/agentfund/codex`) | `codex` only: the directory of a ChatGPT sign-in used only by AgentFund (`CODEX_HOME=<dir> npx -y @openai/codex@0.167.0 login`). Used when no API key or access token is set. Must not be `~/.codex`. See [§7](#7-whose-credentials-whose-bill). |
 
 **Reservation.** A task's full `max_tokens` is reserved against every cap before it starts and
 settled to the real figure afterwards, so caps cannot be overshot. The accounting lives in
@@ -271,6 +294,35 @@ ceiling can only tighten the global one.
 | `AGENTFUND_CONFIG_DIR` | Config directory. Otherwise `$XDG_CONFIG_HOME/agentfund`, then `~/.config/agentfund`. |
 | `AGENTFUND_DATA_DIR` | State directory. Otherwise `$XDG_DATA_HOME/agentfund`, then `~/.local/share/agentfund`. |
 | `AGENTFUND_SANDBOX_IMAGE`, `AGENTFUND_EGRESS_PROXY_IMAGE` | Image overrides. The `work` flags win over these; these win over the config. |
+
+### Behind a TLS-inspecting proxy
+
+Some corporate networks re-sign all TLS traffic with their own CA. The agent in the sandbox
+does not trust that CA and fails with `SELF_SIGNED_CERT_IN_CHAIN` or
+`UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Export the CA as PEM (your IT department has it; on macOS,
+Keychain Access → File → Export Items, then `openssl x509 -inform der -in ca.cer -out ca.pem`
+if it came out as DER) and point the worker at it:
+
+```yaml
+global:
+  sandbox:
+    extra_ca_certs: "~/corp-ca.pem"
+```
+
+The worker checks the file when it loads the config: it must be readable and hold only
+`CERTIFICATE` blocks. A private key in it is refused, because the agent can read the file.
+For each run the certificates are copied into the sandbox, not bind-mounted, so the path only
+has to exist on your machine (Colima and remote Docker hosts cannot see most host paths). They
+land in a root-owned directory the agent can read but not change. Two variables point at them:
+
+- `NODE_EXTRA_CA_CERTS` points at your certificates alone. Claude Code adds them to its roots.
+- `SSL_CERT_FILE` points at the image's roots plus your certificates. Some clients read it *in
+  place of* their default roots: Codex's WebSocket connection, OpenSSL and Go. That is why it
+  is a combined bundle.
+
+This covers *transparent* interception only. If your network only lets traffic out through an
+explicit proxy (`HTTPS_PROXY` on your machine), the sandbox still cannot reach the model API:
+the egress sidecar connects to it directly.
 
 ### When the project's commit moves
 
@@ -320,7 +372,7 @@ is what limits them, not your review.
 | --- | --- |
 | **Act as a hypervisor** | The container shares your kernel. A kernel or container runtime vulnerability could let code escape. If that matters to you, run the worker in a VM or on a dedicated machine; rootless Docker reduces the impact further. |
 | **Inspect content** | The proxy decides where the sandbox may connect, not what is sent, and it does not check the TLS server name inside the tunnel. |
-| **Rule out exfiltration to an allow-listed host** | The agent's credential is in the environment of a process executing someone else's prompt, and that process can talk to the model API. In reach: the public repository and that credential, nothing else of yours. Mitigations: you read the prompts; they cannot change without your re-approval unless you enabled a follow policy; the default allow-list is one host; use a dedicated, revocable credential. |
+| **Rule out exfiltration to an allow-listed host** | The agent's credential is in the environment of a process executing someone else's prompt, and that process can talk to the model API. In reach: the project's repository (private, for a [private project](#private-projects)) and that credential, nothing else of yours. Mitigations: you read the prompts; they cannot change without your re-approval unless you enabled a follow policy; the default allow-list is one host; use a dedicated, revocable credential. |
 | **Judge the work** | `verify` and CI decide whether a change is good. The scope check only decides where it may be. The pull request is a proposal for a human to review. |
 | **Vet the images** | Build them yourself or pin digests. |
 | **Hide the repository from the model provider** | The agent reads it; that is how it works. |
@@ -346,8 +398,62 @@ Full threat model: [SECURITY.md](SECURITY.md).
   [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
   [Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
   [Usage Policy](https://www.anthropic.com/legal/aup).
-  An API key (`ANTHROPIC_API_KEY`, pay-as-you-go under Anthropic's Commercial Terms) is the
-  unambiguous option. See also limitation 3 in [SECURITY.md](SECURITY.md).
+  AgentFund is built around subscription tokens (`claude setup-token`). If you would rather
+  keep donated usage apart from your plan, the worker also accepts an API key
+  (`ANTHROPIC_API_KEY`, pay-as-you-go under Anthropic's Commercial Terms). See also
+  limitation 3 in [SECURITY.md](SECURITY.md).
+
+### Codex (experimental)
+
+With `runner.name: codex` the worker runs the unmodified Codex CLI, published by OpenAI. It
+looks for a credential in this order:
+
+1. **An API key**, `CODEX_API_KEY` or `OPENAI_API_KEY`. Handled like Anthropic credentials
+   above. The sandbox reaches `api.openai.com`.
+2. **A ChatGPT access token**, `CODEX_ACCESS_TOKEN` (`at-…`). These exist for ChatGPT Business
+   and Enterprise workspaces whose admin allows them, and are created at
+   `chatgpt.com/admin/access-tokens`. Create one for AgentFund only, with the Codex scope and
+   the shortest expiry you will put up with; revoke it there at any time. It is handled like an
+   API key: read from your environment, never stored. The sandbox reaches `chatgpt.com` and
+   `auth.openai.com`.
+3. **A ChatGPT sign-in made for AgentFund only** (Plus, Pro and other plans). Run once:
+
+   ```sh
+   mkdir -p -m 700 ~/.config/agentfund/codex
+   CODEX_HOME=~/.config/agentfund/codex npx -y @openai/codex@0.167.0 login
+   ```
+
+   (`npx` runs the Codex version that is in the sandbox image, `0.167.0`, so the sign-in file
+   has the layout the worker was checked against; it needs Node.js. Codex refuses a `CODEX_HOME`
+   that does not exist, hence the `mkdir`.)
+
+   This is a second sign-in, separate from the one your own Codex uses in `~/.codex`, which
+   the worker never reads; your everyday sign-in keeps working through it and through its
+   refreshes (checked 2026-11-10). Unlike every other credential here, **the worker stores and renews
+   this one**: before each run it refreshes the sign-in in that directory if the access token
+   would expire during the run (it talks to `auth.openai.com` from your machine for that, never
+   from the sandbox). The sandbox gets a copy with the access token and without the refresh
+   token, written into its temporary home directory. The sandbox reaches `chatgpt.com` only.
+   `codex logout` with the same `CODEX_HOME` ends it.
+
+What a hostile task could take is different from an Anthropic key, and you should know it
+before choosing 2 or 3:
+
+- With a ChatGPT credential the sandbox must reach `chatgpt.com`, and the egress proxy decides
+  by host, not by path. Code in the sandbox can read the credential Codex uses (it runs as the
+  same user) and call other `chatgpt.com` endpoints with it.
+- An access token from a sign-in (3) lets its holder act as your ChatGPT account until it
+  expires, which is 10 days after it was issued (measured with Codex 0.167.0), possibly beyond
+  what Codex itself needs. The sandbox also gets your name, email address and plan. It cannot be renewed from the sandbox. What exactly it can reach is listed
+  in `worker/internal/runner/CODEX_NOTES.md` as far as it has been verified.
+- A Business/Enterprise access token (2) is limited to the scope, expiry and workspace you
+  chose, and you can revoke it without touching anything else.
+
+Your plan's terms are between you and OpenAI. AgentFund makes no claim on OpenAI's behalf about
+what they permit. Whether donating usage fits your ChatGPT plan or workspace agreement is your
+call to make from those terms; the worker also accepts an API key. Read them yourself:
+[Terms of Use](https://openai.com/policies/terms-of-use/),
+[Usage Policies](https://openai.com/policies/usage-policies/).
 
 ## 8. Reading your own logs
 
@@ -407,9 +513,12 @@ on the instance (`<server-url>/v1/tasks/<slug>:<task-id>`), where `log_digest` i
 **Your model provider.** When the CLI signals a rate limit or overload, the worker tears the
 sandbox down, releases the claim with the tokens burned so far, and backs off: 5 minutes,
 doubling per consecutive hit up to 4 hours, with jitter, never ending before the reset time
-the provider gave. Nothing is claimed until it ends. `agentfund status` shows
-`Rate-limit backoff until ...`. One clean agent run clears it. If the provider rejects your
-credentials or account, the claim is released and the worker **stops**.
+the provider gave. Nothing is claimed until it ends. The same happens when the agent never
+reaches the model API at all (your network, DNS or a firewall): the claim is released, not
+failed, so the task does not count against you. `agentfund status` shows
+`Backing off until ... after a rate limit` (or `after the model API was unreachable`). One
+clean agent run clears it. If the provider rejects your credentials or account, the claim is
+released and the worker **stops**.
 
 **The instance.** Servers limit requests per IP and per key (reference default 600 a minute)
 and answer `429`. The worker's polling stays far below that; a refused request shows up as an
@@ -423,7 +532,10 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | You see | Meaning | Do |
 | --- | --- | --- |
 | `no credentials for the coding agent: set CLAUDE_CODE_OAUTH_TOKEN ...` | Neither variable is set and there is no `claude_token_command`. | Export one in the shell (or env file) that runs `work`. |
+| `the agent credentials need attention: ... sign in again with: CODEX_HOME=<dir> npx … login` | The AgentFund-only Codex sign-in can no longer be renewed: it was signed out, or its refresh token was used elsewhere or expired. The claim was released and the worker stopped. | Run the command shown, then start the worker again. |
 | `the model provider rejected your credentials or account (<why>); fix them and start the worker again` | Expired or revoked token, billing or organisation problem. The worker has stopped. | Fix the credential. If an OAuth token is valid but still rejected, try adding `platform.claude.com` to `sandbox.extra_allow_hosts` (untested; see `CLAUDE_CODE_NOTES.md`). |
+| `API Error: Unable to connect to API: SSL certificate verification failed (SELF_SIGNED_CERT_IN_CHAIN)` (or `UNABLE_TO_VERIFY_LEAF_SIGNATURE`) in the agent output | Your network re-signs TLS with a CA the sandbox does not trust. | Set [`sandbox.extra_ca_certs`](#behind-a-tls-inspecting-proxy). |
+| `global.sandbox.extra_ca_certs: ...` | The CA file is missing, unreadable, not PEM, or holds something other than certificates. | Do what the message says; `""` turns the option off. |
 | `docker is not available: ...` | The daemon is not running or `docker` is not on `PATH`. | Start Docker; under launchd check the unit's `PATH`. |
 | `container image <ref> is not present locally. From a checkout of the repository, build both images with make -C worker images; ...` | Sandbox or proxy image missing. | `make -C worker images`. |
 | `no API key for <server>: run agentfund login ...` | Not logged in to that instance. | `agentfund login <server>`. |
@@ -449,6 +561,7 @@ Messages are quoted from the worker. `<...>` varies. More questions: [FAQ](faq.m
 | outcome `failed`: `could not publish the branch: gh is not logged in to github.com ...` | `gh` has no session. Tokens were spent; the work is lost. | `gh auth login`, and check `gh auth status` before long sessions. |
 | `the server did not accept the report (...); it is kept in <file>.report.json` | Network or server error after the run. | The report is on disk; the claim will expire server-side. |
 | outcome `released`: `rate limited by the model provider: <msg>`, then `backing off until <time> after a rate limit` | Provider rate limit. | Wait; see [section 10](#10-rate-limits-and-backoff). |
+| outcome `released`: `the model API was unreachable from the sandbox: <msg>`, then `backing off until <time> after the model API was unreachable` | The agent never got an answer from the model API: no network, DNS, or a firewall or TLS-inspecting proxy in the way. | Check your connection; the worker retries after the backoff. See [section 10](#10-rate-limits-and-backoff). |
 | `removed <n> orphaned sandbox resource(s) from an earlier run` | Cleanup after a crash or power loss. | Nothing. |
 
 ## 12. Uninstalling

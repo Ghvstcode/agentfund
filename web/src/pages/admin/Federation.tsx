@@ -256,7 +256,7 @@ function PeerConfirmations({ peer, controls, observed }: { peer: Peer; controls:
 function KeyMismatch({ peer, controls, observed }: { peer: Peer; controls: PeerControls; observed: string | null | undefined }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="grid gap-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 whitespace-normal">
+    <section aria-labelledby={id} className="grid gap-4 border border-destructive/30 bg-destructive/5 p-4 whitespace-normal">
       <div className="flex gap-3">
         <ShieldAlert className="mt-0.5 size-4 shrink-0 text-destructive" strokeWidth={1.5} aria-hidden="true" />
         <div className="grid min-w-0 gap-1.5">
@@ -283,7 +283,7 @@ function KeyMismatch({ peer, controls, observed }: { peer: Peer; controls: PeerC
             {!peer.observed_pubkey ? (
               <p className="py-2 text-sm text-muted-foreground">Not reported. Sync again, or remove the peer.</p>
             ) : observed === undefined ? (
-              <Skeleton className="h-[3.25rem] rounded-lg" />
+              <Skeleton className="h-[3.25rem] rounded-none" />
             ) : (
               // Without a secure context the browser cannot hash; the key itself is still comparable.
               <Fingerprint value={observed ?? peer.observed_pubkey} label={`the new key ${observed ? 'fingerprint ' : ''}of ${peer.host}`} className="bg-card" />
@@ -540,7 +540,7 @@ function createProblem(error: unknown, host: string): { title: string; body: str
   return { title: 'The peer was not added', body: describeError(error) };
 }
 
-const FOOTER = 'flex flex-col-reverse gap-2 bg-muted/40 px-5 py-3 sm:flex-row sm:items-center sm:justify-end';
+const FOOTER = 'flex flex-col-reverse gap-2 bg-muted/40 px-6 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-8';
 
 /**
  * Peering in two steps. First ask the instance who it is; nothing is saved. Then show its key
@@ -586,7 +586,7 @@ export function AddPeerDialog({ peers, onClose }: { peers: Peer[]; onClose: () =
 
   if (!preview) {
     return (
-      <Dialog title="Add a peer" subtitle="Step 1 of 2 · Find the instance" onClose={onClose}>
+      <Dialog title="Add a peer" subtitle={<span className="num text-xs">Add a peer · step 1 of 2</span>} onClose={onClose}>
         <form onSubmit={submitUrl} noValidate>
           <DialogSection>
             <TextField
@@ -622,7 +622,7 @@ export function AddPeerDialog({ peers, onClose }: { peers: Peer[]; onClose: () =
   const problem = create.isError ? createProblem(create.error, preview.host) : null;
 
   return (
-    <Dialog title={`Add ${preview.host} as a peer`} subtitle="Step 2 of 2 · Confirm its key" onClose={onClose}>
+    <Dialog title={`Add ${preview.host} as a peer`} subtitle={<span className="num text-xs">Add a peer · step 2 of 2</span>} onClose={onClose}>
       <DialogSection>
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="grid min-w-0 gap-0.5">
@@ -673,7 +673,7 @@ export function AddPeerDialog({ peers, onClose }: { peers: Peer[]; onClose: () =
       )}
 
       {problem && (
-        <div className="border-b p-5">
+        <div className="border-b px-6 py-5 sm:px-8">
           <Notice tone="strong" role="alert" title={problem.title}>
             {problem.body}
           </Notice>
@@ -713,7 +713,7 @@ function OwnKey() {
       </div>
       <div className="grid min-w-0 content-start">
         {fingerprint === undefined ? (
-          <Skeleton className="h-[3.25rem] rounded-lg" />
+          <Skeleton className="h-[3.25rem] rounded-none" />
         ) : (
           <Fingerprint value={fingerprint ?? meta.data.instance_pubkey} label={`this instance's key ${fingerprint ? 'fingerprint' : ''}`.trim()} />
         )}

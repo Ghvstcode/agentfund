@@ -12,6 +12,7 @@ import { recentFeedEvents } from "../services/events.js";
 import { getInstance } from "../services/instance.js";
 import { taskCounts, totals } from "../services/ledger.js";
 import { renderOgCard } from "../services/og.js";
+import { membersOnly } from "../services/members.js";
 import { getProjectRow } from "../services/projects.js";
 
 const MARKER = "<!--app-head-->";
@@ -42,7 +43,7 @@ function headTags(ctx: AppContext, instanceName: string, h: Head): string {
     `<title>${esc(h.title)}</title>`,
     `<meta name="description" content="${esc(h.description)}">`,
     h.noindex ? `<meta name="robots" content="noindex">` : `<link rel="canonical" href="${esc(h.url)}">`,
-    `<link rel="alternate" type="application/atom+xml" title="${esc(instanceName)}" href="${esc(ctx.config.baseUrl)}/feed.atom">`,
+    ...(membersOnly(ctx) ? [] : [`<link rel="alternate" type="application/atom+xml" title="${esc(instanceName)}" href="${esc(ctx.config.baseUrl)}/feed.atom">`]),
     `<meta property="og:site_name" content="${esc(instanceName)}">`,
     `<meta property="og:type" content="${h.type}">`,
     `<meta property="og:title" content="${esc(h.title)}">`,
@@ -62,7 +63,10 @@ function headTags(ctx: AppContext, instanceName: string, h: Head): string {
 }
 
 /** Single-segment UI routes with no sub-paths, and prefixes whose sub-paths belong to the UI (web/src/App.tsx). */
-const UI_EXACT = new Set(["donors", "settings", "maintain", "admin", "styleguide"]);
+const UI_EXACT = new Set(["donors", "settings", "maintain", "admin", "styleguide", "privacy", "terms"]);
+/** UI pages a crawler may index; the other app screens are real pages but `noindex`. */
+const UI_PUBLIC = new Set(["donors", "privacy", "terms"]);
+const LEGAL_TITLES: Record<string, string> = { privacy: "Privacy policy", terms: "Terms of use" };
 const UI_PREFIX = new Set(["maintain", "admin", "styleguide"]);
 const PROJECT_TABS = new Set(["activity", "donors", "audit"]);
 
@@ -77,13 +81,18 @@ async function headFor(ctx: AppContext, path: string): Promise<{ head: Head; ins
   const url = `${base}${path === "/" ? "" : path}`;
   const generic: Head = { title: instance.name, description: instance.description, url: url || base, type: "website" };
   const home: Head = { ...generic, jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: instance.name, description: instance.description, url: base } };
+  // Browsers cannot send the bearer token with a page load, so a members-only instance serves
+  // every path the same generic, unindexed shell: no project names, and no 404 that would
+  // tell a stranger which slugs exist. The SPA signs in and asks the (gated) API.
+  if (membersOnly(ctx)) return { head: { ...generic, url: base, noindex: true }, instanceName: instance.name, found: true };
   const missing = { instanceName: instance.name, found: false, head: { ...generic, title: `Not found · ${instance.name}`, description: "This page does not exist.", noindex: true } };
   const segments = path.split("/").filter(Boolean);
   const [first, second, third] = segments;
   if (!first) return { head: home, instanceName: instance.name, found: true };
   if ((segments.length === 1 && UI_EXACT.has(first)) || (segments.length > 1 && UI_PREFIX.has(first)) || (first === "auth" && second === "callback" && segments.length === 2)) {
     // App screens (settings, admin, …) are real pages but nothing a crawler should index.
-    return { head: { ...generic, noindex: first !== "donors" }, instanceName: instance.name, found: true };
+    const title = LEGAL_TITLES[first] ? `${LEGAL_TITLES[first]} · ${instance.name}` : generic.title;
+    return { head: { ...generic, title, noindex: !UI_PUBLIC.has(first) }, instanceName: instance.name, found: true };
   }
   if (first === "u") {
     if (segments.length !== 2 || !second || !/^[a-z0-9][a-z0-9-]{0,38}(@[a-z0-9.-]{1,253}(:[0-9]{1,5})?)?$/.test(second)) return missing;
@@ -188,7 +197,12 @@ export function registerPages(app: Hono, ctx: AppContext): void {
     }
   });
 
-  app.get("/robots.txt", (c) => c.text(`User-agent: *\nAllow: /\nDisallow: /v1/\nSitemap: ${ctx.config.baseUrl}/sitemap.xml\n`));
+  app.get("/robots.txt", (c) => c.text(membersOnly(ctx) ? "User-agent: *\nDisallow: /\n" : `User-agent: *\nAllow: /\nDisallow: /v1/\nSitemap: ${ctx.config.baseUrl}/sitemap.xml\n`));
+
+  // Crawler and share surfaces carry project data and cannot be authenticated: off when members-only.
+  for (const path of ["/sitemap.xml", "/feed.atom", "/og/:file"]) {
+    app.get(path, async (c, next) => (membersOnly(ctx) ? c.text("Not found", 404) : next()));
+  }
 
   app.get("/problems/:code", (c) => {
     const code = c.req.param("code") as ProblemCode;

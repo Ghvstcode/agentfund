@@ -28,7 +28,7 @@ case " $WHAT " in *" stills "*)
   for theme in light dark; do
     png "$RAW/hero-$theme.png" "$OUT/hero-$theme.png" 2400
     png "$RAW/discover-$theme.png" "$OUT/shot-discover-$theme.png" 1920
-    for shot in project back audit donor; do
+    for shot in project back maintain donor; do
       png "$RAW/$shot-$theme.png" "$OUT/shot-$shot-$theme.png" 1280
     done
   done

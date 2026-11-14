@@ -5,7 +5,7 @@ import { decodeCursor, encodeCursor } from "../lib/cursor.js";
 import type { Schemas } from "../lib/openapi.js";
 import { validation } from "../lib/problem.js";
 import { toUserRef } from "./auth.js";
-import { DEPS_MERGED } from "./ledger.js";
+import { DEPS_BLOCKING, DEPS_MERGED } from "./ledger.js";
 
 type Task = Schemas["Task"];
 type Report = Schemas["Report"];
@@ -114,8 +114,7 @@ interface TaskRow {
 const TASK_VIEW = sql`
   SELECT m.id, p.slug, p.status AS project_status, m.manifest_id, m.path, m.title, m.content_hash, m.commit, m.manifest,
          m.depends_on, m.state, m.updated_at,
-         ARRAY(SELECT d.dep FROM unnest(m.depends_on) AS d(dep)
-               WHERE NOT EXISTS (SELECT 1 FROM manifests x WHERE x.project_id = m.project_id AND x.manifest_id = d.dep AND x.state = 'merged')) AS blocked_by,
+         ${DEPS_BLOCKING} AS blocked_by,
          (m.state = 'open' AND p.status = 'active' AND ${DEPS_MERGED}) AS claimable,
          b.burn_in, b.burn_out, b.burn_runs,
          cu.handle AS ac_handle, cu.avatar_url AS ac_avatar, cu.home_id AS ac_home, ac.claimed_at AS ac_claimed_at, ac.lease_expires_at AS ac_lease,

@@ -19,9 +19,13 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/agentfund/agentfund/worker/internal/app.Version={{ .Version }}
-      - -X github.com/agentfund/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
-      - -X github.com/agentfund/agentfund/worker/internal/app.Date={{ .CommitDate }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Version={{ .Version }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Commit={{ .ShortCommit }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/app.Date={{ .CommitDate }}
+      # The release workflow sets these to the digests it just pushed; a local snapshot keeps the
+      # images built from the checkout.
+      - -X github.com/ghvstcode/agentfund/worker/internal/config.DefaultSandboxImage={{ envOrDefault "RELEASE_SANDBOX_IMAGE" "agentfund/sandbox:dev" }}
+      - -X github.com/ghvstcode/agentfund/worker/internal/config.DefaultEgressProxyImage={{ envOrDefault "RELEASE_EGRESS_PROXY_IMAGE" "agentfund/egress-proxy:dev" }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -46,10 +50,12 @@ changelog:
   disable: true
 
 release:
-  # Placeholder repository; scripts/install.sh downloads from the same one
+  # scripts/install.sh downloads from the same repository
   # (override there with AGENTFUND_REPO).
   github:
-    owner: agentfund
+    owner: ghvstcode
     name: agentfund
-  draft: true
+  # Published as soon as it is built: install.sh installs GitHub's "latest" release, which skips
+  # drafts. A tag with a suffix (v1.2.3-rc1) is a pre-release and never becomes latest.
+  draft: false
   prerelease: auto

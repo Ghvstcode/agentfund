@@ -48,10 +48,25 @@ export async function totals(q: Queryable, projectId?: number): Promise<Totals> 
   return toTotals(r);
 }
 
-/** SQL for "every dependency of manifest `m` is merged". */
-export const DEPS_MERGED = sql`NOT EXISTS (
-  SELECT 1 FROM unnest(m.depends_on) AS d(dep)
-  WHERE NOT EXISTS (SELECT 1 FROM manifests x WHERE x.project_id = m.project_id AND x.manifest_id = d.dep AND x.state = 'merged'))`;
+/**
+ * SQL for "dependency `d.dep` of manifest `m` has landed": it is merged, and the indexer has read
+ * and verified the base branch since that merge was recorded. Claims start from the pinned commit,
+ * so a dependent unlocked by the merge alone ran on a commit without the work it builds on (found
+ * by the first real-model run). A merge is only reported once it is on the branch (GitHub moves
+ * the ref first; a generic CI must do the same), so a head read after it contains it, whether the
+ * pin moved then or already had. Until the next good index (push webhook, timer or Re-pin) the
+ * dependency blocks; a failed index leaves dependencies that had landed alone.
+ */
+const DEP_LANDED = sql`EXISTS (
+  SELECT 1 FROM manifests x JOIN projects pp ON pp.id = x.project_id
+  WHERE x.project_id = m.project_id AND x.manifest_id = d.dep AND x.state = 'merged'
+    AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.manifest_id = x.id AND r.merged_at >= coalesce(pp.branch_read_at, '-infinity')))`;
+
+/** SQL for the dependencies of manifest `m` that have not landed yet (the task's `blocked_by`). */
+export const DEPS_BLOCKING = sql`ARRAY(SELECT d.dep FROM unnest(m.depends_on) AS d(dep) WHERE NOT ${DEP_LANDED})`;
+
+/** SQL for "every dependency of manifest `m` has landed" (see DEP_LANDED). */
+export const DEPS_MERGED = sql`NOT EXISTS (SELECT 1 FROM unnest(m.depends_on) AS d(dep) WHERE NOT ${DEP_LANDED})`;
 
 export async function taskCounts(q: Queryable, projectId: number): Promise<TaskCounts> {
   const r = await one<Record<keyof TaskCounts, string>>(

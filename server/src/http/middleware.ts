@@ -12,7 +12,11 @@ export function problemResponse(ctx: AppContext, c: Context, p: Problem): Respon
 }
 
 export function clientIp(ctx: AppContext, c: Context): string {
-  if (ctx.config.trustProxy) {
+  if (ctx.config.clientIpHeader) {
+    const ip = c.req.header(ctx.config.clientIpHeader)?.split(",")[0]!.trim();
+    if (ip) return ip;
+  } else if (ctx.config.trustProxy) {
+    // The first entry is whatever the client sent; only safe behind a proxy that replaces the header.
     const fwd = c.req.header("x-forwarded-for");
     if (fwd) return fwd.split(",")[0]!.trim();
   }

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/apitest"
-	"github.com/agentfund/agentfund/worker/internal/config"
-	"github.com/agentfund/agentfund/worker/internal/lockfile"
-	"github.com/agentfund/agentfund/worker/internal/minisign"
-	"github.com/agentfund/agentfund/worker/internal/pipeline"
-	"github.com/agentfund/agentfund/worker/internal/testenv"
-	"github.com/agentfund/agentfund/worker/internal/testutil"
-	"github.com/agentfund/agentfund/worker/internal/verify"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/apitest"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/lockfile"
+	"github.com/ghvstcode/agentfund/worker/internal/minisign"
+	"github.com/ghvstcode/agentfund/worker/internal/pipeline"
+	"github.com/ghvstcode/agentfund/worker/internal/testenv"
+	"github.com/ghvstcode/agentfund/worker/internal/testutil"
+	"github.com/ghvstcode/agentfund/worker/internal/verify"
 )
 
 // run executes the CLI in-process.
@@ -706,7 +706,10 @@ func TestUsageErrors(t *testing.T) {
 			t.Errorf("work --help lacks %q", want)
 		}
 	}
-	if out := mustRun(t, "", "version"); !strings.HasPrefix(out, "agentfund ") {
+	// The images a released binary runs by default are part of what it is.
+	if out := mustRun(t, "", "version"); !strings.HasPrefix(out, "agentfund ") ||
+		!strings.Contains(out, "default sandbox image       "+config.DefaultSandboxImage+"\n") ||
+		!strings.Contains(out, "default egress-proxy image  "+config.DefaultEgressProxyImage+"\n") {
 		t.Fatalf("version: %q", out)
 	}
 	for _, sub := range []string{"keygen", "sign", "validate", "login", "approve", "work", "dry-run", "status", "logs", "daemon"} {

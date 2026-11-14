@@ -20,6 +20,9 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
 const Styleguide = lazy(() => import('./pages/Styleguide'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
+const legal = () => import('./pages/Legal');
+const Privacy = lazy(() => legal().then((module) => ({ default: module.Privacy })));
+const Terms = lazy(() => legal().then((module) => ({ default: module.Terms })));
 
 export function App() {
   return (
@@ -34,6 +37,8 @@ export function App() {
         <Route path="admin/:section?" element={<Admin />} />
         <Route path="styleguide/*" element={<Styleguide />} />
         <Route path="auth/callback" element={<AuthCallback />} />
+        <Route path="privacy" element={<Privacy />} />
+        <Route path="terms" element={<Terms />} />
         <Route path=":slug" element={<ProjectPage />}>
           <Route index element={<TasksTab />} />
           <Route path="tasks/:taskId" element={<TasksTab />} />

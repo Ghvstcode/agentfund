@@ -34,6 +34,12 @@ type Meter struct {
 	// forgotten again if a later model call succeeds.
 	hardLimit, retryLimit bool
 	limitWhy              string
+	// answered is set by anything that only an answer from the model API can
+	// produce (a message, an HTTP status, a rate-limit report); it is never
+	// reset. offlineRetries counts api_retry events without an HTTP status:
+	// the request got no answer at all (no route, DNS, proxy refusal).
+	answered       bool
+	offlineRetries int
 }
 
 type msgUsage struct{ in, out int64 }
@@ -70,6 +76,9 @@ type event struct {
 	} `json:"message"`
 	Error           string  `json:"error"`
 	ParentToolUseID *string `json:"parent_tool_use_id"`
+	// IsAPIErrorMessage marks an assistant message the CLI made up itself to
+	// carry an API error (model "<synthetic>", zero usage), not a model answer.
+	IsAPIErrorMessage bool `json:"is_api_error_message"`
 
 	// stream_event
 	Event *struct {
@@ -111,6 +120,9 @@ const (
 	errRateLimit  = "rate_limit"
 	errOverloaded = "overloaded"
 )
+
+// syntheticModel is the model name on assistant messages the CLI makes up.
+const syntheticModel = "<synthetic>"
 
 var credentialErrors = map[string]bool{
 	"authentication_failed": true, "oauth_org_not_allowed": true, "account_on_hold": true,
@@ -156,6 +168,12 @@ func (m *Meter) Feed(line []byte) bool {
 				m.out.Version = "claude-code/" + ev.Version
 			}
 		case "api_retry":
+			// Seen live (2.1.289, no route): error "unknown", error_status null.
+			if ev.ErrorStatus != nil || ev.Error == errRateLimit || ev.Error == errOverloaded || credentialErrors[ev.Error] {
+				m.answered = true
+			} else {
+				m.offlineRetries++
+			}
 			if ev.Error == errRateLimit || ev.Error == errOverloaded {
 				m.retries++
 				if m.retries >= retriesBeforeGivingUp {
@@ -175,6 +193,7 @@ func (m *Meter) Feed(line []byte) bool {
 		switch ev.Event.Type {
 		case "message_start":
 			if ev.Event.Message != nil && ev.Event.Message.ID != "" {
+				m.answered = true
 				m.current[key] = ev.Event.Message.ID
 				if u := ev.Event.Message.Usage; u != nil {
 					mu := m.msg(ev.Event.Message.ID)
@@ -192,11 +211,14 @@ func (m *Meter) Feed(line []byte) bool {
 		}
 	case "assistant":
 		if ev.Message != nil && ev.Message.ID != "" && ev.Message.Usage != nil {
+			if !ev.IsAPIErrorMessage && ev.Message.Model != syntheticModel {
+				m.answered = true
+			}
 			mu := m.msg(ev.Message.ID)
 			mu.in = max(mu.in, ev.Message.Usage.in())
 			mu.out = max(mu.out, ev.Message.Usage.OutputTokens)
 		}
-		if ev.Message != nil && ev.Message.Model != "" && m.out.Model == "" {
+		if ev.Message != nil && ev.Message.Model != "" && ev.Message.Model != syntheticModel && m.out.Model == "" {
 			m.out.Model = ev.Message.Model
 		}
 		switch {
@@ -206,6 +228,7 @@ func (m *Meter) Feed(line []byte) bool {
 			m.out.CredentialProblem = ev.Error
 		}
 	case "rate_limit_event":
+		m.answered = true
 		if ri := ev.RateLimitInfo; ri != nil {
 			if ri.ResetsAt > 0 {
 				m.out.ResetAt = time.Unix(ri.ResetsAt, 0)
@@ -219,6 +242,9 @@ func (m *Meter) Feed(line []byte) bool {
 		m.out.IsError = ev.IsError || (ev.Subtype != "" && ev.Subtype != "success")
 		if m.out.IsError {
 			m.out.Message = truncate(firstNonEmpty(ev.Result, ev.Subtype), 500)
+		}
+		if ev.APIErrorStatus != nil {
+			m.answered = true
 		}
 		if ev.APIErrorStatus != nil && (*ev.APIErrorStatus == 429 || *ev.APIErrorStatus == 529) {
 			m.rateLimited("the model API answered HTTP " + itoa(*ev.APIErrorStatus))
@@ -277,6 +303,9 @@ func (m *Meter) Outcome() Outcome {
 	o.RateLimited = m.hardLimit || m.retryLimit
 	if o.RateLimited && o.Message == "" {
 		o.Message = m.limitWhy
+	}
+	if m.offlineRetries > 0 && !m.answered && o.Total() == 0 && !o.RateLimited && o.CredentialProblem == "" {
+		o.NetworkProblem = firstNonEmpty(o.Message, "no answer from the model API after "+itoa(m.offlineRetries)+" connection retries")
 	}
 	return o
 }

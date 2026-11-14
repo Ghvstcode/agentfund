@@ -13,18 +13,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/agentfund/agentfund/worker/internal/api"
-	"github.com/agentfund/agentfund/worker/internal/app"
-	"github.com/agentfund/agentfund/worker/internal/githost"
-	"github.com/agentfund/agentfund/worker/internal/gitx"
-	"github.com/agentfund/agentfund/worker/internal/logs"
-	"github.com/agentfund/agentfund/worker/internal/policy"
-	"github.com/agentfund/agentfund/worker/internal/runner"
-	"github.com/agentfund/agentfund/worker/internal/sandbox"
-	"github.com/agentfund/agentfund/worker/internal/scope"
-	"github.com/agentfund/agentfund/worker/internal/store"
-	"github.com/agentfund/agentfund/worker/internal/tokfmt"
-	"github.com/agentfund/agentfund/worker/internal/verify"
+	"github.com/ghvstcode/agentfund/worker/internal/api"
+	"github.com/ghvstcode/agentfund/worker/internal/app"
+	"github.com/ghvstcode/agentfund/worker/internal/config"
+	"github.com/ghvstcode/agentfund/worker/internal/githost"
+	"github.com/ghvstcode/agentfund/worker/internal/gitx"
+	"github.com/ghvstcode/agentfund/worker/internal/logs"
+	"github.com/ghvstcode/agentfund/worker/internal/policy"
+	"github.com/ghvstcode/agentfund/worker/internal/runner"
+	"github.com/ghvstcode/agentfund/worker/internal/sandbox"
+	"github.com/ghvstcode/agentfund/worker/internal/scope"
+	"github.com/ghvstcode/agentfund/worker/internal/store"
+	"github.com/ghvstcode/agentfund/worker/internal/tokfmt"
+	"github.com/ghvstcode/agentfund/worker/internal/verify"
 )
 
 // stop reasons
@@ -41,6 +42,8 @@ type run struct {
 	claim  *api.Claim
 	taskID string // manifest id
 	log    *logs.Run
+	scrub  *logs.Scrubber
+	creds  runner.Credentials // renewed for this run (Credentials.Renew)
 	start  time.Time
 
 	tokensIn, tokensOut atomic.Int64
@@ -174,7 +177,7 @@ func (w *Worker) RunTask(ctx context.Context, task api.Task, proj *api.Project) 
 	defer lg.Close()
 	res.LogFile = lg.Path()
 
-	r := &run{w: w, claim: claim, taskID: task.TaskID, log: lg, start: w.now(), hbDone: make(chan struct{})}
+	r := &run{w: w, claim: claim, taskID: task.TaskID, log: lg, scrub: scrub, creds: w.creds, start: w.now(), hbDone: make(chan struct{})}
 	r.cost.Store(float64(0))
 	r.phase.Store(api.PhaseVerifying)
 	lg.Event("claim", map[string]any{
@@ -388,12 +391,21 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	if err != nil {
 		return r.release(parent, err.Error()), nil
 	}
+	// A host that can tell up front that publishing will fail (a private repo without write
+	// access) says so now, before any tokens are spent.
+	if pf, ok := host.(interface {
+		Preflight(context.Context, string) error
+	}); ok {
+		if err := pf.Preflight(ctx, claim.RepoURL); err != nil {
+			return r.release(parent, err.Error()), nil
+		}
+	}
 
 	// ── Steps 1–4: fetch and verify. Nothing from the repo runs before this passes.
 	repoDir := gitx.CachePath(w.ReposDir, claim.RepoURL)
 	lock := w.repoLock(repoDir)
 	lock.Lock()
-	ferr := gitx.Fetch(ctx, repoDir, claim.RepoURL, claim.Commit, w.Project.ApprovedCommit)
+	ferr := gitx.FetchAuth(ctx, repoDir, claim.RepoURL, gitx.Auth(w.Project.GitAuth), claim.Commit, w.Project.ApprovedCommit)
 	lock.Unlock()
 	if res, stopped := r.interrupted(parent); stopped {
 		return res, nil
@@ -426,6 +438,21 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	lg.Event("manifest", map[string]any{"raw": string(vres.ManifestRaw), "parsed": m})
 	lg.Event("prompt", map[string]any{"prompt": m.Prompt})
 
+	// Credentials that expire (a ChatGPT sign-in) must last the whole run.
+	if renew := r.creds.Renew; renew != nil {
+		creds, cerr := renew(ctx, time.Duration(m.TimeoutMinutes)*time.Minute+10*time.Minute)
+		if cerr != nil {
+			if errors.Is(cerr, runner.ErrCredentials) {
+				// The details name the donor's local paths: they stay here.
+				res := r.release(parent, "the agent credentials need attention; the backer has to sign in again")
+				return res, &ErrFatal{Err: cerr}
+			}
+			return r.release(parent, "cannot renew the agent credentials: "+cerr.Error()), nil
+		}
+		r.scrub.Add(creds.Secrets...)
+		r.creds = creds
+	}
+
 	// ── Step 5: donor policy against the *verified* manifest; reserve max_tokens atomically.
 	trust := trustOf(proj)
 	rerr := w.Store.Reserve(store.Run{Claim: claim.ClaimID, Project: w.Ref.Key(), Task: r.taskID, Reserved: m.MaxTokens, PID: os.Getpid(), Phase: api.PhaseVerifying, LogFile: lg.Path()},
@@ -456,11 +483,19 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	}
 	allow := w.egressAllowlist(claim.RepoURL)
 	sb := w.Cfg.Global.Sandbox
+	var extraCA []byte
+	if sb.ExtraCACerts != "" {
+		// Read again: the file may have changed since the config was loaded.
+		if extraCA, err = config.ReadCACerts(sb.ExtraCACerts); err != nil {
+			return r.release(parent, "cannot read the extra CA certificates: "+err.Error()), nil
+		}
+	}
 	lg.Event("sandbox", map[string]any{"image": sb.Image, "egress_proxy_image": sb.EgressProxyImage, "egress_allowlist": allow,
-		"files": len(plan.Files), "dropped": plan.Dropped, "cpus": sb.CPUs, "memory": sb.Memory, "pids": sb.PIDs})
+		"files": len(plan.Files), "dropped": plan.Dropped, "cpus": sb.CPUs, "memory": sb.Memory, "pids": sb.PIDs,
+		"extra_ca_certs": sb.ExtraCACerts})
 	session, err := sandbox.Start(ctx, w.Engine, sandbox.Spec{
 		RunID: runID(claim.ClaimID), Image: sb.Image, ProxyImage: sb.EgressProxyImage,
-		CPUs: sb.CPUs, Memory: sb.Memory, PIDs: sb.PIDs, AllowHosts: allow,
+		CPUs: sb.CPUs, Memory: sb.Memory, PIDs: sb.PIDs, AllowHosts: allow, ExtraCACerts: extraCA,
 	})
 	if err != nil {
 		if res, stopped := r.interrupted(parent); stopped {
@@ -494,7 +529,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	r.setPhase(api.PhaseAgent)
 	w.say("%s: running %s in the sandbox (max %s tokens, %d min)", r.taskID, w.Runner.Name(), tokfmt.Format(m.MaxTokens), m.TimeoutMinutes)
 	out, runErr := w.Runner.Run(ctx, runner.RunSpec{
-		Prompt: m.Prompt, Model: w.Cfg.Global.Runner.Model, Creds: w.creds,
+		Prompt: m.Prompt, Model: w.Cfg.Global.Runner.Model, Creds: r.creds,
 		Exec: func(ctx context.Context, cmd, pass, env []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 			return session.Exec(ctx, sandbox.ExecSpec{Cmd: cmd, PassEnv: pass, Env: env, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 		},
@@ -515,7 +550,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	r.phaseMeta.Store(runnerMeta{version: out.Version, model: out.Model})
 	lg.Event("agent_exit", map[string]any{"exit_code": out.ExitCode, "result_seen": out.ResultSeen, "is_error": out.IsError, "final_usage": out.Final,
 		"tokens_in": out.TokensIn, "tokens_out": out.TokensOut, "cost_estimate": out.CostUSD, "model": out.Model, "runner": out.Version,
-		"rate_limited": out.RateLimited, "message": out.Message})
+		"rate_limited": out.RateLimited, "network_problem": out.NetworkProblem, "message": out.Message})
 	r.proxyLog(session)
 
 	if out.Total() > m.MaxTokens {
@@ -529,15 +564,14 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 		res := r.release(parent, "the model provider rejected the donor's credentials or account ("+out.CredentialProblem+")")
 		return res, &ErrFatal{Err: fmt.Errorf("the model provider rejected your credentials or account (%s); fix them and start the worker again", out.CredentialProblem)}
 	case out.RateLimited:
-		st, _ := w.Store.Snapshot()
-		var prev policy.BackoffState
-		if st != nil {
-			prev = st.Backoff
-		}
-		next := policy.NextBackoff(prev, w.now(), out.ResetAt, policy.Jitter())
-		_ = w.Store.SetBackoff(next)
-		w.say("%s: backing off until %s after a rate limit", r.taskID, next.Until.Format("15:04:05"))
+		w.backOff(r.taskID, out.ResetAt, policy.CauseRateLimit)
 		return r.release(parent, "rate limited by the model provider: "+out.Message), nil
+	case out.NetworkProblem != "":
+		// The backer's network, not the task: no failed report and no retry
+		// cooldown. Before runErr, because a runner that stops an agent stuck
+		// offline may leave the exec with a context error.
+		w.backOff(r.taskID, time.Time{}, policy.CauseUnreachable)
+		return r.release(parent, "the model API was unreachable from the sandbox: "+out.NetworkProblem), nil
 	case runErr != nil:
 		return r.finish(parent, api.StatusFailed, "sandbox error while running the agent: "+runErr.Error(), nil, nil), nil
 	case out.IsError || out.ExitCode != 0 || !out.ResultSeen:
@@ -593,7 +627,7 @@ func (r *run) execute(ctx, parent context.Context, proj *api.Project) (Result, e
 	}
 	// A change set that carries the donor's credential must never be published.
 	for _, c := range changes {
-		for _, secret := range w.creds.Secrets {
+		for _, secret := range r.creds.Secrets {
 			if secret != "" && (bytes.Contains(c.Content, []byte(secret)) || strings.Contains(c.Path, secret)) {
 				lg.Event("scope", map[string]any{"ok": false, "violation": "credential found in " + c.Path})
 				return r.finish(parent, api.StatusVerificationFailed, "DISCARDED — the change set contains the donor's agent credential ("+c.Path+")", &code, nil), nil
@@ -709,4 +743,18 @@ func (w *Worker) deliver(ctx context.Context, send func() error) error {
 		case <-time.After(wait):
 		}
 	}
+}
+
+// backOff extends the shared backoff after a rate limit or an unreachable
+// model API; no task is claimed until it ends.
+func (w *Worker) backOff(taskID string, resetAt time.Time, cause string) {
+	st, _ := w.Store.Snapshot()
+	var prev policy.BackoffState
+	if st != nil {
+		prev = st.Backoff
+	}
+	next := policy.NextBackoff(prev, w.now(), resetAt, policy.Jitter())
+	next.Cause = cause
+	_ = w.Store.SetBackoff(next)
+	w.say("%s: backing off until %s after %s", taskID, next.Until.Format("15:04:05"), cause)
 }

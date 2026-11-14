@@ -75,7 +75,7 @@ func TestConfigRoundTripKeepsCommentsAndValues(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, "config.yaml"))
 	for _, knob := range []string{"tokens_per_day", "tokens_per_week", "max_tokens_per_task", "new_project_max_tokens_per_task",
 		"schedule", "max_concurrent", "allowed_git_hosts", "auto_follow_signed_updates", "follow_unchanged_lock",
-		"retry_failed_after", "claude_token_command", "image", "egress_proxy_image", "cpus", "memory", "pids", "allow_git_host", "extra_allow_hosts", "pass_env", "docker", "name", "model"} {
+		"retry_failed_after", "claude_token_command", "image", "egress_proxy_image", "cpus", "memory", "pids", "allow_git_host", "extra_allow_hosts", "pass_env", "extra_ca_certs", "docker", "name", "model"} {
 		idx := strings.Index(string(raw), "\n  "+knob+":")
 		if idx < 0 {
 			idx = strings.Index(string(raw), "\n    "+knob+":")
@@ -118,6 +118,40 @@ func TestConfigRoundTripKeepsCommentsAndValues(t *testing.T) {
 	}
 }
 
+// A saved config leaves the default images unnamed, so the next binary runs its own released
+// images instead of the ones the binary that wrote the file happened to have; images chosen by
+// the backer are kept.
+func TestSavedConfigDoesNotPinDefaultImages(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvConfigDir, dir)
+	if err := Default().Save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if !strings.Contains(string(raw), "\n    image: \"\"\n") || !strings.Contains(string(raw), "\n    egress_proxy_image: \"\"\n") ||
+		strings.Contains(string(raw), DefaultSandboxImage) {
+		t.Fatalf("default images written out:\n%s", raw)
+	}
+	defer func(s, e string) { DefaultSandboxImage, DefaultEgressProxyImage = s, e }(DefaultSandboxImage, DefaultEgressProxyImage)
+	DefaultSandboxImage = "ghcr.io/ghvstcode/agentfund-sandbox@sha256:" + strings.Repeat("1", 64) // an upgraded binary
+	DefaultEgressProxyImage = "ghcr.io/ghvstcode/agentfund-egress-proxy@sha256:" + strings.Repeat("2", 64)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Global.Sandbox.Image != DefaultSandboxImage || c.Global.Sandbox.EgressProxyImage != DefaultEgressProxyImage {
+		t.Fatalf("images after upgrade: %q, %q", c.Global.Sandbox.Image, c.Global.Sandbox.EgressProxyImage)
+	}
+	own := "registry.example/sandbox@sha256:" + strings.Repeat("3", 64)
+	c.Global.Sandbox.Image = own
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := Load(); err != nil || back.Global.Sandbox.Image != own || back.Global.Sandbox.EgressProxyImage != DefaultEgressProxyImage {
+		t.Fatalf("own image not kept: %+v, %v", back.Global.Sandbox, err)
+	}
+}
+
 func TestDefaultsAreConservative(t *testing.T) {
 	t.Setenv(EnvConfigDir, t.TempDir())
 	c, err := Load()
@@ -127,8 +161,37 @@ func TestDefaultsAreConservative(t *testing.T) {
 	g := c.Global
 	if g.AutoFollowSignedUpdates || g.FollowUnchangedLock || g.MaxConcurrent != 1 || len(g.AllowedGitHosts) != 1 ||
 		g.AllowedGitHosts[0] != "github.com" || g.TokensPerDay == 0 || g.TokensPerWeek == 0 || g.MaxTokensPerTask == 0 ||
-		g.NewProjectMaxTokensPerTask == 0 || len(g.Sandbox.PassEnv) != 0 || g.Sandbox.AllowGitHost || len(g.Sandbox.ExtraAllowHosts) != 0 {
+		g.NewProjectMaxTokensPerTask == 0 || len(g.Sandbox.PassEnv) != 0 || g.Sandbox.AllowGitHost || len(g.Sandbox.ExtraAllowHosts) != 0 || g.Sandbox.ExtraCACerts != "" {
 		t.Fatalf("defaults are not conservative: %+v", g)
+	}
+}
+
+func TestRunnerSelection(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte("global:\n  claude_token_command: claude-cmd\n  runner: {name: codex}\n"), 0o600)
+	c, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Global.Runner.Name != "codex" || c.Global.AgentTokenCommand() != "" {
+		t.Fatalf("codex must not inherit claude_token_command: %+v", c.Global.Runner)
+	}
+	c.Global.Runner.TokenCommand = "codex-cmd"
+	if c.Global.AgentTokenCommand() != "codex-cmd" {
+		t.Fatal("runner.token_command ignored")
+	}
+	c.Global.Runner = Runner{Name: "claude-code"}
+	if c.Global.AgentTokenCommand() != "claude-cmd" {
+		t.Fatal("claude-code lost claude_token_command")
+	}
+	// Round trip through the commented writer.
+	c.Global.Runner = Runner{Name: "codex", Model: "gpt-5-codex", TokenCommand: "pass show openai"}
+	if err := c.SaveFile(p); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := LoadFile(p)
+	if err != nil || c2.Global.Runner != c.Global.Runner {
+		t.Fatalf("round trip: %+v %v", c2.Global.Runner, err)
 	}
 }
 
@@ -137,7 +200,7 @@ func TestLoadRejectsUnknownAndInvalid(t *testing.T) {
 		"unknown knob":   "global:\n  tokens_per_dya: 5m\n",
 		"bad tokens":     "global:\n  tokens_per_day: lots\n",
 		"bad concurrent": "global:\n  max_concurrent: 0\n",
-		"bad runner":     "global:\n  runner: {name: codex}\n",
+		"bad runner":     "global:\n  runner: {name: aider}\n",
 		"bad pass_env":   "global:\n  sandbox: {pass_env: [\"A=B\"]}\n",
 		"bad allow host": "global:\n  sandbox: {extra_allow_hosts: [\"*.example.com\"]}\n",
 	} {
